@@ -147,13 +147,7 @@
 
       <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 8 步生成时间线">
         <div id="assetsStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <div class="content-grid two-col">
-          <article class="panel"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>能力主题</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
-          <article class="panel">
-            <div class="panel-head"><h3>资产规则预览</h3><small class="muted-line">查看认证方式、限流策略和脱敏处理</small></div>
-            <div id="securityPreview" class="card-list"></div>
-          </article>
-        </div>
+        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>可见性</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
         <article class="panel" style="margin-top:20px">
           <div class="panel-head"><h3>8 步生成时间线</h3><small class="muted-line">每个 MCP 资产从资料接入到生产发布的完整轨迹</small></div>
           <div id="timelineList" class="timeline-list"></div>
@@ -174,7 +168,14 @@
               </table>
             </div>
           </article>
-          <article class="panel"><div class="panel-head"><h3>沙箱联调台</h3><small class="muted-line">多行业 MCP 资产 · JSON-RPC 2.0 协议</small></div><div class="simulate-box"><select id="simulateTool"><option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option></select><button id="simulateBtn" type="button" class="primary-btn">执行调用</button><div id="simulateResult" style="background:#f8fafc;border-radius:8px;padding:14px;min-height:60px;font-size:13px;color:#64748b">选择一个 MCP 资产并执行调用，查看 JSON-RPC 2.0 响应</div></div></article>
+          <article class="panel"><div class="panel-head"><h3>沙箱联调台</h3><small class="muted-line">多行业 MCP 资产 · JSON-RPC 2.0 协议 · 安全检测</small></div>
+            <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <select id="sandboxAssetSelect" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:240px"></select>
+              <button id="sandboxTestBtn" type="button" class="primary-btn">一键沙箱测试 + 安全检测</button>
+            </div>
+            <div id="sandboxTestResult" style="min-height:40px"></div>
+            <div class="simulate-box"><select id="simulateTool"><option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option></select><button id="simulateBtn" type="button" class="primary-btn">单次调用测试</button><div id="simulateResult" style="background:#f8fafc;border-radius:8px;padding:14px;min-height:60px;font-size:13px;color:#64748b">选择一个 MCP 资产并执行调用，查看 JSON-RPC 2.0 响应</div></div>
+          </article>
         </div>
       </section>
 
@@ -240,13 +241,12 @@
             </article>
           </div>
         </article>
-        <div class="content-grid two-col">
-          <article class="panel">
+        <article class="panel" style="margin-bottom:20px">
             <div class="panel-head"><h3>资产规则清单</h3><button id="createPolicyBtn" type="button" class="primary-btn small admin-only">新增规则</button></div>
             <div class="table-wrap"><table><thead><tr><th>规则名称</th><th>所属项目</th><th>认证方式</th><th>限流</th><th>脱敏规则</th><th class="admin-only">编辑</th><th class="admin-only">启停</th><th class="admin-only">删除</th></tr></thead><tbody id="policyRows"></tbody></table></div>
             <article class="panel" style="margin-top:14px"><div class="panel-head"><h3>规则变更记录</h3></div><div class="table-wrap"><table><thead><tr><th>变更时间</th><th>规则</th><th>字段</th><th>旧值</th><th>新值</th><th>操作人</th></tr></thead><tbody id="policyChangeRows"></tbody></table></div></article>
           </article>
-          <article class="panel">
+        <article class="panel">
             <div class="panel-head"><h3>调用成效看板</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
             <div id="usageControls" class="project-controls"></div>
             <div id="usageSummary" class="usage-summary"></div>
@@ -257,7 +257,6 @@
               </table>
             </div>
           </article>
-        </div>
       </section>
 
       <section id="settings" class="page" data-title="设置" data-eyebrow="客户管理 · 项目管理 · 计费配置 · 知识库 · API 凭证">
@@ -420,7 +419,7 @@
   </aside>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script type="module" src="/admin/assets/app.js?v=29"></script>
+  <script type="module" src="/admin/assets/app.js?v=36"></script>
 </body>
 </html>
 

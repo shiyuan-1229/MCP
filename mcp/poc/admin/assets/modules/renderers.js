@@ -137,10 +137,12 @@ function renderSummary() {
   const publishedCount = releases.filter(r => r.status === 'published').length;
 
   // 指标卡
+  const publicAssets = assets.filter(a => a.visibility === 'public').length;
+  const internalAssets = assets.filter(a => a.visibility !== 'public').length;
   renderMetricSummary('summaryCards', [
     { label: '已接入业务资料', value: sources.length, meta: '进入工厂的资料批次' },
     { label: '已生成 OpenAPI 草案', value: specs.length, meta: `${specs.filter(s => s.status === 'confirmed').length} 个已确认` },
-    { label: '已产出 MCP 资产', value: assets.length, meta: `${publishedCount} 个已发布` },
+    { label: '已产出 MCP 资产', value: assets.length, meta: `🌐 公开 ${publicAssets} · 🔒 内部 ${internalAssets}` },
     { label: '待交付资料包', value: deliverables.filter(d => d.status !== 'ready').length, meta: '仍在整理中' }
   ]);
 
@@ -266,7 +268,8 @@ function renderRecognition() {
   renderCardList('openapiSpecList', specs.map(item => {
     const isActive = state.selectedOpenapiSpecId === item.id;
     const endpoints = item.spec ? extractEndpointCount(item.spec) : 0;
-    return `<div class="info-card" style="cursor:pointer;border:${isActive ? '2px solid var(--primary)' : '1px solid var(--line)'}" onclick="selectOpenapiSpec('${item.id}')"><h4>${text(item.source_name || item.title || 'OpenAPI 草案')}</h4><p class="muted-line">${text(item.title || '-')}</p><p>${badge(item.status || 'draft')} \u00b7 ${endpoints} 个端点</p></div>`;
+    const isAISpec = (item.title || '').includes('AI');
+    return `<div class="info-card" style="cursor:pointer;border:${isActive ? '2px solid var(--primary)' : '1px solid var(--line)'}" onclick="selectOpenapiSpec('${item.id}')"><h4>${text(item.source_name || item.title || 'OpenAPI 草案')}${isAISpec ? ' <span class="badge info" style="font-size:9px">AI</span>' : ''}</h4><p class="muted-line">${text(item.title || '-')}</p><p>${badge(item.status || 'draft')} \u00b7 ${endpoints} 个端点</p></div>`;
   }), '暂无 OpenAPI 草案。请先在「资料接入」页触发接口识别。');
 
   // 详情区域
@@ -358,14 +361,53 @@ function renderTooling() {
     const tools = list(asset.tools);
     const policy = policies.find(p => p.project_id === asset.project_id);
     const maskingRules = parseRuleList(policy?.masking_rules);
+    // 区分 AI 生成的完整 tool 对象和旧的字符串数组
+    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
+    const isAIGenerated = aiTools.length > 0;
+    const isPublic = asset.visibility === 'public';
+    const visBadge = isPublic
+      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
+      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
     return `<div class="info-card" style="padding:16px">
       <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
         <div><h4 style="margin:0">${displayAssetName(asset.name)}</h4><p class="muted-line" style="margin:4px 0 0">${text(asset.capability || '-')}</p></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${badge(asset.status || 'draft')}<span class="cap-chip">${text(asset.version || '-')}</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${badge(asset.status || 'draft')}<span class="cap-chip">${text(asset.version || '-')}</span>${isAIGenerated ? '<span class="badge info" style="font-size:10px">AI 生成</span>' : ''}${visBadge}</div>
+      </div>
+      <div style="margin:8px 0;padding:8px 12px;background:${isPublic ? '#f0fdf4' : '#fffbeb'};border:1px solid ${isPublic ? '#bbf7d0' : '#fde68a'};border-radius:8px;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px">${isPublic ? '🌐' : '🔒'}</span>
+          <div>
+            <strong style="font-size:13px">${isPublic ? '公开资产' : '内部资产'}</strong>
+            <span style="font-size:11px;color:#64748b;margin-left:6px">${isPublic ? '对外可用，Agent 可直接调用' : '含敏感数据，仅限内部调用'}</span>
+          </div>
+        </div>
+        <button type="button" class="${isPublic ? 'ghost-btn' : 'primary-btn'} small" onclick="toggleAssetVisibility('${asset.id}', '${isPublic ? 'internal' : 'public'}')">${isPublic ? '切换为内部' : '切换为公开'}</button>
       </div>
       <div style="margin:10px 0;padding:10px;background:var(--surface-2);border-radius:8px">
         <p class="muted-line" style="margin:0 0 6px;font-weight:650">MCP Tools（${tools.length}）</p>
         ${tools.length ? tools.map(tool => {
+          if (typeof tool === 'object' && tool !== null) {
+            // AI 生成的完整 tool 对象
+            const params = tool.inputSchema?.properties || {};
+            const required = tool.inputSchema?.required || [];
+            const paramList = Object.keys(params);
+            const toolVis = tool.visibility === 'public' ? 'public' : 'internal';
+            const visChip = toolVis === 'public'
+              ? '<span class="badge success" style="font-size:10px;padding:1px 6px">🌐 公开</span>'
+              : '<span class="badge warning" style="font-size:10px;padding:1px 6px">🔒 内部</span>';
+            return `<div style="padding:8px 0;border-top:1px solid var(--line)">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span class="badge success" style="font-size:11px">${text(tool.category || asset.category || '未分类')}</span>
+                <strong style="font-size:13px">${text(tool.display_name || tool.name)}</strong>
+                <code style="font-size:11px;color:var(--primary)">${text(tool.name)}</code>
+                ${visChip}
+                <span style="font-size:10px;color:#a16207;background:#fef3c7;padding:1px 6px;border-radius:3px">AI 推荐</span>
+              </div>
+              <p style="margin:3px 0 0;font-size:12px;color:#64748b">${text(tool.description || '')}</p>
+              ${tool.sensitivity_reason ? `<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ${text(tool.sensitivity_reason)}</p>` : ''}
+              ${paramList.length ? `<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：${paramList.map(p => `<code style="margin-right:6px">${p}${required.includes(p) ? ' *' : ''}</code>`).join('')}</div>` : '<div style="margin-top:4px;font-size:11px;color:#94a3b8">无参数</div>'}
+            </div>`;
+          }
           const toolName = typeof tool === 'string' ? tool : tool?.name || '-';
           return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="badge info">${text(toolName)}</span><span class="muted-line">operationId: ${text(toolName)}</span></div>`;
         }).join('') : '<span class="muted-line">暂无 Tool</span>'}
@@ -391,9 +433,16 @@ function renderAssets() {
   const stepBar = $('assetsStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(4);
 
-  renderSimpleRows('assetRows', list(state.assets).map(asset => `<tr><td><strong>${displayAssetName(asset.name)}</strong></td><td>${text(asset.capability || '-')}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td><button type="button" class="ghost-btn small" onclick="viewAssetTimeline('${asset.id}')">查看时间线</button></td></tr>`), '暂无 MCP 资产', 7);
-
-  renderCardList('securityPreview', list(state.policies).map(policy => `<div class="info-card"><h4>${text(policy.name || '资产规则')}</h4><p class="muted-line">${text(policy.auth_mode || '-')} \u00b7 ${text(policy.rate_limit || '-')}</p><p>${text(policy.masking_rules || '无脱敏规则')}</p></div>`), '暂无资产规则');
+  renderSimpleRows('assetRows', list(state.assets).map(asset => {
+    const tools = list(asset.tools);
+    const toolCount = tools.length;
+    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
+    const aiBadge = aiTools.length ? '<span class="badge info" style="font-size:10px;margin-left:4px">AI</span>' : '';
+    const visBadge = asset.visibility === 'public'
+      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
+      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
+    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td><td><button type="button" class="ghost-btn small" onclick="viewAssetTimeline('${asset.id}')">查看时间线</button></td></tr>`;
+  }), '暂无 MCP 资产', 7);
 
   // 8步生成时间线
   renderAssetTimelineList();
@@ -468,6 +517,39 @@ function renderPublish() {
   const releases = adminReleases();
   const stepBar = $('publishStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(5);
+
+  // 动态填充沙箱调用的 tool dropdown，包含 AI 生成的资产
+  const simSelect = $('simulateTool');
+  if (simSelect) {
+    const currentVal = simSelect.value;
+    const aiAssets = list(state.assets).filter(a => {
+      const tools = list(a.tools);
+      return tools.some(t => typeof t === 'object');
+    });
+    // 保留原有静态选项 + 追加 AI 资产
+    let options = '<option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option>';
+    aiAssets.forEach(asset => {
+      const tools = list(asset.tools);
+      tools.forEach(tool => {
+        if (typeof tool === 'object') {
+          const val = escapeHtml(tool.name || asset.name);
+          const label = escapeHtml(`${tool.display_name || tool.name}（${asset.name}）`);
+          options += `<option value="${val}">${label}</option>`;
+        }
+      });
+    });
+    simSelect.innerHTML = options;
+    if (currentVal) simSelect.value = currentVal;
+  }
+
+  // 填充沙箱综合测试的资产选择 dropdown
+  const sandboxSelect = $('sandboxAssetSelect');
+  if (sandboxSelect) {
+    const currentVal = sandboxSelect.value;
+    let options = list(state.assets).map(asset => `<option value="${asset.id}">${displayAssetName(asset.name)}（${asset.project_name || asset.project_id}）</option>`).join('');
+    sandboxSelect.innerHTML = options;
+    if (currentVal) sandboxSelect.value = currentVal;
+  }
 
   const controls = $('publishControls');
   if (controls) controls.innerHTML = '<div class="filter-summary"><span>按版本查看测试发布状态</span></div>';

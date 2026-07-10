@@ -304,13 +304,17 @@ function markReleaseTested(id = state.selectedReleaseId) {
 
 function publishRelease(id = state.selectedReleaseId) {
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
-  confirmDialog('确认执行发版吗？系统会将当前版本标记为已发布。', () => {
-    const releasedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    setReleaseOverride(id, { status: 'published', released_at: releasedAt, publishedBy: state.user?.display_name || '管理员', environment: 'production' });
-    // 自动跳转到交付管理页
-    state.currentPage = 'delivery';
-    renderAll();
-    showToast('版本已发布，已跳转到交付管理。', 'success');
+  confirmDialog('确认执行发版吗？系统会将当前版本标记为已发布，企业端将同步收到。', async () => {
+    try {
+      await api(`/api/platform/releases/${id}/publish`, { method: 'POST' });
+      await loadAll();
+      renderAll();
+      state.currentPage = 'delivery';
+      renderAll();
+      showToast('版本已发布！交付物已更新，企业端已同步。', 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
   });
 }
 
@@ -319,10 +323,15 @@ function rollbackRelease(id = state.selectedReleaseId) {
     showToast(permissionDeniedMessage, 'error');
     return;
   }
-  confirmDialog('确认回滚到上一个稳定版本吗？当前版本会被标记为已回滚。', () => {
-    const rolledBackAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    setReleaseOverride(id, { status: 'rolled_back', rolled_back_at: rolledBackAt, rollbackBy: state.user?.display_name || '管理员' });
-    showToast('已标记回滚完成。', 'success');
+  confirmDialog('确认回滚到上一个稳定版本吗？当前版本会被标记为已回滚。', async () => {
+    try {
+      await api(`/api/platform/releases/${id}/rollback`, { method: 'POST' });
+      await loadAll();
+      renderAll();
+      showToast('已回滚完成，资产恢复为测试中。', 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
   });
 }
 
@@ -1574,12 +1583,17 @@ async function confirmOpenapiSpec(specId) {
   if (!specId) return;
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
   try {
-    await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
+    const result = await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
     await loadAll();
     // 自动跳转到 Tool 映射页
     state.currentPage = 'tooling';
     renderAll();
-    showToast('OpenAPI 草案已确认，已进入 Tool 映射。', 'success');
+    // 查找关联的资产
+    const spec = (state.openapiSpecs || []).find(s => s.id === specId);
+    const sourceId = spec?.source_id;
+    const asset = (state.assets || []).find(a => a.id === `mcp_ai_${sourceId}`);
+    const toolCount = asset ? list(asset.tools).length : 0;
+    showToast(`OpenAPI 已确认，自动生成 ${toolCount} 个 MCP Tool，已进入 Tool 映射。`, 'success');
   } catch (error) { showToast(error.message, 'error'); }
 }
 
@@ -1610,6 +1624,26 @@ function jumpToPublish() {
   renderAll();
 }
 
+// 切换 MCP 资产可见性
+async function toggleAssetVisibility(assetId, visibility) {
+  if (!assetId) return;
+  if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
+  const label = visibility === 'public' ? '公开' : '内部';
+  confirmDialog(`确认将此 MCP 资产切换为「${label}」吗？${visibility === 'public' ? '公开后外部 Agent 可直接调用。' : '内部后仅限授权范围内调用。'}`, async () => {
+    try {
+      await api(`/api/platform/mcp-assets/${assetId}/visibility`, {
+        method: 'PUT',
+        body: JSON.stringify({ visibility })
+      });
+      await loadAll();
+      renderAll();
+      showToast(`资产可见性已切换为「${label}」。`, 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  });
+}
+
 // 步骤条点击跳转（被 renderers.js 中 step-item onclick 调用）
 function jumpToPage(pageId) {
   const allPages = ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery'];
@@ -1636,6 +1670,73 @@ window.triggerRecognition = triggerRecognition;
 window.openAiRecognizeModal = openAiRecognizeModal;
 window.showAiAnalysisResult = showAiAnalysisResult;
 window.closeAiAnalysis = closeAiAnalysis;
+window.toggleAssetVisibility = toggleAssetVisibility;
+window.runSandboxTest = runSandboxTest;
+
+// 沙箱综合测试（逐 Tool + 部署检查 + 安全审计）
+async function runSandboxTest() {
+  const select = $('sandboxAssetSelect');
+  const resultEl = $('sandboxTestResult');
+  if (!select || !select.value) { showToast('请先选择要测试的资产', 'warning'); return; }
+
+  resultEl.innerHTML = '<div style="padding:14px;color:#64748b">⏳ 正在执行沙箱综合测试（逐 Tool 调用 + 部署就绪检查 + 安全审计）...</div>';
+
+  try {
+    const result = await api(`/api/platform/mcp-assets/${select.value}/sandbox-test`, { method: 'POST' });
+    let html = '';
+
+    // 总览
+    const statusColor = { pass: '#16a34a', warn: '#ca8a04', fail: '#dc2626' };
+    const statusIcon = { pass: '✅', warn: '⚠️', fail: '❌' };
+    const statusLabel = { pass: '全部通过', warn: '有警告', fail: '存在失败' };
+    const overall = result.overall_status;
+    html += `<div style="background:${overall === 'pass' ? '#f0fdf4' : overall === 'warn' ? '#fffbeb' : '#fef2f2'};border:1px solid ${overall === 'pass' ? '#bbf7d0' : overall === 'warn' ? '#fde68a' : '#fecaca'};border-radius:8px;padding:14px;margin-bottom:12px">`;
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">`;
+    html += `<strong style="font-size:16px;color:${statusColor[overall]}">${statusIcon[overall]} 测试结果：${statusLabel[overall]}</strong>`;
+    html += `<span style="font-size:12px;color:#64748b">耗时 ${result.total_duration_ms}ms · ${new Date(result.tested_at).toLocaleString('zh-CN')}</span>`;
+    html += `</div>`;
+    html += `<div style="display:flex;gap:20px;font-size:13px">`;
+    html += `<span>Tool 测试：<strong style="color:${statusColor.pass}">${result.summary.passed}</strong>/${result.summary.total} 通过</span>`;
+    if (result.summary.failed) html += `<span style="color:${statusColor.fail}">失败 ${result.summary.failed}</span>`;
+    if (result.summary.warnings) html += `<span style="color:${statusColor.warn}">警告 ${result.summary.warnings}</span>`;
+    html += `</div></div>`;
+
+    // Tool 测试详情
+    html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">🔧 Tool 测试详情（${result.tool_tests.length}）</summary>`;
+    html += result.tool_tests.map(t => {
+      const tc = statusColor[t.status] || '#64748b';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:${tc};font-weight:600">${statusIcon[t.status] || '○'}</span><strong>${escapeHtml(t.display_name)}</strong><code style="font-size:11px;color:var(--primary)">${escapeHtml(t.tool_name)}</code></div>${t.checks.map(c => `<div style="font-size:12px;padding:2px 0 2px 20px;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('')}</div>`;
+    }).join('');
+    html += `</details>`;
+
+    // 部署检查
+    if (result.deployment_check) {
+      const dc = result.deployment_check;
+      html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">${statusIcon[dc.status]} 📦 部署就绪检查（${statusLabel[dc.status]}）</summary>`;
+      html += dc.checks.map(c => `<div style="font-size:12px;padding:3px 0;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('');
+      html += `</details>`;
+    }
+
+    // 安全审计
+    if (result.security_audit) {
+      const sa = result.security_audit;
+      html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">${statusIcon[sa.status]} 🛡️ 安全审计（${statusLabel[sa.status]}）</summary>`;
+      html += sa.checks.map(c => `<div style="font-size:12px;padding:3px 0;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('');
+      html += `</details>`;
+    }
+
+    resultEl.innerHTML = html;
+    await loadAll();
+    renderAll();
+
+    if (overall === 'pass') showToast('沙箱测试全部通过！资产已标记为测试通过，可进入发布流程。', 'success');
+    else if (overall === 'warn') showToast('沙箱测试完成，存在警告项请关注。', 'warning');
+    else showToast('沙箱测试存在失败项，请修复后重试。', 'error');
+  } catch (error) {
+    resultEl.innerHTML = `<div style="color:#dc2626;padding:14px">❌ 测试失败: ${escapeHtml(error.message)}</div>`;
+    showToast(error.message, 'error');
+  }
+}
 window.selectOpenapiSpec = selectOpenapiSpec;
 window.confirmOpenapiSpec = confirmOpenapiSpec;
 window.viewSourceOpenapi = viewSourceOpenapi;
@@ -1657,6 +1758,7 @@ function bindEvents() {
   $('loginBtn').addEventListener('click', login);
   $('logoutBtn').addEventListener('click', logout);
   $('simulateBtn').addEventListener('click', simulate);
+  $('sandboxTestBtn')?.addEventListener('click', runSandboxTest);
   $('createDataSourceBtn')?.addEventListener('click', createDataSource);
   $('createPolicyBtn').addEventListener('click', createPolicy);
   $('accessTestBtn')?.addEventListener('click', runAccessTest);

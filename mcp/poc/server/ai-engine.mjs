@@ -109,7 +109,11 @@ function extractJSON(text) {
 export async function analyzeBusinessData(sourceMeta) {
   const { name, type, auth_mode, description, sampleContent } = sourceMeta;
 
-  const systemPrompt = `你是一个资深的企业 API 架构师。你的任务是分析企业提供的业务数据/资料，识别出其中包含的 API 接口、数据表、业务功能，并为每个识别出的能力生成标准的 OpenAPI 3.0 端点描述。
+  const systemPrompt = `你是一个资深的企业 API 架构师和安全顾问。你的任务是分析企业提供的业务数据/资料，识别出其中包含的 API 接口、数据表、业务功能，并为每个识别出的能力生成标准的 OpenAPI 3.0 端点描述。
+
+同时，你需要对每个接口/工具进行安全分级：
+- public（公开）：只读查询类、不含个人信息的数据（如商品列表、门店信息、公告），可以对外暴露
+- internal（内部）：涉及个人信息、财务数据、权限、敏感字段（如手机号、身份证、订单金额、会员信息），仅限内部调用
 
 输出要求：
 - 返回严格的 JSON 格式
@@ -125,6 +129,8 @@ export async function analyzeBusinessData(sourceMeta) {
       "path": "/api/xxx/yyy",
       "description": "接口功能描述",
       "category": "分类名称，如：商品管理|库存管理|会员管理|订单管理|数据分析|系统配置",
+      "visibility": "public|internal",
+      "sensitivity_reason": "如果标记为 internal，说明涉及哪些敏感数据（如：包含会员手机号和身份证信息）",
       "parameters": [
         { "name": "参数名", "in": "query|path|body", "type": "string|number|boolean|date", "required": true, "description": "参数说明" }
       ],
@@ -140,6 +146,8 @@ export async function analyzeBusinessData(sourceMeta) {
       "display_name": "工具中文名",
       "category": "分类名称",
       "description": "工具功能描述",
+      "visibility": "public|internal",
+      "sensitivity_reason": "如果标记为 internal，说明涉及哪些敏感数据",
       "parameters": [
         { "name": "参数名", "type": "string|number|boolean", "required": true, "description": "参数说明" }
       ]
@@ -270,6 +278,8 @@ export function analysisToTools(analysis) {
       display_name: item.display_name || item.name || '',
       description: item.description || '',
       category: item.category || '未分类',
+      visibility: item.visibility === 'public' ? 'public' : 'internal',
+      sensitivity_reason: item.sensitivity_reason || '',
       inputSchema: {
         type: 'object',
         properties,
