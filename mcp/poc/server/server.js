@@ -1451,8 +1451,9 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
       source.type === "Knowledge Base" ? "indexed" : "connected", source.id
     );
 
-    // 删除旧的 spec（如果有），重新生成
+    // 删除旧的 spec 和 AI 分析记录（如果有），重新生成
     db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(source.id);
+    db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ?").run(source.id);
     const specId = makeId("spec");
     db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
       specId, source.id, source.project_id,

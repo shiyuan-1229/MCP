@@ -231,7 +231,7 @@ function renderIntake() {
     const statusBadge = badge(item.status || 'draft');
     const recBadge = recStatus === 'done' ? '<span class="badge success">已识别</span>' : recStatus === 'pending' ? '<span class="badge warning">识别中</span>' : '<span class="badge info">待识别</span>';
     const actionBtn = recStatus === 'done'
-      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button><button type="button" class="ghost-btn small" onclick="downloadSourceReport('${item.id}')">下载识别报告</button></div>`
+      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button><button type="button" class="ghost-btn small" onclick="downloadSourceReport('${item.id}')">下载识别报告</button><button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')" title="使用真实 AI 大模型重新识别">重新识别</button></div>`
       : `<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">开始识别</button>`;
     const outputInfo = recStatus === 'done'
       ? '<span class="badge success">OpenAPI 草案已生成</span>'

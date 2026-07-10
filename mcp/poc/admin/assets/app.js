@@ -1398,12 +1398,15 @@ async function triggerRecognition(sourceId) {
 function openAiRecognizeModal(sourceId) {
   const source = (state.sources || []).find(s => s.id === sourceId);
   if (!source) return;
+  const isReRecognize = (source.recognition_status || 'draft') === 'done';
+  const modalTitle = isReRecognize ? '🤖 AI 重新识别' : '🤖 AI 识别分析';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:640px;max-height:88vh;overflow-y:auto">
-      <h3>🤖 AI 识别分析</h3>
+      <h3>${modalTitle}</h3>
+      ${isReRecognize ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e">⚠️ 该资料已有识别结果，重新识别将覆盖之前的 OpenAPI 草案和 Tool 定义</div>' : ''}
       <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:14px">
         <strong>${escapeHtml(source.name || '未命名资料')}</strong>
         <span class="badge info" style="margin-left:8px">${escapeHtml(source.type || '-')}</span>
