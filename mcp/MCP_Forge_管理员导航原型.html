@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Forge 管理员导航原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #edf2f7;
+      --sidebar: #0f1c2f;
+      --sidebar-2: #15253d;
+      --surface: #ffffff;
+      --surface-2: #f6f8fb;
+      --line: #d9e2ec;
+      --ink: #162033;
+      --muted: #66758c;
+      --primary: #275df6;
+      --primary-soft: rgba(39, 93, 246, 0.12);
+      --success: #13885f;
+      --warning: #b56b00;
+      --radius: 14px;
+      --shadow: 0 12px 28px rgba(17, 24, 39, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eaf0f7 0%, #f4f7fb 100%);
+      color: var(--ink);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .main-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 276px 1fr;
+    }
+
+    .side-nav {
+      background:
+        radial-gradient(circle at top left, rgba(57, 116, 255, 0.22), transparent 32%),
+        linear-gradient(180deg, var(--sidebar) 0%, var(--sidebar-2) 100%);
+      color: #d7e1f3;
+      padding: 22px 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .brand-box {
+      padding: 12px 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .brand-kicker {
+      margin: 0 0 6px;
+      color: #87a1cb;
+      font-size: 12px;
+    }
+
+    .brand-box h1 {
+      margin: 0;
+      color: #fff;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .brand-box p {
+      margin: 8px 0 0;
+      color: #9eb2d3;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .nav-group {
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav-group-title {
+      padding: 0 10px;
+      color: #8297ba;
+      font-size: 12px;
+    }
+
+    .nav-step {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      color: #bfd0ea;
+      background: transparent;
+      border: 1px solid transparent;
+    }
+
+    .nav-step.active {
+      color: #fff;
+      background: rgba(39, 93, 246, 0.22);
+      border-color: rgba(122, 164, 255, 0.35);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .nav-step .index {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .nav-step.active .index {
+      background: #ffffff;
+      color: var(--primary);
+    }
+
+    .nav-step .meta strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    .nav-step .meta span {
+      display: block;
+      margin-top: 3px;
+      color: #8fa5c8;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .nav-step.active .meta span {
+      color: #d6e4ff;
+    }
+
+    .nav-step .tag {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: rgba(255,255,255,0.08);
+      font-size: 11px;
+      color: #abc0e1;
+    }
+
+    .support-box {
+      margin-top: auto;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .support-box strong {
+      display: block;
+      color: #fff;
+      font-size: 13px;
+    }
+
+    .support-box p {
+      margin: 6px 0 0;
+      color: #9cb0cf;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .workspace {
+      min-width: 0;
+      padding: 22px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .topbar,
+    .hero,
+    .panel,
+    .rail-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 18px;
+    }
+
+    .topbar .intro small {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .topbar .intro h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .topbar .intro p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      max-width: 68ch;
+    }
+
+    .role-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--success);
+    }
+
+    .hero {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero-head h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .hero-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .funnel {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .funnel-card {
+      padding: 14px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+
+    .funnel-card .step {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+
+    .funnel-card strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+
+    .funnel-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) 360px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .panel-head h4 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .panel-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .table th,
+    .table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+    }
+
+    .table th {
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table td strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .table td small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .state {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .state.primary { background: rgba(39, 93, 246, 0.1); color: var(--primary); }
+    .state.warn { background: rgba(181, 107, 0, 0.12); color: var(--warning); }
+    .state.ok { background: rgba(19, 136, 95, 0.1); color: var(--success); }
+
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .track {
+      width: 120px;
+      height: 8px;
+      border-radius: 999px;
+      background: #e3eaf2;
+      overflow: hidden;
+    }
+
+    .track span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #2d68ff 0%, #3d87ff 100%);
+      border-radius: 999px;
+    }
+
+    .rail {
+      display: grid;
+      gap: 16px;
+    }
+
+    .rail-card {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .rail-card h4 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .rail-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .rail-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+    }
+
+    .rail-item strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .rail-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .main-shell { grid-template-columns: 1fr; }
+      .content-grid, .funnel { grid-template-columns: 1fr; }
+      .side-nav { padding-bottom: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="main-shell">
+    <aside class="side-nav">
+      <section class="brand-box">
+        <p class="brand-kicker">管理员视角</p>
+        <h1>MCP Forge</h1>
+        <p>企业业务资料 -> MCP 资产 的生成工厂后台。先看生产线，再看治理面，不再从运维入口开始。</p>
+      </section>
+
+      <section class="nav-group">
+        <div class="nav-group-title">主流程导航</div>
+
+        <div class="nav-step active">
+          <div class="index">01</div>
+          <div class="meta">
+            <strong>生成总览</strong>
+            <span>工厂总看板 / 最近动态</span>
+          </div>
+          <div class="tag">首页</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">02</div>
+          <div class="meta">
+            <strong>资料接入</strong>
+            <span>Swagger / SQL / 字段说明 / 文档</span>
+          </div>
+          <div class="tag">入口</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">03</div>
+          <div class="meta">
+            <strong>接口识别</strong>
+            <span>AI 识别接口并生成 OpenAPI</span>
+          </div>
+          <div class="tag">识别</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">04</div>
+          <div class="meta">
+            <strong>Tool 映射</strong>
+            <span>OpenAPI -> MCP Tools</span>
+          </div>
+          <div class="tag">转换</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">05</div>
+          <div class="meta">
+            <strong>MCP 资产</strong>
+            <span>Server 封装 / 版本 / 状态</span>
+          </div>
+          <div class="tag">产出</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">06</div>
+          <div class="meta">
+            <strong>测试发布</strong>
+            <span>沙箱试调 / 灰度 / 上线</span>
+          </div>
+          <div class="tag">验证</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">07</div>
+          <div class="meta">
+            <strong>交付管理</strong>
+            <span>交付包 / 报告 / 下载</span>
+          </div>
+          <div class="tag">闭环</div>
+        </div>
+      </section>
+
+      <section class="nav-group">
+        <div class="nav-group-title">支撑导航</div>
+
+        <div class="nav-step">
+          <div class="index">08</div>
+          <div class="meta">
+            <strong>治理与统计</strong>
+            <span>调用量 / 成功率 / 审计 / 健康</span>
+          </div>
+          <div class="tag">运营</div>
+        </div>
+
+        <div class="nav-step">
+          <div class="index">09</div>
+          <div class="meta">
+            <strong>设置</strong>
+            <span>客户管理 / 凭证协议 / 计费</span>
+          </div>
+          <div class="tag">底座</div>
+        </div>
+      </section>
+
+      <section class="support-box">
+        <strong>原型说明</strong>
+        <p>这张图强调的是管理员如何理解产品，不是客户如何调用产品。导航顺序就是产品叙事顺序。</p>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="intro">
+          <small>当前页面：生成总览</small>
+          <h2>管理员看到的是资产生成工厂，不是平台接入配置台</h2>
+          <p>首页先回答“收到了什么资料、加工到了哪一步、哪些资产可以交付”，把 Webhook、凭证、证书、审计等能力后移到治理与设置。</p>
+        </div>
+        <div class="role-chip">
+          <span class="dot"></span>
+          平台管理员 / 工厂总览模式
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-head">
+          <div>
+            <h3>企业业务资料 -> MCP 资产</h3>
+            <p>管理员首页必须围绕主流程看板展开，让生产状态比技术配置更先被看到。</p>
+          </div>
+          <div class="legend">
+            <span>主流程优先</span>
+            <span>资料到资产</span>
+            <span>交付后治理</span>
+          </div>
+        </div>
+
+        <div class="funnel">
+          <article class="funnel-card">
+            <span class="step">STEP 1</span>
+            <strong>42</strong>
+            <p>资料接入：Swagger、SQL、字段说明、业务文档</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">STEP 2</span>
+            <strong>28</strong>
+            <p>接口识别：待确认 OpenAPI 草稿</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">STEP 3</span>
+            <strong>24</strong>
+            <p>Tool 映射：已生成 MCP Tools</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">STEP 4</span>
+            <strong>17</strong>
+            <p>MCP 资产：已封装 MCP Server</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">STEP 5</span>
+            <strong>9</strong>
+            <p>测试发布：待灰度 / 待正式发布</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">STEP 6</span>
+            <strong>6</strong>
+            <p>交付管理：交付包已生成待确认</p>
+          </article>
+          <article class="funnel-card">
+            <span class="step">横向</span>
+            <strong>97.6%</strong>
+            <p>治理与统计：资产调用成功率</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h4>主流程项目看板</h4>
+            <span>从“资料”走到“交付”的生产路径</span>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>客户 / 项目</th>
+                <th>当前阶段</th>
+                <th>加工进度</th>
+                <th>下一步动作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>华智制造 / 工单质检 MCP</strong>
+                  <small>资料已齐，正在做接口识别</small>
+                </td>
+                <td><span class="state primary">接口识别</span></td>
+                <td>
+                  <div class="progress-row">
+                    <div class="track"><span style="width: 48%"></span></div>
+                    <small>48%</small>
+                  </div>
+                </td>
+                <td><small>确认 OpenAPI 草稿</small></td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>鑫融金服 / 风控问答 MCP</strong>
+                  <small>OpenAPI 已确认，待映射为 Tools</small>
+                </td>
+                <td><span class="state warn">Tool 映射</span></td>
+                <td>
+                  <div class="progress-row">
+                    <div class="track"><span style="width: 63%"></span></div>
+                    <small>63%</small>
+                  </div>
+                </td>
+                <td><small>完成安全规则与 Tool 命名</small></td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>知行教育 / 校园助手 MCP</strong>
+                  <small>MCP 资产已封装，等待测试发布</small>
+                </td>
+                <td><span class="state ok">测试发布</span></td>
+                <td>
+                  <div class="progress-row">
+                    <div class="track"><span style="width: 82%"></span></div>
+                    <small>82%</small>
+                  </div>
+                </td>
+                <td><small>进入沙箱试调与版本验证</small></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <aside class="rail">
+          <section class="rail-card">
+            <h4>最近生成动态</h4>
+            <div class="rail-list">
+              <div class="rail-item">
+                <strong>门店售后资料已转 OpenAPI</strong>
+                <p>零售项目在 14:20 完成第 2 步，待人工确认字段语义。</p>
+              </div>
+              <div class="rail-item">
+                <strong>工单查询 Tool 已映射</strong>
+                <p>制造项目已进入 MCP 资产封装，预计今天可进入测试发布。</p>
+              </div>
+              <div class="rail-item">
+                <strong>校园问答资产待交付</strong>
+                <p>交付管理已生成下载包，等待客户确认接收。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-card">
+            <h4>导航改造原则</h4>
+            <div class="rail-list">
+              <div class="rail-item">
+                <strong>先生产，后治理</strong>
+                <p>不再把凭证、Webhook、接入配置放在主入口前面。</p>
+              </div>
+              <div class="rail-item">
+                <strong>先资料，后资产</strong>
+                <p>一级导航必须体现资料如何加工成 MCP，而不是客户如何调用。</p>
+              </div>
+              <div class="rail-item">
+                <strong>平台能力优先</strong>
+                <p>一级导航不出现零售、门店、校园等 demo 行业词。</p>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

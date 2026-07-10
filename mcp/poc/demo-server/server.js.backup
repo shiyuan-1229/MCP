@@ -1,0 +1,468 @@
+/**
+ * MCP Forge - 零售门店 AI 助手 MCP Server
+ * 全功能生产版：13 Tools + API Key 认证
+ * 门店：美佳便利店
+ * 
+ * 启动：node server.js
+ * SSE 端点：http://localhost:3456/sse
+ * 健康检查：http://localhost:3456/health
+ */
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import express from "express";
+import crypto from "crypto";
+
+// ═══════════════════════════════════════
+// 配置（通过环境变量覆盖）
+// ═══════════════════════════════════════
+const PORT = process.env.PORT || 3458;
+const API_KEY = process.env.API_KEY || crypto.randomBytes(16).toString("hex");
+const STORE_NAME = process.env.STORE_NAME || "美佳便利店";
+
+// ═══════════════════════════════════════
+// 模拟数据
+// ═══════════════════════════════════════
+
+const STORES = [
+  { id: "store1", name: STORE_NAME, address: "广州市天河区天河北路100号", open: "07:00", close: "23:00", online: true },
+  { id: "store2", name: "美佳·体育西店", address: "广州市天河区体育西路50号", open: "07:30", close: "22:30", online: true },
+  { id: "store3", name: "美佳·珠江新城店", address: "广州市天河区花城大道88号", open: "08:00", close: "22:00", online: true },
+];
+
+const PRODUCTS = [
+  { id: "p01", name: "元气森林海盐菠萝", price: 9.90, unit: "瓶", category: "饮品", promo: "买2箱享9折" },
+  { id: "p02", name: "元气森林白桃", price: 9.90, unit: "瓶", category: "饮品", promo: "买2箱享9折" },
+  { id: "p03", name: "农夫山泉5L", price: 9.90, unit: "桶", category: "饮品", promo: null },
+  { id: "p04", name: "农夫山泉550ml", price: 2.00, unit: "瓶", category: "饮品", promo: "整箱购买8折" },
+  { id: "p05", name: "鲜牛奶", price: 12.80, unit: "盒", category: "乳品", promo: "第二件半价" },
+  { id: "p06", name: "面包组合", price: 9.90, unit: "份", category: "食品", promo: "特价¥9.9" },
+  { id: "p07", name: "薯片大礼包", price: 39.90, unit: "包", category: "零食", promo: null },
+  { id: "p08", name: "可乐330ml", price: 3.50, unit: "罐", category: "饮品", promo: "买6送1" },
+  { id: "p09", name: "雪碧330ml", price: 3.50, unit: "罐", category: "饮品", promo: "买6送1" },
+  { id: "p10", name: "方便面", price: 4.90, unit: "桶", category: "食品", promo: "买5送1" },
+  { id: "p11", name: "三明治", price: 15.80, unit: "份", category: "食品", promo: null },
+  { id: "p12", name: "矿泉水", price: 1.50, unit: "瓶", category: "饮品", promo: null },
+];
+
+const PROMOS = [
+  { id: "pr01", title: "元气森林系列 买2箱9折", desc: "全场元气森林气泡水买2箱享9折优惠", valid: "本月" },
+  { id: "pr02", title: "鲜牛奶 第二件半价", desc: "指定鲜牛奶第二件半价", valid: "本月" },
+  { id: "pr03", title: "面包组合 ¥9.9 特惠", desc: "精选面包组合限时特价", valid: "本周" },
+  { id: "pr04", title: "会员双倍积分", desc: "全场购物享双倍会员积分", valid: "本月" },
+  { id: "pr05", title: "新用户首单8折", desc: "首次下单立享8折优惠", valid: "长期" },
+];
+
+const INVENTORY = {
+  "元气森林海盐菠萝": { store1: 32, store2: 18, store3: 24 },
+  "元气森林白桃": { store1: 18, store2: 15, store3: 20 },
+  "农夫山泉5L": { store1: 24, store2: 30, store3: 16 },
+  "农夫山泉550ml": { store1: 48, store2: 60, store3: 42 },
+  "鲜牛奶": { store1: 15, store2: 12, store3: 9 },
+  "面包组合": { store1: 12, store2: 8, store3: 14 },
+  "薯片大礼包": { store1: 9, store2: 6, store3: 11 },
+  "可乐330ml": { store1: 60, store2: 55, store3: 48 },
+  "雪碧330ml": { store1: 55, store2: 50, store3: 42 },
+  "方便面": { store1: 30, store2: 35, store3: 28 },
+  "三明治": { store1: 7, store2: 5, store3: 8 },
+  "矿泉水": { store1: 120, store2: 100, store3: 95 },
+};
+
+// ═══════════════════════════════════════
+// MCP Server 初始化
+// ═══════════════════════════════════════
+
+const mcpServer = new Server(
+  { name: "retail-store-ai", version: "1.0.0" },
+  { capabilities: { tools: {} } }
+);
+
+const TOOLS = [
+  // ── 商品模板 (4) ──
+  { name: "product_search", description: "搜索商品，根据关键词匹配商品名称和分类",
+    inputSchema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
+  },
+  { name: "product_detail", description: "查询商品详细信息，包括规格、促销信息",
+    inputSchema: { type: "object", properties: { product_name: { type: "string", description: "商品名称" } }, required: ["product_name"] }
+  },
+  { name: "price_query", description: "查询商品当前价格和单位",
+    inputSchema: { type: "object", properties: { product_name: { type: "string", description: "商品名称" } }, required: ["product_name"] }
+  },
+  { name: "promo_list", description: "查询当前所有促销活动列表",
+    inputSchema: { type: "object", properties: {} }
+  },
+
+  // ── 库存模板 (2) ──
+  { name: "inventory_query", description: "查询指定商品在各门店的实时库存数量",
+    inputSchema: { type: "object", properties: { product_name: { type: "string", description: "商品名称" } }, required: ["product_name"] }
+  },
+  { name: "inventory_alert", description: "查询所有库存不足（<10件）的商品预警",
+    inputSchema: { type: "object", properties: {} }
+  },
+
+  // ── 会员模板 (3) ──
+  { name: "member_info", description: "查询会员基本信息（等级、积分等）",
+    inputSchema: { type: "object", properties: { member_id: { type: "string", description: "会员ID（可选，默认返回当前用户）" } } }
+  },
+  { name: "member_points", description: "查询会员积分及可兑换的优惠券",
+    inputSchema: { type: "object", properties: { member_id: { type: "string", description: "会员ID（可选）" } } }
+  },
+  { name: "coupon_query", description: "查询会员当前可用的优惠券列表",
+    inputSchema: { type: "object", properties: { member_id: { type: "string", description: "会员ID（可选）" } } }
+  },
+
+  // ── 门店模板 (2) ──
+  { name: "store_list", description: "查询附近门店列表、地址和营业时间",
+    inputSchema: { type: "object", properties: { location: { type: "string", description: "位置/区域（可选）" } } }
+  },
+  { name: "store_status", description: "查询指定门店的实时营业状态",
+    inputSchema: { type: "object", properties: { store_name: { type: "string", description: "门店名称" } }, required: ["store_name"] }
+  },
+
+  // ── 订单模板 (3) ──
+  { name: "create_order", description: "创建新订单，自动计算金额并应用会员优惠，返回取货码",
+    inputSchema: { type: "object", properties: { product_name: { type: "string", description: "商品名称" }, quantity: { type: "number", description: "数量" }, store_id: { type: "string", description: "门店ID，可选store1/store2/store3" } }, required: ["product_name", "quantity", "store_id"] }
+  },
+  { name: "order_status", description: "查询订单当前状态和取货信息",
+    inputSchema: { type: "object", properties: { order_id: { type: "string", description: "订单号" } }, required: ["order_id"] }
+  },
+  { name: "process_payment", description: "处理订单支付，支持微信支付，返回支付链接和状态",
+    inputSchema: { type: "object", properties: { order_id: { type: "string", description: "订单号" }, payment_method: { type: "string", description: "支付方式（默认微信支付）" } }, required: ["order_id"] }
+  },
+];
+
+// 保存最近创建的订单用于查询
+const recentOrders = {};
+
+// 添加工具缓存，减少重复计算
+const toolCache = new Map();
+const cacheTimeout = 30000; // 30秒缓存
+
+mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+  const now = Date.now();
+  const cached = toolCache.get('tools');
+  
+  if (cached && now - cached.timestamp < cacheTimeout) {
+    return cached.data;
+  }
+  
+  const result = { tools: TOOLS };
+  toolCache.set('tools', { data: result, timestamp: now });
+  return result;
+});
+
+mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const toolName = request.params.name;
+  const args = request.params.arguments || {};
+
+  try {
+    // 添加错误处理和性能监控
+    const startTime = Date.now();
+    
+    // ── 商品模板 ──
+    if (toolName === "product_search") {
+      const kw = (args.keyword || "").toLowerCase();
+      const results = PRODUCTS.filter(p =>
+        p.name.toLowerCase().includes(kw) || p.category.includes(kw)
+      );
+      const responseTime = Date.now() - startTime;
+      
+      // 记录性能日志
+      console.log(`[PERF] product_search: ${responseTime}ms, keyword: "${kw}"`);
+      
+      return { content: [{ type: "text", text: JSON.stringify(results.slice(0, 10), null, 2) }] };
+    }
+
+    if (toolName === "product_detail") {
+      const p = PRODUCTS.find(x => x.name === args.product_name);
+      return { content: [{ type: "text", text: p ? JSON.stringify(p, null, 2) : "未找到商品: " + args.product_name }] };
+    }
+
+    if (toolName === "price_query") {
+      const p = PRODUCTS.find(x => x.name === args.product_name);
+      return { content: [{ type: "text", text: p ? `${p.name}: ¥${p.price}/${p.unit}${p.promo ? "，" + p.promo : ""}` : "未找到商品: " + args.product_name }] };
+    }
+
+    if (toolName === "promo_list") {
+      return { content: [{ type: "text", text: JSON.stringify(PROMOS, null, 2) }] };
+    }
+
+    // ── 库存模板 ──
+    if (toolName === "inventory_query") {
+      const inv = INVENTORY[args.product_name];
+      if (!inv) return { content: [{ type: "text", text: "未找到商品库存: " + args.product_name }] };
+      const result = Object.entries(inv).map(([storeId, qty]) => {
+        const s = STORES.find(x => x.id === storeId);
+        const storeName = s ? s.name : storeId;
+        const icon = qty > 10 ? "✅" : qty > 0 ? "⚠️" : "❌";
+        const label = qty > 10 ? "充足" : qty > 0 ? "少量" : "售罄";
+        return `${storeName}：${qty} 件 ${icon}${label}`;
+      });
+      return { content: [{ type: "text", text: `${args.product_name} 库存：\n${result.join("\n")}` }] };
+    }
+
+    if (toolName === "inventory_alert") {
+      const alerts = [];
+      for (const [name, inv] of Object.entries(INVENTORY)) {
+        for (const [storeId, qty] of Object.entries(inv)) {
+          if (qty > 0 && qty < 10) {
+            const s = STORES.find(x => x.id === storeId);
+            alerts.push(`${name} — ${s ? s.name : storeId}：仅剩${qty}件`);
+          }
+        }
+      }
+      return { content: [{ type: "text", text: alerts.length ? `⚠️ 库存预警（<10件）：\n${alerts.join("\n")}` : "✅ 暂无库存预警" }] };
+    }
+
+    // ── 会员模板 ──
+    if (toolName === "member_info") {
+      // 从数据库查询会员信息
+      const member_id = args.member_id || "M10001"; // 默认使用第一个测试会员
+      const db = require('better-sqlite3')('data.db');
+      const member = db.prepare('SELECT * FROM members WHERE id = ?').get(member_id);
+      db.close();
+      
+      if (!member) {
+        return { content: [{ type: "text", text: "未找到该会员信息" }] };
+      }
+      
+      return { content: [{ type: "text", text: `姓名：${member.name}\n等级：${member.level}\n积分：${member.points} 分\n会员号：${member.id}\n注册日期：${member.joined}\n联系电话：${member.phone}\n邮箱：${member.email}` }] };
+    }
+
+    if (toolName === "member_points") {
+      // 从数据库查询会员积分
+      const member_id = args.member_id || "M10001"; // 默认使用第一个测试会员
+      const db = require('better-sqlite3')('data.db');
+      const member = db.prepare('SELECT * FROM members WHERE id = ?').get(member_id);
+      db.close();
+      
+      if (!member) {
+        return { content: [{ type: "text", text: "未找到该会员信息" }] };
+      }
+      
+      return { content: [{ type: "text", text: `当前积分：${member.points} 分\n\n可兑换：\n🎫 10元无门槛券 — 500分\n🎫 鲜牛奶兑换券 — 800分\n🎫 现金抵扣 ¥23.50 — 2,350分` }] };
+    }
+
+    if (toolName === "coupon_query") {
+      // 从数据库查询会员优惠券
+      const member_id = args.member_id || "M10001"; // 默认使用第一个测试会员
+      const db = require('better-sqlite3')('data.db');
+      const member = db.prepare('SELECT * FROM members WHERE id = ?').get(member_id);
+      db.close();
+      
+      if (!member) {
+        return { content: [{ type: "text", text: "未找到该会员信息" }] };
+      }
+      
+      // 根据会员等级返回不同优惠券
+      const coupons = [];
+      if (member.points >= 500) coupons.push("🎫 10元无门槛券 × 1（需500分兑换）");
+      if (member.points >= 800) coupons.push("🎫 鲜牛奶兑换券 × 1（需800分兑换）");
+      if (member.points >= 2350) coupons.push("🎫 现金抵扣 ¥23.50（需2,350分）");
+      coupons.push("🎫 新品体验券 × 2（可乐买1送1）");
+      coupons.push("🎫 满50减5 × 1（全场通用）");
+      
+      return { content: [{ type: "text", text: coupons.join("\n") }] };
+    }
+
+    // ── 门店模板 ──
+    if (toolName === "store_list") {
+      const list = STORES.map(s =>
+        `${s.name} — ${s.address} ${s.online ? "● 营业中" : "● 已打烊"}（${s.open}-${s.close}）`
+      );
+      return { content: [{ type: "text", text: `附近门店（${STORES.length}家）：\n${list.join("\n")}` }] };
+    }
+
+    if (toolName === "store_status") {
+      const s = STORES.find(x => x.name.includes(args.store_name));
+      if (!s) return { content: [{ type: "text", text: "未找到门店: " + args.store_name }] };
+      return { content: [{ type: "text", text: `${s.name}\n地址：${s.address}\n营业时间：${s.open}-${s.close}\n状态：${s.online ? "● 营业中" : "● 已打烊"}` }] };
+    }
+
+    // ── 订单模板 ──
+    if (toolName === "create_order") {
+      const p = PRODUCTS.find(x => x.name === args.product_name);
+      if (!p) return { content: [{ type: "text", text: "商品不存在: " + args.product_name }] };
+      const s = STORES.find(x => x.id === args.store_id);
+      if (!s) return { content: [{ type: "text", text: "门店不存在: " + args.store_id }] };
+
+      const subtotal = p.price * args.quantity;
+      const discount = subtotal >= 100 ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
+      const total = subtotal - discount;
+      const pickupCode = String(1000 + Math.floor(Math.random() * 9000));
+      const orderId = "ORD" + Date.now();
+
+      // 保存订单到数据库
+      const db = require('better-sqlite3')('data.db');
+      db.prepare('INSERT INTO orders (id, store_id, product_name, quantity, price, subtotal, discount, total, pickup_code, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(orderId, args.store_id, args.product_name, args.quantity, p.price, subtotal, discount, total, pickupCode, "待支付", new Date().toISOString());
+      db.close();
+
+      return { content: [{ 
+        type: "text", 
+        text: `✅ 订单创建成功\n\n订单号：${orderId}\n门店：${s.name}\n商品：${p.name} × ${args.quantity}\n小计：¥${subtotal.toFixed(2)}\n折扣：${discount > 0 ? `-¥${discount.toFixed(2)}` : "无"}\n总计：¥${total.toFixed(2)}\n取货码：${pickupCode}\n状态：待支付\n\n请使用 process_payment 工具进行支付` 
+      }] };
+    }
+
+    if (toolName === "order_status") {
+      // 从数据库查询订单状态
+      const db = require('better-sqlite3')('data.db');
+      const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(args.order_id);
+      db.close();
+      if (!order) {
+        return { content: [{ type: "text", text: `订单 ${args.order_id} 不存在` }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(order, null, 2) }] };
+    }
+
+    if (toolName === "process_payment") {
+      const order_id = args.order_id;
+      const payment_method = args.payment_method || "微信支付";
+      
+      // 从数据库获取订单信息
+      const db = require('better-sqlite3')('data.db');
+      const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(order_id);
+      db.close();
+      
+      if (!order) {
+        return { content: [{ type: "text", text: `订单 ${order_id} 不存在` }] };
+      }
+      
+      if (order.status !== "待支付") {
+        return { content: [{ type: "text", text: `订单 ${order_id} 已支付，状态：${order.status}` }] };
+      }
+      
+      // 生成支付链接（模拟微信支付）
+      const payment_id = "PAY" + Date.now();
+      const payment_url = `https://pay.weixin.qq.com/mmpayweb/pay?pr=MMZT&partner_id=1900000109&prepay_id=prepay_id_${payment_id}`;
+      
+      // 创建支付记录
+      const db_write = require('better-sqlite3')('data.db');
+      db_write.prepare('INSERT INTO payments (id, order_id, amount, method, transaction_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(payment_id, order_id, order.total, payment_method, null, new Date().toISOString(), new Date().toISOString());
+      
+      // 更新订单状态
+      db_write.prepare('UPDATE orders SET status = ?, payment_method = ? WHERE id = ?')
+        .run("支付中", payment_method, order_id);
+      db_write.close();
+      
+      return { content: [{ 
+        type: "text", 
+        text: `✅ 支付请求已提交\n\n订单号：${order_id}\n金额：¥${order.total}\n支付方式：${payment_method}\n\n🔗 支付链接：${payment_url}\n\n请点击链接完成支付，支付完成后订单状态将自动更新为"已支付"` 
+      }] };
+    }
+
+    return { content: [{ type: "text", text: "未知 Tool: " + toolName }] };
+
+  } catch (e) {
+    return { content: [{ type: "text", text: "Tool 执行异常: " + e.message }] };
+  }
+});
+
+// ═══════════════════════════════════════
+// Express 应用 + API Key 认证
+// ═══════════════════════════════════════
+
+const app = express();
+// 全局 JSON 解析，但跳过 /mcp 路由（MCP SDK 自己解析 body stream）
+app.use((req, res, next) => {
+  if (req.path === "/mcp") return next();
+  express.json()(req, res, next);
+});
+
+// CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
+// API Key 认证中间件
+function apiKeyAuth(req, res, next) {
+  // 支持两种方式：Bearer Token 或 X-API-Key header
+  const authHeader = req.headers.authorization;
+  const apiKeyHeader = req.headers["x-api-key"];
+
+  let providedKey = null;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    providedKey = authHeader.slice(7);
+  } else if (apiKeyHeader) {
+    providedKey = apiKeyHeader;
+  }
+
+  if (!API_KEY || API_KEY === "disabled") {
+    // API Key 未配置或显式禁用，跳过认证
+    return next();
+  }
+
+  if (!providedKey || providedKey !== API_KEY) {
+    return res.status(401).json({ error: "Unauthorized: invalid or missing API key" });
+  }
+  next();
+}
+
+// 健康检查（无需认证）
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    name: "retail-store-ai",
+    store: STORE_NAME,
+    tools: TOOLS.length,
+    auth: !!API_KEY && API_KEY !== "disabled",
+    uptime: process.uptime().toFixed(0) + "s",
+  });
+});
+
+// SSE MCP 端点（需要 API Key 认证）
+const mcpSessions = new Map();
+
+app.get("/sse", apiKeyAuth, async (req, res) => {
+  const transport = new SSEServerTransport("/mcp", res);
+  const sessionId = transport._sessionId;
+  mcpSessions.set(sessionId, transport);
+  res.on("close", () => mcpSessions.delete(sessionId));
+  await mcpServer.connect(transport);
+});
+
+// MCP 消息处理端点（POST）- 处理由 SSE 建立的会话
+app.post("/mcp", apiKeyAuth, async (req, res) => {
+  const sessionId = req.query.sessionId;
+  if (!sessionId) {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+  const transport = mcpSessions.get(sessionId);
+  if (!transport) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  await transport.handlePostMessage(req, res);
+});
+
+// 启动
+app.listen(PORT, () => {
+  console.log("═".repeat(50));
+  console.log("  MCP Forge · 零售门店 AI 助手");
+  console.log(`  门店：${STORE_NAME}`);
+  console.log(`  Tools：${TOOLS.length}`);
+  console.log("═".repeat(50));
+  console.log(`  SSE 端点：http://localhost:${PORT}/sse`);
+  console.log(`  健康检查：http://localhost:${PORT}/health`);
+  console.log("");
+  if (API_KEY && API_KEY !== "disabled") {
+    console.log(`  🔑 API Key：${API_KEY}`);
+    console.log(`  使用方式 1：Authorization: Bearer ${API_KEY}`);
+    console.log(`  使用方式 2：X-API-Key: ${API_KEY}`);
+  } else {
+    console.log("  ⚠️  API Key 未启用，服务以无认证模式运行");
+  }
+  console.log("═".repeat(50));
+  
+  // 添加性能监控
+  setInterval(() => {
+    const uptime = process.uptime();
+    const memoryUsage = process.memoryUsage();
+    console.log(`[MONITOR] Uptime: ${uptime.toFixed(0)}s | Memory: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB/${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`);
+  }, 60000); // 每分钟打印一次监控信息
+});

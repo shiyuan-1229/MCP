@@ -1,0 +1,401 @@
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+import crypto from "crypto";
+import fs from "fs";
+import Database from "better-sqlite3";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 3100);
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "mcp_forge.db");
+const db = new Database(DB_PATH);
+const ADMIN_DIR = path.join(__dirname, "..", "admin");
+const CLIENT_DIR = path.join(__dirname, "..", "client");
+
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
+app.use(express.json({ limit: "2mb" }));
+
+function makeId(prefix) { return `${prefix}_${crypto.randomBytes(5).toString("hex")}`; }
+function hashPassword(password, salt = crypto.randomBytes(12).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
+  return `${salt}:${hash}`;
+}
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt] = stored.split(":");
+  return hashPassword(password, salt) === stored;
+}
+function encode(value) { return JSON.stringify(value || []); }
+function decode(value) { try { return value ? JSON.parse(value) : []; } catch { return []; } }
+function count(table) { return db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c; }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS platform_users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin','customer')),
+    display_name TEXT NOT NULL,
+    customer_id TEXT DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS platform_sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES platform_users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_customers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    industry TEXT NOT NULL,
+    contact TEXT,
+    tier TEXT DEFAULT 'Pro',
+    status TEXT DEFAULT 'delivery',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS platform_projects (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    stage TEXT DEFAULT 'testing',
+    owner TEXT,
+    progress INTEGER DEFAULT 50,
+    due_date TEXT,
+    FOREIGN KEY(customer_id) REFERENCES platform_customers(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_data_sources (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    auth_mode TEXT DEFAULT 'API Key',
+    status TEXT DEFAULT 'connected',
+    last_checked TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES platform_projects(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_mcp_assets (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    status TEXT DEFAULT 'testing',
+    version TEXT DEFAULT 'v1.0.0',
+    endpoint TEXT,
+    owner TEXT,
+    tools TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES platform_projects(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_mcp_releases (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    tested_at TEXT,
+    released_at TEXT,
+    notes TEXT,
+    FOREIGN KEY(asset_id) REFERENCES platform_mcp_assets(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_gateway_policies (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    auth_mode TEXT NOT NULL,
+    authorization_scope TEXT NOT NULL,
+    rate_limit TEXT NOT NULL,
+    masking_rules TEXT NOT NULL,
+    audit_enabled INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'enabled',
+    FOREIGN KEY(project_id) REFERENCES platform_projects(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_call_events (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL,
+    caller TEXT NOT NULL,
+    status TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    business_result TEXT,
+    trace_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(asset_id) REFERENCES platform_mcp_assets(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_deliverables (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT DEFAULT 'ready',
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(project_id) REFERENCES platform_projects(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_billing_records (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL,
+    item TEXT NOT NULL,
+    period TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'pending',
+    calls INTEGER DEFAULT 0,
+    FOREIGN KEY(customer_id) REFERENCES platform_customers(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS platform_access_configs (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL,
+    project_id TEXT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    endpoint TEXT,
+    api_key TEXT,
+    scope TEXT,
+    status TEXT DEFAULT 'enabled',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(customer_id) REFERENCES platform_customers(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS kb_collections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    doc_count INTEGER DEFAULT 0,
+    chunk_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS kb_documents (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source_url TEXT,
+    chunk_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'indexed',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(collection_id) REFERENCES kb_collections(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS kb_chunks (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    collection_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    keywords TEXT DEFAULT '[]',
+    FOREIGN KEY(document_id) REFERENCES kb_documents(id) ON DELETE CASCADE
+  );
+`);
+
+function seed() {
+  const hasCustomers = count("platform_customers") > 0;
+  const hasUsers = count("platform_users") > 0;
+  const tx = db.transaction(() => {
+    if (!hasUsers) {
+      db.prepare("DELETE FROM platform_sessions").run();
+    }
+    const customers = [
+      ["cust_retail", "美佳零售集团", "零售", "林总", "专业版", "运行中"],
+      ["cust_manufacturing", "华智制造", "制造", "周经理", "企业版", "测试中"],
+      ["cust_finance", "鑫融金服", "金融", "陈总", "企业版", "交付中"],
+      ["cust_property", "安和物业", "物业", "吴经理", "专业版", "交付中"],
+      ["cust_education", "知行教育", "教育", "郑老师", "专业版", "测试中"]
+    ];
+    const projects = [
+      ["proj_retail_ai", "cust_retail", "零售 AI 经营问答 MCP", "published", "李实施", 86, "2026-07-18"],
+      ["proj_manufacturing_ops", "cust_manufacturing", "制造工单与质检 MCP", "testing", "王实施", 62, "2026-07-25"],
+      ["proj_finance_risk", "cust_finance", "金融风控问答 MCP", "data-source", "赵实施", 38, "2026-08-02"],
+      ["proj_property_service", "cust_property", "物业居民服务 MCP", "testing", "刘实施", 55, "2026-07-28"],
+      ["proj_education_campus", "cust_education", "校园 AI 助手 MCP", "draft", "孙实施", 30, "2026-08-10"]
+    ];
+    const sources = [
+      ["ds_pos", "proj_retail_ai", "POS 销售报表接口", "REST API", "API Key", "已连接"],
+      ["ds_crm", "proj_retail_ai", "会员 CRM 数据库", "Database", "JWT", "已连接"],
+      ["ds_kb", "proj_retail_ai", "门店服务知识库", "Knowledge Base", "Internal Token", "已索引"],
+      ["ds_mes", "proj_manufacturing_ops", "MES 工单接口", "REST API", "OAuth", "调试中"],
+      ["ds_qms", "proj_manufacturing_ops", "质量记录数据库", "Database", "VPN 账号", "已连接"],
+      ["ds_risk", "proj_finance_risk", "风控策略服务", "REST API", "OAuth", "接入中"],
+      ["ds_property_tickets", "proj_property_service", "物业工单系统", "REST API", "API Key", "已连接"],
+      ["ds_property_residents", "proj_property_service", "住户名录", "Database", "JWT", "已连接"],
+      ["ds_edu_courses", "proj_education_campus", "选课系统", "REST API", "OAuth", "接入中"],
+      ["ds_edu_kb", "proj_education_campus", "校园知识库", "Knowledge Base", "Internal Token", "已索引"]
+    ];
+    const assets = [
+      ["mcp_sales_top", "proj_retail_ai", "sales_top_products", "销售 TopN 查询", "published", "v1.2.0", "/mcp/sales-top", "运营", ["sales_top_products"]],
+      ["mcp_member_benefits", "proj_retail_ai", "member_expiring_benefits", "会员积分与过期权益", "published", "v1.1.0", "/mcp/member-benefits", "会员", ["member_expiring_benefits"]],
+      ["mcp_store_kb", "proj_retail_ai", "store_service_kb", "门店服务知识库问答", "testing", "v0.9.0", "/mcp/store-kb", "知识", ["kb_search", "kb_answer"]],
+      ["mcp_work_order", "proj_manufacturing_ops", "work_order_lookup", "工单查询", "testing", "v0.8.0", "/mcp/work-orders", "制造", ["work_order_lookup"]],
+      ["mcp_quality", "proj_manufacturing_ops", "quality_inspection", "质检分析", "draft", "v0.3.0", "/mcp/quality", "质量", ["quality_inspection"]],
+      ["mcp_risk_alert", "proj_finance_risk", "risk_alert", "风险预警查询", "draft", "v0.2.0", "/mcp/risk-alert", "风控", ["risk_alert"]],
+      ["mcp_property_ticket", "proj_property_service", "property_ticket_create", "物业报修工单创建", "testing", "v0.7.0", "/mcp/property-ticket", "物业", ["property_ticket_create"]],
+      ["mcp_property_notice", "proj_property_service", "property_notice_broadcast", "居民通知广播", "draft", "v0.4.0", "/mcp/property-notice", "物业", ["property_notice_broadcast"]],
+      ["mcp_edu_course", "proj_education_campus", "course_recommendation", "课程推荐", "draft", "v0.2.0", "/mcp/course-recommendation", "教育", ["course_recommendation"]],
+      ["mcp_edu_qa", "proj_education_campus", "campus_qa", "校园知识问答", "testing", "v0.5.0", "/mcp/campus-qa", "教育", ["campus_qa"]]
+    ];
+    const policies = [
+      ["pol_retail", "proj_retail_ai", "零售 AI 网关策略", "API Key + JWT", "企业微信机器人、客服 Agent、经营看板", "600 rpm / 客户", "手机号、会员 ID、订单号、金额", 1, "已启用"],
+      ["pol_manufacturing", "proj_manufacturing_ops", "制造测试策略", "OAuth", "生产经理、质检 Agent", "120 rpm / 项目", "工单号、员工号", 1, "已启用"],
+      ["pol_finance", "proj_finance_risk", "金融审计策略", "OAuth + mTLS", "风控 Agent、审计员", "60 rpm / 应用", "账号、身份证号、金额", 1, "审批中"],
+      ["pol_property", "proj_property_service", "物业服务策略", "API Key + JWT", "居民 App、管理看板", "300 rpm / 客户", "手机号、房间号、工单号", 1, "已启用"],
+      ["pol_education", "proj_education_campus", "校园 AI 策略", "OAuth", "学生 App、教师助手", "200 rpm / 客户", "学号、课程号", 1, "已启用"]
+    ];
+    const releases = [
+      ["rel_sales_120", "mcp_sales_top", "v1.2.0", "published", "2026-07-05 10:30", "2026-07-06 09:00", "新增门店筛选和 TopN 参数"],
+      ["rel_member_110", "mcp_member_benefits", "v1.1.0", "published", "2026-07-05 14:00", "2026-07-06 09:30", "新增过期权益提醒"],
+      ["rel_kb_090", "mcp_store_kb", "v0.9.0", "tested", "2026-07-07 11:00", "", "等待客户发布窗口"]
+    ];
+    const deliverables = [
+      ["del_cfg", "proj_retail_ai", "MCP 配置包", "config", "ready"],
+      ["del_test", "proj_retail_ai", "上线测试报告", "test-report", "ready"],
+      ["del_logs", "proj_retail_ai", "调用日志 CSV", "log", "ready"],
+      ["del_review", "proj_retail_ai", "月度效果复盘", "effect-report", "generating"],
+      ["del_kb", "proj_retail_ai", "知识库导出", "knowledge-base", "ready"],
+      ["del_manufacturing_cfg", "proj_manufacturing_ops", "制造 MCP 配置包", "config", "ready"],
+      ["del_manufacturing_test", "proj_manufacturing_ops", "制造测试报告", "test-report", "ready"],
+      ["del_property_cfg", "proj_property_service", "物业 MCP 配置包", "config", "ready"],
+      ["del_education_cfg", "proj_education_campus", "校园 AI 配置包", "config", "ready"]
+    ];
+    const bills = [
+      ["bill_impl", "cust_retail", "实施费", "2026-07", 68000, "confirmed", 0],
+      ["bill_package", "cust_retail", "年费 / 能力包", "2026", 98000, "pending", 0],
+      ["bill_usage", "cust_retail", "调用量 / 效果费", "2026-07", 12680, "pending", 28642],
+      ["bill_private", "cust_finance", "私有化部署评估", "2026-07", 30000, "pending", 0],
+      ["bill_property_impl", "cust_property", "物业实施费", "2026-07", 45000, "confirmed", 0],
+      ["bill_property_usage", "cust_property", "调用量 / 效果费", "2026-07", 8200, "pending", 12500],
+      ["bill_education_impl", "cust_education", "校园 AI 实施费", "2026-07", 38000, "pending", 0],
+      ["bill_education_usage", "cust_education", "调用量 / 效果费", "2026-07", 5600, "pending", 8600]
+    ];
+    const accessConfigs = [
+      ["acc_sse", null, null, "平台 SSE 接入点", "sse", "http://localhost:3100/sse", "", "全局", "enabled"],
+      ["acc_retail_api", "cust_retail", "proj_retail_ai", "美佳零售 API Key", "api_key", "", "ak_retail_***", "门店数据、会员数据", "enabled"],
+      ["acc_manufacturing_oauth", "cust_manufacturing", "proj_manufacturing_ops", "华智制造 OAuth", "oauth", "", "token_***", "工单、质检数据", "enabled"],
+      ["acc_finance_mtls", "cust_finance", "proj_finance_risk", "鑫融金服 mTLS", "mtls", "", "cert_***", "风控策略", "pending"],
+      ["acc_property_wechat", "cust_property", "proj_property_service", "安和物业企业微信", "webhook", "https://work.weixin.qq.com/...", "", "居民通知、报修", "enabled"],
+      ["acc_education_dingtalk", "cust_education", "proj_education_campus", "知行教育钉钉", "webhook", "https://oapi.dingtalk.com/...", "", "校园问答、课程提醒", "enabled"]
+    ];
+    const kbCollections = [
+      ["col_store_ops", "门店运营手册", "门店日常运营、收银、退换货、服务规范等知识", 4, 12, "active"],
+      ["col_product_faq", "商品常见问题", "商品规格、价格、促销、库存等常见问答", 3, 9, "active"],
+      ["col_promo_rules", "促销活动规则", "满减、买赠、会员日、优惠券等规则说明", 2, 6, "active"]
+    ];
+    const kbDocuments = [
+      ["doc_opening", "col_store_ops", "门店开业流程", "https://kb.mcpforge.local/store/opening", 3, "indexed"],
+      ["doc_return", "col_store_ops", "退换货政策", "https://kb.mcpforge.local/store/return", 4, "indexed"],
+      ["doc_service", "col_store_ops", "客诉处理规范", "https://kb.mcpforge.local/store/service", 3, "indexed"],
+      ["doc_close", "col_store_ops", "闭店盘点要点", "https://kb.mcpforge.local/store/close", 2, "indexed"],
+      ["doc_price", "col_product_faq", "商品价格说明", "https://kb.mcpforge.local/product/price", 3, "indexed"],
+      ["doc_stock", "col_product_faq", "库存查询与缺货", "https://kb.mcpforge.local/product/stock", 3, "indexed"],
+      ["doc_spec", "col_product_faq", "商品规格对照", "https://kb.mcpforge.local/product/spec", 3, "indexed"],
+      ["doc_full_reduction", "col_promo_rules", "满减活动规则", "https://kb.mcpforge.local/promo/full", 3, "indexed"],
+      ["doc_member_day", "col_promo_rules", "会员日权益", "https://kb.mcpforge.local/promo/member", 3, "indexed"]
+    ];
+    const kbChunks = [
+      ["chk_1", "doc_opening", "col_store_ops", "开业前 30 分钟到店，检查收银设备、POS 网络、冷藏柜温度，确保系统正常登录。", "开业,收银,设备"],
+      ["chk_2", "doc_opening", "col_store_ops", "晨会时间 10 分钟，同步当日促销、缺货商品和注意事项。", "晨会,促销,缺货"],
+      ["chk_3", "doc_opening", "col_store_ops", "开门后检查陈列是否完整，价签与系统价格一致，发现异常立即上报。", "陈列,价签,价格"],
+      ["chk_4", "doc_return", "col_store_ops", "顾客退换货需凭小票，未拆封商品 7 天内可退，食品、生鲜不支持退换。", "退货,小票,生鲜"],
+      ["chk_5", "doc_return", "col_store_ops", "退款金额原路返回，POS 系统选择「退货」类型并备注原因。", "退款,POS,原因"],
+      ["chk_6", "doc_return", "col_store_ops", "超过 7 天但商品有质量问题，可换货或按会员积分补偿。", "换货,质量,积分"],
+      ["chk_7", "doc_return", "col_store_ops", "退换货数据每日汇总，异常高频商品反馈给采购和运营。", "汇总,采购,运营"],
+      ["chk_8", "doc_service", "col_store_ops", "客诉处理首问负责制，员工须倾听、记录、致歉并给出解决方案。", "客诉,首问,记录"],
+      ["chk_9", "doc_service", "col_store_ops", "无法现场解决的客诉，30 分钟内上报值班店长，24 小时内回访顾客。", "店长,回访,解决"],
+      ["chk_10", "doc_service", "col_store_ops", "所有客诉记录录入系统，用于月度服务质量和培训复盘。", "记录,培训,复盘"],
+      ["chk_11", "doc_close", "col_store_ops", "闭店前 1 小时停止收货，整理货架并补满畅销商品。", "闭店,收货,货架"],
+      ["chk_12", "doc_close", "col_store_ops", "日结对账：核对 POS 流水、现金、移动支付和优惠券，差异需说明。", "日结,对账,差异"],
+      ["chk_13", "doc_price", "col_product_faq", "商品价格以 POS 系统为准，若价签与系统不一致，按最低价格执行。", "价格,价签,最低"],
+      ["chk_14", "doc_price", "col_product_faq", "促销期间价格以活动配置为准，结束时间以系统设定为准。", "促销,结束时间,系统"],
+      ["chk_15", "doc_price", "col_product_faq", "会员价仅对会员生效，结账时需确认会员身份。", "会员价,会员,结账"],
+      ["chk_16", "doc_stock", "col_product_faq", "库存实时同步，缺货商品可设置到货提醒或推荐替代商品。", "库存,缺货,提醒"],
+      ["chk_17", "doc_stock", "col_product_faq", "临期商品提前 7 天预警，可触发降价或捆绑销售。", "临期,预警,降价"],
+      ["chk_18", "doc_stock", "col_product_faq", "盘点差异超过 3% 需要二次复盘，确认损耗或系统错误。", "盘点,差异,损耗"],
+      ["chk_19", "doc_spec", "col_product_faq", "同一商品不同规格在系统中以不同 SKU 区分，避免混淆。", "SKU,规格,混淆"],
+      ["chk_20", "doc_spec", "col_product_faq", "组合装商品拆单时按比例分摊价格，并保留原包装条码。", "组合装,拆单,条码"],
+      ["chk_21", "doc_spec", "col_product_faq", "进口商品需标注中文标签和保质期，系统记录批次号。", "进口,保质期,批次"],
+      ["chk_22", "doc_full_reduction", "col_promo_rules", "满减活动按订单金额阶梯计算，不可与部分折扣叠加。", "满减,阶梯,折扣"],
+      ["chk_23", "doc_full_reduction", "col_promo_rules", "赠品以库存为准，送完即止，需在 POS 选择对应赠品编码。", "赠品,库存,POS"],
+      ["chk_24", "doc_full_reduction", "col_promo_rules", "活动结算后自动拆分到参与商品，用于毛利分析。", "结算,毛利,分析"],
+      ["chk_25", "doc_member_day", "col_promo_rules", "会员日每月 8 日，会员享双倍积分和专属折扣。", "会员日,双倍积分,折扣"],
+      ["chk_26", "doc_member_day", "col_promo_rules", "会员生日当月可领取生日券，有效期 30 天。", "生日券,有效期,领取"],
+      ["chk_27", "doc_member_day", "col_promo_rules", "会员权益以系统等级为准，不同等级折扣和积分倍率不同。", "等级,折扣,积分"]
+    ];
+
+    const insertCustomer = db.prepare("INSERT OR IGNORE INTO platform_customers (id,name,industry,contact,tier,status) VALUES (?,?,?,?,?,?)"); customers.forEach(row => insertCustomer.run(...row));
+    const insertProject = db.prepare("INSERT OR IGNORE INTO platform_projects (id,customer_id,name,stage,owner,progress,due_date) VALUES (?,?,?,?,?,?,?)"); projects.forEach(row => insertProject.run(...row));
+    const insertSource = db.prepare("INSERT OR IGNORE INTO platform_data_sources (id,project_id,name,type,auth_mode,status) VALUES (?,?,?,?,?,?)"); sources.forEach(row => insertSource.run(...row));
+    const insertAsset = db.prepare("INSERT OR IGNORE INTO platform_mcp_assets (id,project_id,name,capability,status,version,endpoint,owner,tools) VALUES (?,?,?,?,?,?,?,?,?)"); assets.forEach(row => insertAsset.run(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], encode(row[8])));
+    const insertPolicy = db.prepare("INSERT OR IGNORE INTO platform_gateway_policies (id,project_id,name,auth_mode,authorization_scope,rate_limit,masking_rules,audit_enabled,status) VALUES (?,?,?,?,?,?,?,?,?)"); policies.forEach(row => insertPolicy.run(...row));
+    const insertRelease = db.prepare("INSERT OR IGNORE INTO platform_mcp_releases (id,asset_id,version,status,tested_at,released_at,notes) VALUES (?,?,?,?,?,?,?)"); releases.forEach(row => insertRelease.run(...row));
+    const insertDeliverable = db.prepare("INSERT OR IGNORE INTO platform_deliverables (id,project_id,name,type,status) VALUES (?,?,?,?,?)"); deliverables.forEach(row => insertDeliverable.run(...row));
+    const insertBill = db.prepare("INSERT OR IGNORE INTO platform_billing_records (id,customer_id,item,period,amount,status,calls) VALUES (?,?,?,?,?,?,?)"); bills.forEach(row => insertBill.run(...row));
+    const insertKbCollection = db.prepare("INSERT OR IGNORE INTO kb_collections (id,name,description,doc_count,chunk_count,status) VALUES (?,?,?,?,?,?)"); kbCollections.forEach(row => insertKbCollection.run(...row));
+    const insertKbDocument = db.prepare("INSERT OR IGNORE INTO kb_documents (id,collection_id,title,source_url,chunk_count,status) VALUES (?,?,?,?,?,?)"); kbDocuments.forEach(row => insertKbDocument.run(...row));
+    const insertKbChunk = db.prepare("INSERT OR IGNORE INTO kb_chunks (id,document_id,collection_id,content,keywords) VALUES (?,?,?,?,?)"); kbChunks.forEach(row => insertKbChunk.run(...row));
+    const insertAccess = db.prepare("INSERT OR IGNORE INTO platform_access_configs (id,customer_id,project_id,name,type,endpoint,api_key,scope,status) VALUES (?,?,?,?,?,?,?,?,?)"); accessConfigs.forEach(row => insertAccess.run(...row));
+    const insertEvent = db.prepare("INSERT INTO platform_call_events (id,asset_id,caller,status,latency_ms,business_result,trace_id,created_at) VALUES (?,?,?,?,?,?,?,datetime('now', ?))");
+    if (count("platform_call_events") === 0) {
+      for (let i = 0; i < 80; i += 1) {
+        const assetId = assets[i % assets.length][0];
+        const ok = i % 13 !== 0;
+        insertEvent.run(makeId("evt"), assetId, ["WeCom", "Service Agent", "Ops Dashboard", "OA Bot"][i % 4], ok ? "success" : "error", 80 + (i * 17) % 420, ok ? ["coupon", "redeem", "query", "conversion"][i % 4] : "argument_error", `trace_${10000 + i}`, `-${i % 28} days`);
+      }
+    }
+    const insertUser = db.prepare("INSERT OR IGNORE INTO platform_users (id,username,password_hash,role,display_name,customer_id) VALUES (?,?,?,?,?,?)");
+    insertUser.run("usr_admin", "admin", hashPassword("admin123"), "admin", "科传管理员", "");
+    insertUser.run("usr_retail", "meijia", hashPassword("store123"), "customer", "美佳零售集团", "cust_retail");
+    insertUser.run("usr_hzm", "hzm", hashPassword("123456"), "customer", "华智制造", "cust_manufacturing");
+    insertUser.run("usr_xrf", "xrf", hashPassword("123456"), "customer", "鑫融金服", "cust_finance");
+    insertUser.run("usr_ahwy", "ahwy", hashPassword("123456"), "customer", "安和物业", "cust_property");
+    insertUser.run("usr_zxjy", "zxjy", hashPassword("123456"), "customer", "知行教育", "cust_education");
+  });
+  tx();
+}
+seed();
+
+function currentSession(req) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token) return null;
+  return db.prepare(`SELECT s.token, u.id, u.username, u.role, u.display_name, u.customer_id FROM platform_sessions s JOIN platform_users u ON u.id = s.user_id WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')`).get(token);
+}
+function requireAuth(req, res, next) { const session = currentSession(req); if (!session) return res.status(401).json({ error: "session expired" }); req.user = session; next(); }
+function requireAdmin(req, res, next) { if (req.user?.role !== "admin") return res.status(403).json({ error: "admin role required" }); next(); }
+function customerScope(req) { return req.user.role === "admin" ? null : req.user.customer_id; }
+function scopedProjects(req) { const cid = customerScope(req); const sql = "SELECT p.*, c.name AS customer_name FROM platform_projects p JOIN platform_customers c ON c.id = p.customer_id" + (cid ? " WHERE p.customer_id = ?" : "") + " ORDER BY p.due_date"; return cid ? db.prepare(sql).all(cid) : db.prepare(sql).all(); }
+function scopedAssets(req) { const cid = customerScope(req); const sql = "SELECT a.*, p.name AS project_name, c.name AS customer_name FROM platform_mcp_assets a JOIN platform_projects p ON p.id = a.project_id JOIN platform_customers c ON c.id = p.customer_id" + (cid ? " WHERE p.customer_id = ?" : "") + " ORDER BY a.status = 'published' DESC, a.created_at DESC"; return cid ? db.prepare(sql).all(cid) : db.prepare(sql).all(); }
+function callStats(ids) { if (!ids.length) return { total: 0, successRate: 0, avgLatency: 0, errorCount: 0 }; const ph = ids.map(() => "?").join(","); const row = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success, AVG(latency_ms) AS avg_latency, SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) AS errors FROM platform_call_events WHERE asset_id IN (${ph})`).get(...ids); return { total: row.total || 0, successRate: row.total ? Math.round((row.success || 0) * 1000 / row.total) / 10 : 0, avgLatency: Math.round(row.avg_latency || 0), errorCount: row.errors || 0 }; }
+
+app.post("/auth/login", (req, res) => { const { username, password } = req.body || {}; const user = db.prepare("SELECT * FROM platform_users WHERE username = ?").get(username); if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: "invalid username or password" }); const token = crypto.randomBytes(24).toString("hex"); db.prepare("INSERT INTO platform_sessions (token,user_id,expires_at) VALUES (?,?,datetime('now','+12 hours'))").run(token, user.id); res.json({ token, user: { id: user.id, username: user.username, role: user.role, display_name: user.display_name, customer_id: user.customer_id } }); });
+app.post("/auth/logout", requireAuth, (req, res) => { db.prepare("DELETE FROM platform_sessions WHERE token = ?").run(req.user.token); res.json({ ok: true }); });
+app.get("/auth/me", requireAuth, (req, res) => res.json({ id: req.user.id, username: req.user.username, role: req.user.role, display_name: req.user.display_name, customer_id: req.user.customer_id }));
+app.get("/health", (req, res) => res.json({ status: "ok", service: "mcp-forge-admin", uptime: Math.round(process.uptime()), assets: count("platform_mcp_assets"), projects: count("platform_projects") }));
+app.get("/api/platform/summary", requireAuth, (req, res) => { const projects = scopedProjects(req); const assets = scopedAssets(req); const stats = callStats(assets.map(a => a.id)); const published = assets.filter(a => a.status === "published").length; const cid = customerScope(req); const billing = cid ? db.prepare("SELECT COALESCE(SUM(amount),0) AS amount FROM platform_billing_records WHERE customer_id = ?").get(cid) : db.prepare("SELECT COALESCE(SUM(amount),0) AS amount FROM platform_billing_records").get(); res.json({ customers: cid ? 1 : count("platform_customers"), projects: projects.length, assets: assets.length, published, calls: stats.total, successRate: stats.successRate, avgLatency: stats.avgLatency, errors: stats.errorCount, billingAmount: Math.round((billing.amount || 0) * 100) / 100 }); });
+app.get("/api/platform/customers", requireAuth, (req, res) => { const cid = customerScope(req); res.json(cid ? db.prepare("SELECT * FROM platform_customers WHERE id = ?").all(cid) : db.prepare("SELECT * FROM platform_customers ORDER BY created_at DESC").all()); });
+app.get("/api/platform/projects", requireAuth, (req, res) => res.json(scopedProjects(req)));
+app.get("/api/platform/data-sources", requireAuth, (req, res) => { const ids = scopedProjects(req).map(p => p.id); if (!ids.length) return res.json([]); res.json(db.prepare(`SELECT ds.*, p.name AS project_name FROM platform_data_sources ds JOIN platform_projects p ON p.id = ds.project_id WHERE ds.project_id IN (${ids.map(() => "?").join(",")}) ORDER BY ds.status, ds.name`).all(...ids)); });
+app.get("/api/platform/mcp-assets", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({ ...a, tools: decode(a.tools) }))));
+app.post("/api/platform/mcp-assets", requireAuth, requireAdmin, (req, res) => { const { project_id, name, capability, owner, tools } = req.body || {}; if (!project_id || !name || !capability) return res.status(400).json({ error: "project_id, name and capability are required" }); const asset = { id: makeId("mcp"), project_id, name, capability, status: "draft", version: "v0.1.0", endpoint: `/mcp/${name}`, owner: owner || "Delivery", tools: tools || [name] }; db.prepare("INSERT INTO platform_mcp_assets (id,project_id,name,capability,status,version,endpoint,owner,tools) VALUES (?,?,?,?,?,?,?,?,?)").run(asset.id, asset.project_id, asset.name, asset.capability, asset.status, asset.version, asset.endpoint, asset.owner, encode(asset.tools)); res.status(201).json(asset); });
+app.get("/api/platform/releases", requireAuth, (req, res) => { const ids = scopedAssets(req).map(a => a.id); if (!ids.length) return res.json([]); res.json(db.prepare(`SELECT r.*, a.name AS asset_name FROM platform_mcp_releases r JOIN platform_mcp_assets a ON a.id = r.asset_id WHERE r.asset_id IN (${ids.map(() => "?").join(",")}) ORDER BY COALESCE(r.released_at, r.tested_at) DESC`).all(...ids)); });
+app.get("/api/platform/gateway-policies", requireAuth, (req, res) => { const ids = scopedProjects(req).map(p => p.id); if (!ids.length) return res.json([]); res.json(db.prepare(`SELECT gp.*, p.name AS project_name FROM platform_gateway_policies gp JOIN platform_projects p ON p.id = gp.project_id WHERE gp.project_id IN (${ids.map(() => "?").join(",")}) ORDER BY gp.status DESC`).all(...ids)); });
+app.get("/api/platform/call-events", requireAuth, (req, res) => { const ids = scopedAssets(req).map(a => a.id); if (!ids.length) return res.json([]); res.json(db.prepare(`SELECT ce.*, a.name AS asset_name FROM platform_call_events ce JOIN platform_mcp_assets a ON a.id = ce.asset_id WHERE ce.asset_id IN (${ids.map(() => "?").join(",")}) ORDER BY ce.created_at DESC LIMIT 80`).all(...ids)); });
+app.get("/api/platform/deliverables", requireAuth, (req, res) => { const ids = scopedProjects(req).map(p => p.id); if (!ids.length) return res.json([]); res.json(db.prepare(`SELECT d.*, p.name AS project_name FROM platform_deliverables d JOIN platform_projects p ON p.id = d.project_id WHERE d.project_id IN (${ids.map(() => "?").join(",")}) ORDER BY d.updated_at DESC`).all(...ids)); });
+app.get("/api/platform/billing", requireAuth, (req, res) => { const cid = customerScope(req); const sql = "SELECT br.*, c.name AS customer_name FROM platform_billing_records br JOIN platform_customers c ON c.id = br.customer_id" + (cid ? " WHERE br.customer_id = ?" : "") + " ORDER BY br.period DESC, br.item"; res.json(cid ? db.prepare(sql).all(cid) : db.prepare(sql).all()); });
+app.get("/api/platform/access-configs", requireAuth, (req, res) => { const cid = customerScope(req); const sql = "SELECT ac.*, c.name AS customer_name, p.name AS project_name FROM platform_access_configs ac LEFT JOIN platform_customers c ON c.id = ac.customer_id LEFT JOIN platform_projects p ON p.id = ac.project_id" + (cid ? " WHERE ac.customer_id = ?" : "") + " ORDER BY ac.status DESC, ac.type"; res.json(cid ? db.prepare(sql).all(cid) : db.prepare(sql).all()); });
+app.get("/api/platform/kb/collections", requireAuth, (req, res) => { res.json(db.prepare("SELECT * FROM kb_collections ORDER BY created_at DESC").all()); });
+app.get("/api/platform/kb/documents", requireAuth, (req, res) => { const { collection_id } = req.query || {}; const sql = collection_id ? "SELECT * FROM kb_documents WHERE collection_id = ? ORDER BY title" : "SELECT * FROM kb_documents ORDER BY title"; res.json(collection_id ? db.prepare(sql).all(collection_id) : db.prepare(sql).all()); });
+app.get("/api/platform/kb/search", requireAuth, (req, res) => { const { q = "" } = req.query || {}; if (!q.trim()) return res.json({ query: q, results: [] }); const query = q.trim().toLowerCase(); const chunks = db.prepare("SELECT kc.*, kd.title AS document_title, kc2.name AS collection_name FROM kb_chunks kc JOIN kb_documents kd ON kd.id = kc.document_id JOIN kb_collections kc2 ON kc2.id = kc.collection_id").all(); const results = chunks.map(c => { const keywords = decode(c.keywords); const content = c.content.toLowerCase(); let score = 0; if (content.includes(query)) score += 3; if (keywords.some(k => k.toLowerCase().includes(query))) score += 5; if (query.split(/\s+/).some(term => content.includes(term))) score += 1; return { ...c, score }; }).filter(c => c.score > 0).sort((a, b) => b.score - a.score).slice(0, 5); res.json({ query: q, results: results.map(r => ({ document_title: r.document_title, collection_name: r.collection_name, content: r.content, keywords: decode(r.keywords), score: r.score })) }); });
+app.get("/api/tools", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({ name: a.name, description: a.capability, status: a.status, tools: decode(a.tools) }))));
+app.post("/admin/simulate-call", requireAuth, (req, res) => { const { tool_name, arguments: args = {} } = req.body || {}; const traceId = `trace_${crypto.randomBytes(4).toString("hex")}`; const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE name = ?").get(tool_name) || db.prepare("SELECT * FROM platform_mcp_assets LIMIT 1").get(); if (!asset) return res.status(404).json({ error: "no MCP asset available" }); let result; if (tool_name === "sales_top_products") { const topN = Math.min(Math.max(Number(args.top_n) || 10, 1), 20); result = { tool: tool_name, trace_id: traceId, range: args.date_range || "month", rows: Array.from({ length: topN }).map((_, i) => ({ rank: i + 1, product: ["Milk", "Coffee", "Yogurt", "Water", "Sandwich", "Energy Drink", "Fruit Cup", "Bread", "Tea", "Lunch Box"][i % 10], revenue: 9800 - i * 520, quantity: 420 - i * 19, contribution: `${(18 - i * 0.9).toFixed(1)}%` })) }; } else if (tool_name === "member_expiring_benefits") { result = { tool: tool_name, trace_id: traceId, member: args.member_id || "M10001", name: "Demo Member", current_points: 2350, expiring_points: 320, points_expire_at: "2026-07-31", coupons: ["8 off over 50", "second coffee half price"], expiring_coupons: ["fresh food 15% off"], suggested_action: "remind member to redeem expiring benefits" }; } else { result = { tool: tool_name || "kb_search", trace_id: traceId, answer: "Sandbox call completed with authorization and masking checks." }; } db.prepare("INSERT INTO platform_call_events (id,asset_id,caller,status,latency_ms,business_result,trace_id) VALUES (?,?,?,?,?,?,?)").run(makeId("evt"), asset.id, req.user.display_name, "success", 120 + Math.floor(Math.random() * 180), tool_name || "simulate", traceId); res.json(result); });
+
+app.get("/admin/login-bg.png", (req, res) => res.sendFile(path.join(ADMIN_DIR, "login-bg.png")));
+app.get("/admin/brand-icon.png", (req, res) => res.sendFile(path.join(ADMIN_DIR, "brand-icon.png")));
+
+// 禁止浏览器缓存 admin 静态资源，避免演示时修改不生效
+app.use("/admin", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
+app.use("/admin/assets", express.static(path.join(ADMIN_DIR, "assets")));
+app.get("/admin", (req, res) => res.sendFile(path.join(ADMIN_DIR, "index.html")));
+app.get("/", (req, res) => res.redirect("/admin"));
+if (fs.existsSync(CLIENT_DIR)) app.use(express.static(CLIENT_DIR));
+app.listen(PORT, () => console.log(`MCP Forge admin server running at http://localhost:${PORT}/admin`));

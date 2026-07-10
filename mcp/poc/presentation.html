@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Forge 演讲演示</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --accent: #6366f1;
+      --accent-2: #8b5cf6;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .deck { position: relative; width: 100vw; height: 100vh; }
+    .slide {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      padding: 4rem 5vw;
+      opacity: 0; pointer-events: none; transform: translateX(40px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .slide.active { opacity: 1; pointer-events: auto; transform: translateX(0); }
+    .slide.prev { opacity: 0; pointer-events: none; transform: translateX(-40px); }
+
+    .content { max-width: 1100px; width: 100%; }
+    h1 { font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 800; line-height: 1.1; margin-bottom: 1rem; }
+    h2 { font-size: clamp(1.8rem, 4vw, 2.8rem); font-weight: 700; margin-bottom: 1.5rem; }
+    h3 { font-size: 1.3rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--accent); }
+    p, li { font-size: 1.15rem; line-height: 1.8; color: var(--muted); }
+    ul { list-style: none; }
+    li { padding-left: 1.5rem; position: relative; margin-bottom: 0.5rem; }
+    li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
+
+    .gradient-text { background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; background: rgba(99,102,241,0.15); color: var(--accent); border: 1px solid rgba(99,102,241,0.3); }
+
+    .grid { display: grid; gap: 1.5rem; margin-top: 2rem; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+    .card { background: var(--panel); border: 1px solid rgba(148,163,184,0.1); border-radius: 1rem; padding: 1.5rem; transition: transform 0.2s, border-color 0.2s; }
+    .card:hover { transform: translateY(-4px); border-color: var(--accent); }
+    .card .icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 1rem; background: rgba(99,102,241,0.12); }
+
+    .metric-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 2rem; }
+    .metric { background: var(--panel); border-radius: 1rem; padding: 1.5rem 2rem; min-width: 180px; flex: 1; border: 1px solid rgba(148,163,184,0.1); }
+    .metric .value { font-size: 2.5rem; font-weight: 800; color: var(--text); }
+    .metric .label { font-size: 0.95rem; color: var(--muted); margin-top: 0.25rem; }
+
+    .customer-strip { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-top: 2rem; }
+    .customer-pill { background: var(--panel); border: 1px solid rgba(148,163,184,0.15); border-radius: 999px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 0.6rem; font-weight: 500; }
+    .customer-pill .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    .quote { border-left: 4px solid var(--accent); padding-left: 1.5rem; font-style: italic; font-size: 1.3rem; color: #e2e8f0; margin: 2rem 0; }
+
+    .nav { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); display: flex; gap: 0.75rem; align-items: center; z-index: 100; background: rgba(15,23,42,0.8); padding: 0.5rem 1rem; border-radius: 999px; border: 1px solid rgba(148,163,184,0.15); backdrop-filter: blur(8px); }
+    .nav button { background: transparent; border: none; color: var(--text); font-size: 1.2rem; cursor: pointer; padding: 0.5rem 0.8rem; border-radius: 0.5rem; transition: background 0.2s; }
+    .nav button:hover { background: rgba(99,102,241,0.2); }
+    .progress { position: fixed; bottom: 0; left: 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.3s; z-index: 101; }
+
+    .notes { position: fixed; bottom: 5rem; right: 2rem; max-width: 320px; background: rgba(30,41,59,0.95); border: 1px solid rgba(148,163,184,0.2); border-radius: 0.75rem; padding: 1rem; font-size: 0.9rem; color: var(--muted); z-index: 90; }
+    .notes strong { color: var(--text); display: block; margin-bottom: 0.5rem; }
+    .slide-number { position: fixed; top: 1.5rem; right: 2rem; color: var(--muted); font-size: 0.9rem; z-index: 100; }
+
+    .flow { display: flex; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 2rem; }
+    .flow-step { background: var(--panel); border-radius: 0.75rem; padding: 1rem 1.5rem; border: 1px solid rgba(148,163,184,0.1); text-align: center; min-width: 140px; }
+    .flow-arrow { color: var(--accent); font-size: 1.5rem; }
+
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+    @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+    .code-block { background: #020617; border: 1px solid rgba(148,163,184,0.15); border-radius: 0.75rem; padding: 1rem; font-family: "SF Mono", Consolas, monospace; font-size: 0.85rem; color: #a5b4fc; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <div class="slide active" data-notes="开场：今天介绍 MCP Forge，一个面向企业的 MCP 打造与治理平台。我们不止做 Demo，而是解决 AI 落地企业的真实工程问题。">
+      <div class="content" style="text-align:center">
+        <span class="badge">企业 AI 交付基础设施</span>
+        <h1 style="margin-top:1rem">MCP Forge</h1>
+        <h2 class="gradient-text">企业 MCP 打造与治理平台</h2>
+        <p style="margin-top:1.5rem; max-width:700px; margin-left:auto; margin-right:auto">
+          把企业现有业务能力快速封装成 AI 可调用的 MCP 资产，<br>
+          并通过统一后台完成客户交付、网关治理、版本发布与计费结算。
+        </p>
+        <div class="customer-strip">
+          <div class="customer-pill"><span class="dot" style="background:#22c55e"></span>美佳零售集团</div>
+          <div class="customer-pill"><span class="dot" style="background:#3b82f6"></span>华智制造</div>
+          <div class="customer-pill"><span class="dot" style="background:#f59e0b"></span>鑫融金服</div>
+          <div class="customer-pill"><span class="dot" style="background:#14b8a6"></span>安和物业</div>
+          <div class="customer-pill"><span class="dot" style="background:#a855f7"></span>知行教育</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="先讲痛点：企业做 AI 时，90% 的时间花在对接内部系统、处理权限、写 Prompt、调格式，而不是业务价值本身。">
+      <div class="content">
+        <h2>企业落地 AI 的四大痛点</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="icon">🧩</div>
+            <h3>系统对接碎片化</h3>
+            <p>每个业务系统接口协议、认证方式、返回格式都不一样，AI 团队重复造轮子。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🔐</div>
+            <h3>权限与数据安全难控</h3>
+            <p>大模型直接访问数据库风险高，缺少租户隔离、字段脱敏、调用审计。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🚀</div>
+            <h3>从 POC 到生产跨度大</h3>
+            <p>沙箱跑通不等于可交付，缺版本管理、灰度发布、效果追踪和计费闭环。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🏭</div>
+            <h3>多客户复用成本高</h3>
+            <p>每个客户都定制开发，能力无法沉淀为可复用资产，交付人效低。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="给出我们的判断：MCP 协议正在成为 AI 调用企业能力的标准接口。MCP Forge 就是要做企业里的能力工厂。">
+      <div class="content" style="text-align:center">
+        <h2 class="gradient-text">MCP = 企业能力的 AI 接口标准</h2>
+        <p style="max-width:800px; margin:1rem auto 2rem">
+          就像 REST API 连接了移动互联网时代的业务系统，<br>
+          <strong>MCP 正在连接大模型与企业业务系统</strong>。
+        </p>
+        <div class="flow">
+          <div class="flow-step"><div style="font-size:1.5rem">🏢</div><div>企业业务系统</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step" style="border-color:var(--accent)"><div style="font-size:1.5rem">🔧</div><div>MCP 资产</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div style="font-size:1.5rem">🤖</div><div>AI Agent</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div style="font-size:1.5rem">📈</div><div>业务价值</div></div>
+        </div>
+        <div class="quote" style="text-align:left; max-width:700px; margin:3rem auto 0">
+          MCP Forge 的定位不是做一个 Chatbot，而是帮助企业把自有能力封装成 AI 可调用的标准化资产，并治理这些资产的全生命周期。
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="这是整体架构：底部是数据源接入层，中间是 MCP 工厂，上层是网关治理、测试发布、计费管理，最右侧是客户交付门户。">
+      <div class="content">
+        <h2>平台架构：从数据源到客户交付</h2>
+        <div class="grid grid-3">
+          <div class="card">
+            <div class="icon">🔌</div>
+            <h3>数据源接入</h3>
+            <p>REST API、Database、知识库等多种数据源统一接入，支持 API Key / JWT / OAuth / mTLS 等认证模式。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🏭</div>
+            <h3>MCP 工厂</h3>
+            <p>把业务能力定义为 MCP 资产：名称、能力描述、版本、端点、工具列表，支持草稿 → 测试 → 发布全流程。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🛡️</div>
+            <h3>网关与治理</h3>
+            <p>按客户/项目配置认证授权、限流策略、字段脱敏规则，审计每一次调用。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🧪</div>
+            <h3>测试与发布</h3>
+            <p>内置沙箱试调，记录版本发布历史，支持测试通过后再正式上线。</p>
+          </div>
+          <div class="card">
+            <div class="icon">💰</div>
+            <h3>计费管理</h3>
+            <p>实施费、年费/能力包、按调用量/效果计费，形成商业闭环。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🚪</div>
+            <h3>客户交付门户</h3>
+            <p>客户登录后只看到自有项目、MCP 资产、调用效果、交付文件下载。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="进入案例部分。先看零售：美佳零售集团，这是第一个落地场景，已发布上线。">
+      <div class="content">
+        <div class="two-col">
+          <div>
+            <span class="badge">案例一</span>
+            <h2 style="margin-top:0.75rem">美佳零售集团</h2>
+            <p>连锁零售企业，需要让门店店长、会员运营、客服都能通过 AI 快速获取经营数据和服务知识。</p>
+            <ul style="margin-top:1rem">
+              <li>销售 TopN 查询：AI 直接问“本月最好卖的 10 个 SKU”</li>
+              <li>会员权益提醒：自动识别积分过期、券到期并推送</li>
+              <li>门店知识库：服务手册、退换货政策实时问答</li>
+            </ul>
+          </div>
+          <div>
+            <div class="card" style="margin-bottom:1rem">
+              <h3>项目状态</h3>
+              <p><strong>阶段：</strong>已发布</p>
+              <p><strong>进度：</strong>86%</p>
+              <p><strong>数据源：</strong>POS、CRM、知识库</p>
+            </div>
+            <div class="card">
+              <h3>MCP 资产</h3>
+              <p>sales_top_products（v1.2.0 已发布）</p>
+              <p>member_expiring_benefits（v1.1.0 已发布）</p>
+              <p>store_service_kb（v0.9.0 测试中）</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="制造业案例：华智制造。核心是把 MES 工单系统和质量记录封装成 MCP，让生产经理和质量员用自然语言查询。">
+      <div class="content">
+        <div class="two-col">
+          <div>
+            <span class="badge">案例二</span>
+            <h2 style="margin-top:0.75rem">华智制造</h2>
+            <p>离散制造企业，生产工单、质检记录分散在 MES 和 QMS 中，管理层需要快速掌握产线状态。</p>
+            <ul style="margin-top:1rem">
+              <li>工单查询：按产线、工序、状态查询在制工单</li>
+              <li>质检分析：统计不良率、定位异常批次</li>
+              <li>设备维护提醒：结合工单进度推送保养建议</li>
+            </ul>
+          </div>
+          <div>
+            <div class="card" style="margin-bottom:1rem">
+              <h3>项目状态</h3>
+              <p><strong>阶段：</strong>测试中</p>
+              <p><strong>进度：</strong>62%</p>
+              <p><strong>数据源：</strong>MES、质量记录库</p>
+            </div>
+            <div class="card">
+              <h3>MCP 资产</h3>
+              <p>work_order_lookup（v0.8.0 测试中）</p>
+              <p>quality_inspection（v0.3.0 草稿）</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="金融业案例：鑫融金服。风控和合规要求高，网关策略使用 OAuth + mTLS，字段脱敏是刚需。">
+      <div class="content">
+        <div class="two-col">
+          <div>
+            <span class="badge">案例三</span>
+            <h2 style="margin-top:0.75rem">鑫融金服</h2>
+            <p>金融科技企业，希望内部风控 agent 能查询风险政策、触发预警，同时满足合规审计要求。</p>
+            <ul style="margin-top:1rem">
+              <li>风险预警查询：按客户、产品、规则查询预警命中</li>
+              <li>政策问答：把风控政策文档变成知识库 MCP</li>
+              <li>全链路审计：每次调用记录 caller、trace_id、脱敏字段</li>
+            </ul>
+          </div>
+          <div>
+            <div class="card" style="margin-bottom:1rem">
+              <h3>项目状态</h3>
+              <p><strong>阶段：</strong>数据源接入</p>
+              <p><strong>进度：</strong>38%</p>
+              <p><strong>安全：</strong>OAuth + mTLS，账户/身份证/金额脱敏</p>
+            </div>
+            <div class="card">
+              <h3>MCP 资产</h3>
+              <p>risk_alert（v0.2.0 草稿）</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="物业和教育是新增的两个行业案例，展示平台的通用性和可复制性。">
+      <div class="content">
+        <h2>跨行业扩展：物业 & 教育</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="icon">🏠</div>
+            <h3>安和物业</h3>
+            <p><strong>场景：</strong>居民报修、公告通知、住户查询</p>
+            <ul>
+              <li>property_ticket_create：居民通过 AI 提交报修工单</li>
+              <li>property_notice_broadcast：向指定楼栋推送停水停电通知</li>
+            </ul>
+            <p style="margin-top:0.75rem"><span class="badge">进度 55%</span></p>
+          </div>
+          <div class="card">
+            <div class="icon">🎓</div>
+            <h3>知行教育</h3>
+            <p><strong>场景：</strong>选课推荐、校园知识问答</p>
+            <ul>
+              <li>course_recommendation：根据学生画像推荐选修课</li>
+              <li>campus_qa：食堂、图书馆、教务政策实时问答</li>
+            </ul>
+            <p style="margin-top:0.75rem"><span class="badge">进度 30%</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="数据说话。当前平台已经接入 5 个行业客户，10 个 MCP 资产，80 条调用事件，计费金额 26 万多。">
+      <div class="content" style="text-align:center">
+        <h2>平台运营数据</h2>
+        <p>截至演示当日，MCP Forge 已沉淀如下数据（全部来自真实数据库 seed）</p>
+        <div class="metric-row">
+          <div class="metric"><div class="value">5</div><div class="label">企业客户</div></div>
+          <div class="metric"><div class="value">5</div><div class="label">行业项目</div></div>
+          <div class="metric"><div class="value">10</div><div class="label">MCP 资产</div></div>
+          <div class="metric"><div class="value">2</div><div class="label">已发布</div></div>
+        </div>
+        <div class="metric-row" style="margin-top:1rem">
+          <div class="metric"><div class="value">80</div><div class="label">调用事件</div></div>
+          <div class="metric"><div class="value">92.5%</div><div class="label">成功率</div></div>
+          <div class="metric"><div class="value">~260ms</div><div class="label">平均响应</div></div>
+          <div class="metric"><div class="value">¥267,480</div><div class="label">计费金额</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="这是后台登录页。支持平台管理员和不同客户账号快速登录，登录后根据角色展示不同菜单和数据范围。">
+      <div class="content">
+        <h2>后台登录与客户隔离</h2>
+        <div class="two-col">
+          <div>
+            <p>打开 <code>http://localhost:3100/admin</code>，可以看到：</p>
+            <ul>
+              <li>平台管理员：admin / admin123，看全局数据</li>
+              <li>美佳零售：meijia / store123</li>
+              <li>华智制造：hzm / 123456</li>
+              <li>鑫融金服：xrf / 123456</li>
+              <li>安和物业：ahwy / 123456</li>
+              <li>知行教育：zxjy / 123456</li>
+            </ul>
+          </div>
+          <div class="code-block">
+            快速登录流程：<br><br>
+            1. 点击客户卡片<br>
+            2. 自动填充账号密码<br>
+            3. 触发 /auth/login<br>
+            4. 返回 JWT token<br>
+            5. 后续 API 按 customer_id 隔离
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="项目工作台是管理员视角，展示客户项目列表、交付动态和核心指标。">
+      <div class="content">
+        <h2>项目工作台：全局交付态势</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <h3>左侧：客户项目表</h3>
+            <p>展示企业客户、项目名称、当前阶段、进度条、负责人。</p>
+            <p>管理员一眼看清所有在途项目的健康度。</p>
+          </div>
+          <div class="card">
+            <h3>右侧：近期交付动态</h3>
+            <p>展示 MCP 资产的版本发布记录、测试时间、发布说明。</p>
+            <p>让交付节奏透明化。</p>
+          </div>
+        </div>
+        <div class="metric-row" style="margin-top:2rem">
+          <div class="metric"><div class="value">企业客户</div><div class="label">按平台客户统计</div></div>
+          <div class="metric"><div class="value">MCP 资产</div><div class="label">N 个已发布</div></div>
+          <div class="metric"><div class="value">本月调用</div><div class="label">成功率 XX%</div></div>
+          <div class="metric"><div class="value">计费金额</div><div class="label">实施费、年费、效果费</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="MCP 工厂页面展示所有资产和数据源。这里可以新建 MCP 草稿，查看能力描述、版本、状态和接入的数据源。">
+      <div class="content">
+        <h2>MCP 工厂：能力定义与资产生产</h2>
+        <div class="grid grid-3">
+          <div class="card">
+            <div class="icon">📦</div>
+            <h3>MCP 资产列表</h3>
+            <p>名称、能力描述、状态、版本、所属项目一目了然。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🔌</div>
+            <h3>数据源接入</h3>
+            <p>每个资产关联哪些数据源、什么协议、认证方式、当前连接状态。</p>
+          </div>
+          <div class="card">
+            <div class="icon">➕</div>
+            <h3>新建草稿</h3>
+            <p>点击按钮即可创建新 MCP 资产草稿，自动分配版本 v0.1.0。</p>
+          </div>
+        </div>
+        <div class="quote" style="margin-top:2rem">
+          关键设计：MCP 资产是“业务能力的标准化封装”，不是一次性接口。同一个能力可以被多个客户、多个 Agent 复用。
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="测试与发布页面包含发布记录和沙箱试调。沙箱可以模拟调用 sales_top_products、member_expiring_benefits 等工具。">
+      <div class="content">
+        <h2>测试与发布：沙箱试调</h2>
+        <div class="two-col">
+          <div>
+            <h3>发布记录</h3>
+            <p>记录每个 MCP 资产的版本、状态、测试时间、发布时间、发布说明。</p>
+            <p style="margin-top:1rem">示例：</p>
+            <ul>
+              <li>sales_top_products v1.2.0：已发布，新增门店筛选和 TopN 参数</li>
+              <li>member_expiring_benefits v1.1.0：已发布，新增过期权益提醒</li>
+              <li>store_service_kb v0.9.0：测试通过，等待客户发布窗口</li>
+            </ul>
+          </div>
+          <div>
+            <h3>沙箱试调</h3>
+            <div class="code-block">
+              选择工具 → 运行试调 → 查看结果<br><br>
+              sales_top_products:<br>
+              { date_range: "month", top_n: 8 }<br><br>
+              member_expiring_benefits:<br>
+              { member_id: "M10001" }<br><br>
+              结果会记录到 call_events，<br>
+              用于统计调用量和成功率。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="网关与治理是平台的核心竞争力。按客户/项目配置认证、授权、限流、脱敏、审计。">
+      <div class="content">
+        <h2>网关与治理：安全可控</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="icon">🔑</div>
+            <h3>认证与授权</h3>
+            <p>支持 API Key、JWT、OAuth、mTLS 等多种认证模式，按项目和调用方限定授权范围。</p>
+          </div>
+          <div class="card">
+            <div class="icon">⏱️</div>
+            <h3>限流策略</h3>
+            <p>可按客户、项目、应用设置 RPM，如零售 600 rpm、金融 60 rpm、制造 120 rpm。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🎭</div>
+            <h3>字段脱敏</h3>
+            <p>手机号、会员 ID、订单金额、身份证号、工号等敏感字段可按策略自动脱敏。</p>
+          </div>
+          <div class="card">
+            <div class="icon">📋</div>
+            <h3>调用审计</h3>
+            <p>每次调用记录 caller、trace_id、状态、耗时、业务结果，满足合规要求。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="使用统计页面展示调用量、成功率、平均响应、效果事件。调用审计表格可以看到每一次调用的明细。">
+      <div class="content">
+        <h2>使用统计：效果可观测</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <h3>核心指标</h3>
+            <ul>
+              <li>调用量：按调用事件统计</li>
+              <li>成功率：成功 / 总调用</li>
+              <li>平均响应：按日志统计毫秒数</li>
+              <li>效果事件：领券、核销、转化等业务动作</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>调用审计</h3>
+            <div class="code-block">
+              时间 | MCP | 调用方 | 状态 | 耗时 | trace_id<br><br>
+              2026-07-07 | sales_top_products | WeCom | success | 120ms | trace_abc123<br>
+              2026-07-07 | member_expiring_benefits | Service Agent | error | 240ms | trace_def456
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="计费管理形成商业闭环。实施费、年费/能力包、按调用量/效果计费，三种模式并存。">
+      <div class="content">
+        <h2>计费管理：商业闭环</h2>
+        <div class="grid grid-3">
+          <div class="card">
+            <div class="icon">🛠️</div>
+            <h3>实施费</h3>
+            <p>一次性项目交付费用，如美佳零售 ¥68,000、安和物业 ¥45,000。</p>
+          </div>
+          <div class="card">
+            <div class="icon">📅</div>
+            <h3>年费 / 能力包</h3>
+            <p>按年订阅 MCP 能力，如美佳零售年度能力包 ¥98,000。</p>
+          </div>
+          <div class="card">
+            <div class="icon">📊</div>
+            <h3>调用量 / 效果费</h3>
+            <p>按实际调用量或业务效果计费，如美佳零售 7 月效果费 ¥12,680（28,642 次调用）。</p>
+          </div>
+        </div>
+        <div class="metric-row" style="margin-top:2rem">
+          <div class="metric"><div class="value">¥178,680</div><div class="label">已确认 / 待确认收入</div></div>
+          <div class="metric"><div class="value">¥88,800</div><div class="label">待确认年费 & 效果费</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="客户登录后进入客户侧交付后台，只能看到自有项目、资产、调用效果、交付文件。这体现了多租户隔离。">
+      <div class="content">
+        <h2>客户侧：交付门户</h2>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="icon">👤</div>
+            <h3>数据隔离</h3>
+            <p>每个客户账号只能查看自己的项目、MCP 资产、调用记录、计费记录和交付文件。</p>
+          </div>
+          <div class="card">
+            <div class="icon">📁</div>
+            <h3>文件下载</h3>
+            <p>配置包、测试报告、调用日志 CSV、效果复盘报告、知识库导出，客户可自助下载。</p>
+          </div>
+        </div>
+        <div class="quote" style="margin-top:2rem">
+          同一个后台，两种视角：管理员看全局运营台，客户看专属交付门户。所有 API 都通过 customer_id 做数据范围隔离。
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="技术亮点总结：MCP 协议、多租户隔离、低代码资产定义、网关治理、效果观测。">
+      <div class="content">
+        <h2>技术亮点</h2>
+        <div class="grid grid-3">
+          <div class="card">
+            <div class="icon">🔗</div>
+            <h3>标准协议</h3>
+            <p>基于 MCP 协议封装能力，未来可无缝接入支持 MCP 的任意大模型或 Agent 框架。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🏢</div>
+            <h3>多租户隔离</h3>
+            <p>平台用户 + 客户 + 项目 + 资产四级模型，所有查询都按 customer_id 范围过滤。</p>
+          </div>
+          <div class="card">
+            <div class="icon">⚡</div>
+            <h3>低代码定义</h3>
+            <p>一个 MCP 资产只需要名称、能力描述、版本、端点、工具列表即可注册上线。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🛡️</div>
+            <h3>企业级治理</h3>
+            <p>认证、授权、限流、脱敏、审计五位一体，满足金融、制造等敏感行业要求。</p>
+          </div>
+          <div class="card">
+            <div class="icon">📈</div>
+            <h3>效果可观测</h3>
+            <p>调用事件记录业务结果，支撑调用量、成功率、效果事件多维分析。</p>
+          </div>
+          <div class="card">
+            <div class="icon">🔄</div>
+            <h3>全生命周期</h3>
+            <p>草稿 → 测试 → 发布 → 计费 → 交付，覆盖 MCP 资产的完整生命周期。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="结尾：MCP Forge 的下一步规划。短期聚焦零售和制造落地，中期扩展到更多行业，长期成为企业 AI 能力中台。">
+      <div class="content" style="text-align:center">
+        <h2 class="gradient-text">下一步：从 POC 到产品化</h2>
+        <div class="flow" style="margin-top:2rem">
+          <div class="flow-step"><div style="font-size:1.5rem">1️⃣</div><div>零售 & 制造<br>场景落地</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div style="font-size:1.5rem">2️⃣</div><div>金融 & 物业<br>规模化复制</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step"><div style="font-size:1.5rem">3️⃣</div><div>企业 AI<br>能力中台</div></div>
+        </div>
+        <div class="quote" style="max-width:800px; margin:3rem auto 0; text-align:center; border:none; padding:0; font-style:normal;">
+          MCP Forge 让企业不再为每个 AI 场景重复造轮子，<br>
+          而是把业务能力沉淀为可复用、可治理、可计费的 MCP 资产。
+        </div>
+        <p style="margin-top:2rem"><span class="badge">Demo 地址：http://localhost:3100/admin</span></p>
+      </div>
+    </div>
+
+    <div class="slide" data-notes="感谢页。可以留下 QA 环节。">
+      <div class="content" style="text-align:center">
+        <h1 class="gradient-text">谢谢</h1>
+        <h2 style="margin-top:1rem">MCP Forge · 企业 MCP 打造与治理平台</h2>
+        <p style="margin-top:2rem">欢迎提问与交流</p>
+        <div class="customer-strip" style="margin-top:3rem">
+          <div class="customer-pill"><span class="dot" style="background:#22c55e"></span>美佳零售集团</div>
+          <div class="customer-pill"><span class="dot" style="background:#3b82f6"></span>华智制造</div>
+          <div class="customer-pill"><span class="dot" style="background:#f59e0b"></span>鑫融金服</div>
+          <div class="customer-pill"><span class="dot" style="background:#14b8a6"></span>安和物业</div>
+          <div class="customer-pill"><span class="dot" style="background:#a855f7"></span>知行教育</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-number"><span id="current">1</span> / <span id="total">18</span></div>
+  <div class="progress" id="progress" style="width:0%"></div>
+  <div class="nav">
+    <button id="prevBtn" title="上一页">◀</button>
+    <button id="nextBtn" title="下一页">▶</button>
+    <button id="notesBtn" title="演讲备注">📝</button>
+  </div>
+  <div class="notes" id="notesPanel" style="display:none">
+    <strong>演讲备注</strong>
+    <div id="notesText"></div>
+  </div>
+
+  <script>
+    const slides = document.querySelectorAll('.slide');
+    const total = slides.length;
+    let current = 0;
+    document.getElementById('total').textContent = total;
+
+    function updateSlide() {
+      slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev');
+        if (index === current) slide.classList.add('active');
+        else if (index < current) slide.classList.add('prev');
+      });
+      document.getElementById('current').textContent = current + 1;
+      document.getElementById('progress').style.width = `${((current + 1) / total) * 100}%`;
+      document.getElementById('notesText').textContent = slides[current].dataset.notes || '';
+    }
+
+    function next() { if (current < total - 1) { current++; updateSlide(); } }
+    function prev() { if (current > 0) { current--; updateSlide(); } }
+
+    document.getElementById('nextBtn').addEventListener('click', next);
+    document.getElementById('prevBtn').addEventListener('click', prev);
+    document.getElementById('notesBtn').addEventListener('click', () => {
+      const panel = document.getElementById('notesPanel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+      if (e.key === 'n') {
+        const panel = document.getElementById('notesPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+
+    updateSlide();
+  </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# MCP Forge · Docker Compose (开发模式)
+# 挂载本地源码用于实时开发调试，不构建镜像
+# 用法：docker compose -f docker-compose.dev.yml up -d
+
+services:
+  mcp-forge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-forge-dev
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+      - "3458:3458"
+    volumes:
+      # 挂载源码（开发热重载）
+      - ./server:/app/server
+      - ./demo-server:/app/demo-server
+      - ./admin:/app/admin
+      - ./public:/app/public
+      - ./docker-entrypoint.js:/app/docker-entrypoint.js
+      # 数据持久化
+      - mcp-forge-dev-db:/app/data
+      - mcp-forge-dev-logs:/app/logs
+    environment:
+      - NODE_ENV=development
+      - SERVER_PORT=3100
+      - DEMO_PORT=3458
+      - DB_PATH=/app/data/mcp_forge.db
+    command: ["node", "docker-entrypoint.js"]
+
+volumes:
+  mcp-forge-dev-db:
+    name: mcp-forge-dev-db
+  mcp-forge-dev-logs:
+    name: mcp-forge-dev-logs

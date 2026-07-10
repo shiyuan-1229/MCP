@@ -1,0 +1,39 @@
+﻿# MCP Forge Docker Compose
+# 一键启动主服务、Demo 服务和数据持久化
+
+services:
+  mcp-forge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-forge
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+      - "3458:3458"
+    volumes:
+      - mcp-forge-db:/app/data
+      - mcp-forge-logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - SERVER_PORT=3100
+      - DEMO_PORT=3458
+      - DB_PATH=/app/data/mcp_forge.db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3100/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+volumes:
+  mcp-forge-db:
+    name: mcp-forge-db
+  mcp-forge-logs:
+    name: mcp-forge-logs

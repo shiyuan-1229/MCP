@@ -1,0 +1,405 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Forge - 业务资料 -> MCP 资产生成工厂</title>
+  <link rel="stylesheet" href="/admin/assets/styles.css">
+</head>
+<body>
+  <div id="login" class="login-shell">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="brand-row">
+        <img src="/admin/brand-icon.png" alt="MCP Forge" onerror="this.style.display='none'">
+        <div>
+          <h1 id="loginTitle">MCP Forge</h1>
+          <p>业务资料 -> MCP 资产生成工厂 · 面向交付的企业 MCP 生产台</p>
+        </div>
+      </div>
+      <div class="role-hint">
+        <span>工厂侧：围绕业务资料整理、OpenAPI 草案生成、Tool 装配、MCP 资产封装与交付治理展开。</span>
+        <span>客户侧：查看已交付 MCP、实际调用效果、交付资料和运行说明。</span>
+        <span>下方行业账号仅用于展示业务资料如何进入工厂并沉淀为可交付 MCP 资产。</span>
+      </div>
+      <label><span>账号</span><input id="loginUser" autocomplete="username" value="admin"></label>
+      <label><span>密码</span><input id="loginPass" type="password" autocomplete="current-password" value="admin123"></label>
+      <button id="loginBtn" type="button" class="primary-btn">进入工厂</button>
+      <p id="loginError" class="form-error" role="alert"></p>
+      <div class="quick-accounts" aria-label="示例账号">
+        <button type="button" data-user="admin" data-pass="admin123">平台管理员</button>
+        <button type="button" data-user="meijia" data-pass="store123">美佳零售</button>
+        <button type="button" data-user="hzm" data-pass="123456">华智制造</button>
+        <button type="button" data-user="xrf" data-pass="123456">鑫融金融</button>
+        <button type="button" data-user="ahwy" data-pass="123456">安和物业</button>
+        <button type="button" data-user="zxjy" data-pass="123456">知行教育</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="side-brand"><strong>MCP Forge</strong><span id="roleLabel">MCP 资产生成工厂</span></div>
+      <nav id="nav" aria-label="工厂导航"></nav>
+      <button id="logoutBtn" type="button" class="ghost-btn logout-btn">退出登录</button>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="pageEyebrow">业务资料 -> MCP 资产生成工厂的全链路看板</p>
+          <h2 id="pageTitle">生成总览</h2>
+        </div>
+        <div class="user-pill"><span class="status-dot"></span><span id="currentUser">未登录</span></div>
+      </header>
+
+      <section id="summary" class="page active" data-title="生成总览" data-eyebrow="资产生成全链路漏斗 · 产能趋势 · 动态时间线">
+        <div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>厂长驾驶舱</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="summaryCards" class="metric-grid"></div></div>
+        <article class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><h3>资产生成漏斗</h3><small class="muted-line">点击各阶段可跳转到对应页面</small></div>
+          <div id="generationFunnel" class="funnel-container" style="padding:16px;display:grid;gap:8px"></div>
+        </article>
+        <article class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><h3>核心链路看板</h3><small class="muted-line">业务资料 → OpenAPI → Tools → MCP Server → 测试发布 → 交付管理</small></div>
+          <div id="generationFlowBoard" class="metric-grid"></div>
+          <div class="table-wrap" style="margin-top:14px"><table class="pipeline-table"><thead><tr><th>客户 / 项目</th><th>业务资料</th><th>OpenAPI</th><th>Tools</th><th>MCP Server</th><th>测试发布</th><th>交付资料</th><th>当前阶段</th></tr></thead><tbody id="projectPipelineRows"></tbody></table></div>
+        </article>
+        <div class="content-grid two-col">
+          <article class="panel"><div class="panel-head"><h3>项目与资产健康</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="projectControls" class="project-controls"></div><div class="table-wrap"><table class="health-table"><thead><tr><th>客户 / 项目</th><th>阶段 / 环境</th><th>进度</th><th>负责人</th><th>里程碑</th><th>最近发布</th><th>证书到期</th><th>调用异常</th><th>计费状态</th><th>健康状态</th></tr></thead><tbody id="projectRows"></tbody></table></div></article>
+          <article class="panel"><div class="panel-head"><h3>最近生成动态</h3></div><div id="activityList" class="event-list"></div></article>
+        </div>
+      </section>
+
+      <section id="intake" class="page" data-title="资料接入" data-eyebrow="上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
+        <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
+          <div class="table-wrap">
+            <table class="intake-table">
+              <thead><tr><th>资料名称</th><th>所属项目</th><th>类型</th><th>认证方式</th><th>接入状态</th><th>识别进度</th><th>产出物</th><th>操作</th></tr></thead>
+              <tbody id="sourceRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="content-grid two-col">
+          <article class="panel">
+            <div class="panel-head"><h3>资料接入引导</h3></div>
+            <div class="card-list">
+              <div class="info-card"><h4>支持的资料格式</h4><p>Swagger JSON / YAML、Postman Collection、SQL DDL、Excel 字段说明、PDF 业务文档、Markdown FAQ</p></div>
+              <div class="info-card"><h4>资料越完整，产出越精准</h4><p>提供字段含义、示例数据、业务规则后，AI 识别的 OpenAPI 草案准确率可提升 60% 以上。</p></div>
+              <div class="info-card"><h4>识别流程</h4><p>导入资料 → AI 自动识别接口 → 生成 OpenAPI 草案 → 确认后进入 Tool 装配</p></div>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>识别进度看板</h3></div>
+            <div id="intakeProgressBoard" class="metric-grid"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="recognition" class="page" data-title="接口识别" data-eyebrow="AI 将业务资料识别为 OpenAPI 3.0 接口草案，可确认并下载">
+        <div id="recognitionStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div class="content-grid two-col" style="margin-bottom:14px">
+          <article class="panel">
+            <div class="panel-head"><h3>OpenAPI 草案列表</h3><small class="muted-line">选择草案查看详情</small></div>
+            <div id="openapiSpecList" class="card-list"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>接口草案详情</h3><div id="openapiDetailActions" style="display:flex;gap:8px"></div></div>
+            <div id="openapiSpecDetail" style="padding:14px"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tooling" class="page" data-title="Tool 映射" data-eyebrow="OpenAPI 端点映射为 MCP Tool + 安全规则配置">
+        <div id="toolingStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><h3>Tool 映射看板</h3><small class="muted-line">接口端点 → MCP Tool → 安全规则</small></div>
+          <div class="metric-grid" id="toolingSummary" style="padding:14px"></div>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><h3>Tool 映射清单</h3><small class="muted-line">每个 MCP 资产的 Tool 来源、参数和安全配置</small></div>
+          <div id="toolMappingList" class="card-list"></div>
+        </article>
+      </section>
+
+      <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 8 步生成时间线">
+        <div id="assetsStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div class="content-grid two-col">
+          <article class="panel"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>能力主题</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
+          <article class="panel">
+            <div class="panel-head"><h3>资产规则预览</h3><small class="muted-line">查看认证方式、限流策略和脱敏处理</small></div>
+            <div id="securityPreview" class="card-list"></div>
+          </article>
+        </div>
+        <article class="panel" style="margin-top:20px">
+          <div class="panel-head"><h3>8 步生成时间线</h3><small class="muted-line">每个 MCP 资产从资料接入到生产发布的完整轨迹</small></div>
+          <div id="timelineList" class="timeline-list"></div>
+        </article>
+      </section>
+
+      <section id="publish" class="page" data-title="测试发布" data-eyebrow="沙箱试调 · 灰度发布 · 版本管理 · 回滚">
+        <div id="publishStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div class="content-grid two-col">
+          <article class="panel">
+            <div class="panel-head"><h3>验证发布清单</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+            <div id="publishControls" class="project-controls"></div>
+            <div id="publishSummary" class="publish-summary"></div>
+            <div class="table-wrap">
+              <table class="publish-table">
+                <thead><tr><th>MCP 资产</th><th>版本</th><th>状态</th><th>环境</th><th>验证时间</th><th>发布时间</th><th>备注</th><th>操作</th></tr></thead>
+                <tbody id="releaseRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="panel"><div class="panel-head"><h3>沙箱联调台</h3><small class="muted-line">多行业 MCP 资产 · JSON-RPC 2.0 协议</small></div><div class="simulate-box"><select id="simulateTool"><option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option></select><button id="simulateBtn" type="button" class="primary-btn">执行调用</button><div id="simulateResult" style="background:#f8fafc;border-radius:8px;padding:14px;min-height:60px;font-size:13px;color:#64748b">选择一个 MCP 资产并执行调用，查看 JSON-RPC 2.0 响应</div></div></article>
+        </div>
+      </section>
+
+      <section id="delivery" class="page" data-title="交付管理" data-eyebrow="配置包 · 测试报告 · 调用日志 · 效果报告下载">
+        <div id="deliveryStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <article class="panel">
+          <div class="panel-head"><h3>交付资料清单</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+          <div id="deliverableControls" class="project-controls"></div>
+          <div id="deliverableSummary" class="deliverable-summary"></div>
+          <div class="table-wrap">
+            <table class="deliverable-table">
+              <thead><tr><th>资料名称</th><th>所属项目</th><th>资料类型</th><th>状态</th><th>最近更新</th><th>说明</th><th>操作</th></tr></thead>
+              <tbody id="deliverableRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="governance" class="page" data-title="治理与统计" data-eyebrow="网关策略 · 调用监控 · 审计日志 · 使用统计">
+        <article class="panel" style="margin-bottom:20px">
+          <div class="panel-head"><h3>运行成效总览</h3></div>
+          <div class="tabs" id="accessTabs">
+            <button type="button" class="tab-btn active" data-tab="access-overview" onclick="switchAccessTab('access-overview')">总览</button>
+            <button type="button" class="tab-btn" data-tab="access-test" onclick="switchAccessTab('access-test')">验证</button>
+            <button type="button" class="tab-btn" data-tab="access-health" onclick="switchAccessTab('access-health')">健康</button>
+            <button type="button" class="tab-btn" data-tab="access-audit" onclick="switchAccessTab('access-audit')">变更</button>
+            <button type="button" class="tab-btn" data-tab="access-webhook" onclick="switchAccessTab('access-webhook')">回调</button>
+          </div>
+          <div id="access-overview" class="tab-panel active">
+            <div class="content-grid access-overview-grid">
+              <article class="panel"><div class="panel-head"><h3>交付运行概况</h3></div><div id="accessOverview"></div></article>
+              <article class="panel"><div class="panel-head"><h3>客户接入台账</h3><button id="createAccessBtn" type="button" class="primary-btn small admin-only">新增接入项</button></div>
+                <div class="table-wrap"><table class="access-table"><thead><tr><th>客户 / 项目</th><th>接入项</th><th>类型</th><th>地址 / 范围</th><th>环境</th><th>证书到期</th><th>最近检查</th><th>状态</th><th class="admin-only">操作</th></tr></thead><tbody id="accessRows"></tbody></table></div>
+              </article>
+            </div>
+          </div>
+          <div id="access-test" class="tab-panel">
+            <article class="panel">
+              <div class="panel-head"><h3>接入验证</h3></div>
+              <div class="simulate-box" style="display:grid;gap:12px;padding:16px">
+                <select id="accessTestConfig"><option value="">- 请选择接入项 -</option></select>
+                <button id="accessTestBtn" type="button" class="primary-btn" disabled>开始验证</button>
+                <pre id="accessTestResult" style="min-height:120px">选择接入项后可查看验证结果</pre>
+              </div>
+            </article>
+          </div>
+          <div id="access-health" class="tab-panel">
+            <article class="panel">
+              <div class="panel-head"><h3>健康巡检</h3><button id="refreshHealthBtn" type="button" class="ghost-btn" data-refresh="health">刷新</button></div>
+              <div class="table-wrap"><table><thead><tr><th>检查时间</th><th>接入项</th><th>状态</th><th>延迟</th><th>状态码</th><th>认证结果</th><th>Trace ID</th></tr></thead><tbody id="accessHealthRows"></tbody></table></div>
+            </article>
+          </div>
+          <div id="access-audit" class="tab-panel">
+            <article class="panel">
+              <div class="panel-head"><h3>变更记录</h3></div>
+              <div class="table-wrap"><table><thead><tr><th>变更时间</th><th>接入项</th><th>变更字段</th><th>旧值</th><th>新值</th><th>操作人</th></tr></thead><tbody id="accessAuditRows"></tbody></table></div>
+            </article>
+          </div>
+          <div id="access-webhook" class="tab-panel">
+            <article class="panel">
+              <div class="panel-head"><h3>回调记录</h3></div>
+              <div class="table-wrap"><table><thead><tr><th>创建时间</th><th>接入项</th><th>事件类型</th><th>URL</th><th>状态</th><th>重试次数</th><th>状态码</th><th>错误信息</th></tr></thead><tbody id="accessWebhookRows"></tbody></table></div>
+            </article>
+          </div>
+        </article>
+        <div class="content-grid two-col">
+          <article class="panel">
+            <div class="panel-head"><h3>资产规则清单</h3><button id="createPolicyBtn" type="button" class="primary-btn small admin-only">新增规则</button></div>
+            <div class="table-wrap"><table><thead><tr><th>规则名称</th><th>所属项目</th><th>认证方式</th><th>限流</th><th>脱敏规则</th><th class="admin-only">编辑</th><th class="admin-only">启停</th><th class="admin-only">删除</th></tr></thead><tbody id="policyRows"></tbody></table></div>
+            <article class="panel" style="margin-top:14px"><div class="panel-head"><h3>规则变更记录</h3></div><div class="table-wrap"><table><thead><tr><th>变更时间</th><th>规则</th><th>字段</th><th>旧值</th><th>新值</th><th>操作人</th></tr></thead><tbody id="policyChangeRows"></tbody></table></div></article>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>调用成效看板</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+            <div id="usageControls" class="project-controls"></div>
+            <div id="usageSummary" class="usage-summary"></div>
+            <div class="table-wrap">
+              <table class="usage-table">
+                <thead><tr><th>调用时间</th><th>客户 / 项目</th><th>MCP 资产</th><th>调用方</th><th>业务结果</th><th>状态</th><th>耗时</th><th>Trace ID</th><th>操作</th></tr></thead>
+                <tbody id="eventRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="settings" class="page" data-title="设置" data-eyebrow="客户管理 · 项目管理 · 计费配置 · 知识库 · API 凭证">
+        <div class="content-grid two-col">
+          <article class="panel">
+            <div class="panel-head"><h3>API 凭证管理</h3><button id="createApiKeyBtn" type="button" class="primary-btn small admin-only" onclick="createApiKey()">创建 API Key</button></div>
+            <p class="muted-line" style="margin:0 0 10px">每个接入方需要独立 API Key，用于 MCP 调用鉴权和调用追踪。支持设置权限范围和有效期。</p>
+            <div class="table-wrap"><table><thead><tr><th>凭证名称</th><th>所属客户</th><th>Key ID</th><th>类型</th><th>环境</th><th>权限范围</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead><tbody id="apiKeyRows"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>知识资料清单</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+            <div id="knowledgeControls" class="project-controls"></div>
+            <div id="knowledgeSummary" class="knowledge-summary"></div>
+            <div class="table-wrap">
+              <table class="knowledge-table">
+                <thead><tr><th>客户 / 项目</th><th>知识资料</th><th>关联 MCP</th><th>资料状态</th><th>索引时间</th><th>切片数量</th><th>最近更新</th><th>操作</th></tr></thead>
+                <tbody id="knowledgeRows"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h3>结算资料清单</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+            <div id="billingControls" class="project-controls"></div>
+            <div id="billingSummary" class="billing-summary"></div>
+            <div class="table-wrap">
+              <table class="billing-table">
+                <thead><tr><th>客户</th><th>项目</th><th>结算项</th><th>账期</th><th>金额</th><th>调用量</th><th>计费类型</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="billingRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+            <section id="my-assets" class="page" data-title="我的 MCP 资产" data-eyebrow="已交付资产的运行总览">
+        <div id="customerDashboardCards" class="metric-grid"></div>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>我的 MCP 资产</h3></div><div id="customerAssetCards" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>快捷入口</h3></div><div id="customerQuickActions" class="card-list"></div></article>
+        </div>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>资产运行焦点</h3></div><div id="customerAssetSpotlight" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>最近交付版本</h3></div><div id="customerReleaseTimeline" class="card-list"></div></article>
+        </div>
+      </section>
+
+            <section id="my-usage" class="page" data-title="调用统计" data-eyebrow="近 30 天调用趋势与成功率">
+        <div id="customerUsageCards" class="metric-grid"></div>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>近 30 天调用趋势</h3></div><div id="customerUsageTrendBars" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>调用观察</h3></div><div id="customerUsageHighlights" class="card-list"></div></article>
+        </div>
+        <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>最近调用记录</h3></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>MCP 资产</th><th>业务结果</th><th>状态</th><th>耗时</th><th>Trace ID</th></tr></thead><tbody id="customerUsageRows"></tbody></table></div></article>
+      </section>
+
+            <section id="my-billing" class="page" data-title="账单管理" data-eyebrow="当期账单与历史明细">
+        <div id="customerBillingSummary" class="panel"></div>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>账单观察</h3></div><div id="customerBillingHighlights" class="card-list"></div></article>
+          <div id="customerBillingList"></div>
+        </div>
+      </section>
+
+            <section id="my-deliverables" class="page" data-title="交付物下载" data-eyebrow="配置包、报告、日志与复盘">
+        <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article></article>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>交付建议</h3></div><div id="customerDeliverableHighlights" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>交付物下载</h3></div><div class="table-wrap"><table><thead><tr><th>文件</th><th>所属项目</th><th>类型</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
+        </div>
+      </section>
+
+            <section id="my-access" class="page" data-title="接入配置" data-eyebrow="地址、证书、鉴权方式与运行说明">
+        <article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><div id="customerAccessSummary" class="metric-grid"></div></article></article>
+        <div class="content-grid two-col" style="margin-top:20px">
+          <article class="panel"><div class="panel-head"><h3>使用前须知</h3></div><div id="customerAccessGuideList" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>接入配置</h3></div><div id="customerAccessList" class="card-list"></div></article>
+        </div>
+      </section>
+
+      <div id="accessGuideOverlay" class="modal-overlay" style="display:none">
+        <div class="modal-card" style="max-width:720px;max-height:90vh;overflow-y:auto">
+          <div class="modal-head"><h3 id="accessGuideTitle">接入指引</h3><button onclick="closeAccessGuide()" class="ghost-btn">关闭</button></div>
+          <div id="accessGuideContent" class="modal-body"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="projectDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="projectDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">项目详情</p>
+        <h3 id="projectDrawerTitle">项目详情</h3>
+      </div>
+      <button id="projectDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="projectDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="knowledgeDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="knowledgeDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">知识资料详情</p>
+        <h3 id="knowledgeDrawerTitle">知识资料详情</h3>
+      </div>
+      <button id="knowledgeDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="knowledgeDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="publishDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="publishDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">发布详情</p>
+        <h3 id="publishDrawerTitle">发布详情</h3>
+      </div>
+      <button id="publishDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="publishDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="usageDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="usageDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">调用详情</p>
+        <h3 id="usageDrawerTitle">调用详情</h3>
+      </div>
+      <button id="usageDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="usageDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="billingDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="billingDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">账单详情</p>
+        <h3 id="billingDrawerTitle">账单详情</h3>
+      </div>
+      <button id="billingDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="billingDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="deliverableDrawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="deliverableDrawer" class="project-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">交付物详情</p>
+        <h3 id="deliverableDrawerTitle">交付物详情</h3>
+      </div>
+      <button id="deliverableDrawerClose" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <div id="deliverableDrawerContent" class="drawer-body"></div>
+  </aside>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script type="module" src="/admin/assets/app.js?v=27"></script>
+</body>
+</html>
+
+
+

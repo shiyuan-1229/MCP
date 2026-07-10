@@ -1,0 +1,91 @@
+
+&lt;!DOCTYPE html&gt;
+&lt;html lang="zh-CN"&gt;
+&lt;head&gt;
+&lt;meta charset="UTF-8"&gt;
+&lt;title&gt;操作日志 - MCP Forge&lt;/title&gt;
+&lt;style&gt;
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding:20px; max-width:1200px; margin:0 auto; background:#f8fafc; color:#1e293b; }
+  h1 { color:#4f46e5; margin-bottom:8px; }
+  .sub { color:#64748b; margin-bottom:20px; font-size:14px; }
+  .card { background:white; border-radius:12px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05); margin-bottom:20px; }
+  table { width:100%; border-collapse: collapse; }
+  th, td { padding:10px; text-align:left; border-bottom:1px solid #e2e8f0; }
+  th { background:#f8fafc; font-size:13px; font-weight:600; color:#475569; }
+  td { font-size:14px; }
+  .btn { padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:600; background:#4f46e5; color:white; transition:all 0.2s; }
+  .btn:hover { background:#4338ca; }
+  .tag { display:inline-block; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:600; }
+  .tag.green { background:#10b98115; color:#10b981; border:1px solid #10b98130; }
+  .tag.red { background:#ef444415; color:#ef4444; border:1px solid #ef444430; }
+  .tag.yellow { background:#f59e0b15; color:#f59e0b; border:1px solid #f59e0b30; }
+  .tag.blue { background:#4f46e515; color:#4f46e5; border:1px solid #4f46e530; }
+  .row { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+  .time { color:#64748b; font-family:monospace; font-size:13px; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;📝 操作日志&lt;/h1&gt;
+  &lt;p class="sub"&gt;系统操作审计日志 · &lt;span id="logTime"&gt;&lt;/span&gt;&lt;/p&gt;
+
+  &lt;div class="card"&gt;
+    &lt;div class="row" style="margin-bottom:12px"&gt;
+      &lt;span style="font-weight:600"&gt;最近操作记录&lt;/span&gt;
+      &lt;button class="btn" onclick="loadLogs()"&gt;🔄 刷新&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;table&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;
+          &lt;th style="width:180px"&gt;时间&lt;/th&gt;
+          &lt;th style="width:120px"&gt;操作人&lt;/th&gt;
+          &lt;th style="width:140px"&gt;操作类型&lt;/th&gt;
+          &lt;th&gt;操作内容&lt;/th&gt;
+          &lt;th style="width:120px"&gt;IP&lt;/th&gt;
+        &lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody id="logTableBody"&gt;
+        &lt;tr&gt;&lt;td colspan="5" style="text-align:center;padding:30px;color:#64748b"&gt;正在加载...&lt;/td&gt;&lt;/tr&gt;
+      &lt;/tbody&gt;
+    &lt;/table&gt;
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    // 简单的 getJSON 实现
+    async function getJSON(url) {
+      const token = localStorage.getItem('mcp_token');
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(url, { headers });
+      if (res.ok) return res.json();
+      throw new Error('请求失败');
+    }
+
+    async function loadLogs() {
+      try {
+        const logs = await getJSON('/admin/operation-logs');
+        document.getElementById('logTime').textContent = '最后更新：' + new Date().toLocaleTimeString('zh-CN');
+        const tb = document.getElementById('logTableBody');
+        
+        tb.innerHTML = logs.map(log =&gt; {
+          const time = new Date(log.created_at).toLocaleString('zh-CN');
+          let typeColor = 'blue';
+          if (log.operation_type.includes('删除')) typeColor = 'red';
+          if (log.operation_type.includes('修改')) typeColor = 'yellow';
+          if (log.operation_type.includes('新增')) typeColor = 'green';
+          return `&lt;tr&gt;
+            &lt;td class="time"&gt;${time}&lt;/td&gt;
+            &lt;td style="font-weight:600"&gt;${log.operator_name || log.operator_id}&lt;/td&gt;
+            &lt;td&gt;&lt;span class="tag ${typeColor}"&gt;${log.operation_type}&lt;/span&gt;&lt;/td&gt;
+            &lt;td style="font-size:13px;color:#334155"&gt;${log.operation_content || '-'}&lt;/td&gt;
+            &lt;td style="font-size:12px;color:#64748b;font-family:monospace"&gt;${log.ip || '-'}&lt;/td&gt;
+          &lt;/tr&gt;`;
+        }).join('') || '&lt;tr&gt;&lt;td colspan="5" style="text-align:center;padding:30px;color:#64748b"&gt;暂无操作日志，请先登录并进行一些操作来生成测试数据&lt;/td&gt;&lt;/tr&gt;';
+      } catch(e) {
+        document.getElementById('logTableBody').innerHTML = `&lt;tr&gt;&lt;td colspan="5" style="text-align:center;padding:30px;color:#ef4444"&gt;加载失败：${e.message}。请先去 &lt;a href="/admin" style="color:#4f46e5;text-decoration:underline"&gt;/admin&lt;/a&gt; 登录&lt;/td&gt;&lt;/tr&gt;`;
+      }
+    }
+
+    loadLogs();
+  &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;

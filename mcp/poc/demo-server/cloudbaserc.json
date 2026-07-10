@@ -1,0 +1,17 @@
+{
+  "envId": "mcp-demo",
+  "functionRoot": "./",
+  "functions": [
+    {
+      "name": "mcp-server",
+      "runtime": "Nodejs18",
+      "entryFile": "server.js",
+      "handler": "main",
+      "memorySize": 256,
+      "timeout": 10,
+      "envVariables": {
+        "API_KEY": "demo-key-2026"
+      }
+    }
+  ]
+}

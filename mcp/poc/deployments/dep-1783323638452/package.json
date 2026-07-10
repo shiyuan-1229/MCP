@@ -1,0 +1,14 @@
+{
+  "name": "鲜多多生鲜·龙口西店-MCP",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP Forge 自动生成的零售门店 AI 助手",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "express": "^4.21.0"
+  }
+}

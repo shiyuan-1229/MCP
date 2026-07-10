@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MCP Forge · 数据同步可视化</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --p: #4F46E5; --pl: #818CF8; --pd: #3730A3;
+  --s: #10B981; --sl: #34D399;
+  --w: #F59E0B; --d: #EF4444;
+  --bg: #F8FAFC; --c: #FFF; --t: #1E293B; --tl: #64748B; --b: #E2E8F0;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--t);
+  padding: 24px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; }
+
+h1 {
+  font-size: 22px; font-weight: 700;
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 4px;
+}
+.sub { font-size: 13px; color: var(--tl); margin-bottom: 20px; }
+
+.flow {
+  background: linear-gradient(135deg, #EEF2FF 0%, #FFFFFF 100%);
+  border: 1px solid #C7D2FE;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.node {
+  background: #fff;
+  border: 2px solid var(--b);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+.node.demo { border-color: #07C160; }
+.node.db   { border-color: var(--p); background: linear-gradient(135deg, #EEF2FF 0%, #C7D2FE 100%); }
+.node.admin{ border-color: var(--s); }
+.node .ico { font-size: 28px; margin-bottom: 4px; }
+.node .nm { font-size: 13px; font-weight: 700; }
+.node .ds { font-size: 11px; color: var(--tl); margin-top: 2px; }
+.arrow {
+  font-size: 28px; color: var(--p);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse {
+  0%,100% { transform: translateX(0); opacity: .8; }
+  50%     { transform: translateX(4px); opacity: 1; }
+}
+
+.cards {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  margin-bottom: 20px;
+}
+.card {
+  background: #fff; border: 1px solid var(--b);
+  border-radius: 12px; padding: 14px;
+  transition: all .15s;
+}
+.card:hover { border-color: var(--p); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(79,70,229,.1); }
+.card .num { font-size: 24px; font-weight: 700; color: var(--p); }
+.card .lbl { font-size: 11px; color: var(--tl); margin-top: 2px; }
+.card .chg { font-size: 10px; margin-top: 4px; font-weight: 500; }
+.card .chg.up { color: var(--s); }
+.card .chg.down { color: var(--d); }
+
+.row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;
+  margin-bottom: 16px;
+}
+.panel {
+  background: #fff; border: 1px solid var(--b);
+  border-radius: 12px; padding: 16px;
+}
+.panel h3 {
+  font-size: 13px; font-weight: 600; margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.panel h3 .tag {
+  background: #EEF2FF; color: var(--pd);
+  padding: 2px 8px; border-radius: 6px;
+  font-size: 10px; font-weight: 500;
+}
+.chart-wrap { position: relative; height: 200px; }
+
+.tbl {
+  background: #fff; border: 1px solid var(--b);
+  border-radius: 12px; overflow: hidden;
+}
+.tbl-head {
+  padding: 12px 16px; background: #F1F5F9;
+  font-size: 13px; font-weight: 600;
+  display: flex; justify-content: space-between; align-items: center;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 9px 14px; background: #F8FAFC; font-weight: 600; color: var(--tl); border-bottom: 1px solid var(--b); }
+td { padding: 9px 14px; border-bottom: 1px solid var(--b); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #F8FAFC; }
+.tag-gr { background: #D1FAE5; color: #065F46; padding: 1px 8px; border-radius: 8px; font-size: 10px; font-weight: 500; }
+.tag-yl { background: #FEF3C7; color: #92400E; padding: 1px 8px; border-radius: 8px; font-size: 10px; font-weight: 500; }
+.tag-bl { background: #E0E7FF; color: #3730A3; padding: 1px 8px; border-radius: 8px; font-size: 10px; font-weight: 500; }
+
+.live-bar {
+  position: fixed; bottom: 16px; right: 16px;
+  background: #1E293B; color: #fff;
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 11px; display: flex; align-items: center; gap: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  z-index: 99;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--s);
+  animation: blink 1.5s infinite;
+}
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+
+.demo-controls {
+  background: #fff; border: 1px dashed var(--p);
+  border-radius: 12px; padding: 14px;
+  margin-bottom: 16px;
+  display: flex; gap: 10px; align-items: center;
+}
+.btn {
+  background: var(--p); color: #fff; border: none;
+  padding: 7px 16px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.btn:hover { background: var(--pd); }
+.btn.green { background: var(--s); }
+.btn.green:hover { background: #059669; }
+.btn.warn { background: var(--w); }
+.btn.warn:hover { background: #D97706; }
+.demo-controls input {
+  flex: 1; padding: 7px 12px;
+  border: 1px solid var(--b); border-radius: 8px;
+  font-size: 12px; outline: none;
+}
+.demo-controls input:focus { border-color: var(--p); }
+.demo-controls label { font-size: 12px; color: var(--tl); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>🔄 MCP Forge · 数据同步可视化</h1>
+  <div class="sub">演示 demo-server (3458) 与管理后台 (3100) 共享 SQLite 实时双向打通</div>
+
+  <!-- 数据同步示意图 -->
+  <div class="flow">
+    <div class="node demo">
+      <div class="ico">🤖</div>
+      <div class="nm">Demo MCP Server</div>
+      <div class="ds">端口 3458 · 14 个 Tools</div>
+    </div>
+    <div class="arrow">⟷</div>
+    <div class="node db">
+      <div class="ico">💾</div>
+      <div class="nm">SQLite 共享数据库</div>
+      <div class="ds">mcp_forge.db · 11 张表</div>
+    </div>
+    <div class="arrow">⟷</div>
+    <div class="node admin">
+      <div class="ico">📊</div>
+      <div class="nm">管理后台</div>
+      <div class="ds">端口 3100 · 9 个页面</div>
+    </div>
+  </div>
+
+  <!-- 演示控制台 -->
+  <div class="demo-controls">
+    <label>💡 体验同步：</label>
+    <input id="demoItem" value="可口可乐330ml × 2 + 乐事薯片 × 1 = ¥15.90" />
+    <button class="btn" onclick="createDemoOrder()">➕ 通过 MCP Server 下单</button>
+    <button class="btn warn" onclick="clearDemoData()">🗑 清理测试数据</button>
+    <button class="btn green" onclick="refreshAll()">🔄 刷新数据</button>
+  </div>
+
+  <!-- 顶部统计卡 -->
+  <div class="cards" id="statCards"></div>
+
+  <!-- 三个图表 -->
+  <div class="row">
+    <div class="panel">
+      <h3>📍 各门店订单分布 <span class="tag">实时</span></h3>
+      <div class="chart-wrap"><canvas id="chartStore"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>📡 订单来源占比 <span class="tag">AI vs POS</span></h3>
+      <div class="chart-wrap"><canvas id="chartSource"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>📊 订单状态 <span class="tag">实时</span></h3>
+      <div class="chart-wrap"><canvas id="chartStatus"></canvas></div>
+    </div>
+  </div>
+
+  <!-- 实时订单表 -->
+  <div class="tbl" style="margin-bottom:16px">
+    <div class="tbl-head">
+      <span>🛒 最新订单（共享数据库读取）</span>
+      <span style="color:var(--tl);font-size:11px">每 3 秒自动刷新</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>订单 ID</th><th>门店</th><th>金额</th><th>来源</th><th>状态</th><th>时间</th>
+      </tr></thead>
+      <tbody id="recentOrders"></tbody>
+    </table>
+  </div>
+
+  <!-- 门店列表 -->
+  <div class="tbl">
+    <div class="tbl-head">
+      <span>🏪 门店在线状态</span>
+      <span id="storeCount" style="color:var(--tl);font-size:11px">6 家</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>门店</th><th>地址</th><th>状态</th>
+      </tr></thead>
+      <tbody id="storeList"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="live-bar">
+  <div class="dot"></div>
+  <span>实时同步中 · 最后更新 <span id="lastUpdate">--:--:--</span></span>
+</div>
+
+<script>
+const fmt = n => '¥' + Number(n).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const C_P = '#4F46E5', C_S = '#10B981', C_W = '#F59E0B', C_D = '#EF4444', C_L = '#818CF8';
+let charts = {};
+
+async function fetchData() {
+  const [stats, byStore, bySource, byStatus, recent, stores] = await Promise.all([
+    fetch('/api/sync/stats').then(r => r.json()),
+    fetch('/api/sync/by-store').then(r => r.json()),
+    fetch('/api/sync/by-source').then(r => r.json()),
+    fetch('/api/sync/by-status').then(r => r.json()),
+    fetch('/api/sync/recent-orders').then(r => r.json()),
+    fetch('/api/sync/stores').then(r => r.json()),
+  ]);
+  return { stats, byStore, bySource, byStatus, recent, stores };
+}
+
+function renderCards(stats) {
+  const aiRatio = stats.orders ? Math.round(stats.aiOrders.c / stats.orders * 100) : 0;
+  document.getElementById('statCards').innerHTML = `
+    <div class="card">
+      <div class="num">${stats.storesOnline}/${stats.stores}</div>
+      <div class="lbl">在线门店</div>
+      <div class="chg up">↑ 实时同步</div>
+    </div>
+    <div class="card">
+      <div class="num">${stats.orders}</div>
+      <div class="lbl">订单总数</div>
+      <div class="chg up">${aiRatio}% 来自 AI</div>
+    </div>
+    <div class="card">
+      <div class="num">${fmt(stats.aiOrders.total || 0)}</div>
+      <div class="lbl">AI 订单总额</div>
+      <div class="chg up">↑ 元器直连</div>
+    </div>
+    <div class="card">
+      <div class="num">${stats.products}</div>
+      <div class="lbl">商品数</div>
+      <div class="chg up">SQLite 读取</div>
+    </div>
+    <div class="card">
+      <div class="num">${fmt(stats.billingRevenue || 0)}</div>
+      <div class="lbl">累计收入</div>
+      <div class="chg up">已支付账单</div>
+    </div>
+  `;
+}
+
+function renderChart(canvasId, label, data, type='bar', color=C_P) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  if (charts[canvasId]) charts[canvasId].destroy();
+  charts[canvasId] = new Chart(ctx, {
+    type,
+    data: {
+      labels: data.map(d => d.label),
+      datasets: [{
+        label,
+        data: data.map(d => d.value),
+        backgroundColor: type === 'doughnut'
+          ? [C_P, C_S, C_W, C_D, C_L, '#A78BFA', '#FB7185']
+          : data.map((_, i) => i % 2 ? C_L : C_P),
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: type === 'doughnut', position: 'right', labels: { font: { size: 11 } } } },
+      scales: type === 'doughnut' ? {} : {
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+        x: { ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+function renderRecent(orders) {
+  document.getElementById('recentOrders').innerHTML = orders.map(o => `
+    <tr>
+      <td style="font-family:monospace;font-size:11px">${o.id}</td>
+      <td>${o.store}</td>
+      <td style="font-weight:600">${fmt(o.total)}</td>
+      <td>${o.source}</td>
+      <td><span class="${o.status === '已完成' ? 'tag-gr' : 'tag-yl'}">${o.status}</span></td>
+      <td style="color:var(--tl)">${o.time || '-'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--tl)">暂无订单</td></tr>';
+}
+
+function renderStores(stores) {
+  document.getElementById('storeCount').textContent = `${stores.filter(s => s.online).length}/${stores.length} 在线`;
+  document.getElementById('storeList').innerHTML = stores.map(s => `
+    <tr>
+      <td>🏪 ${s.name}</td>
+      <td style="color:var(--tl)">${s.address || '-'}</td>
+      <td><span class="${s.online ? 'tag-gr' : 'tag-yl'}">${s.online ? '● 在线' : '⚙️ 配置中'}</span></td>
+    </tr>
+  `).join('');
+}
+
+async function refreshAll() {
+  try {
+    const { stats, byStore, bySource, byStatus, recent, stores } = await fetchData();
+    renderCards(stats);
+    renderChart('chartStore', '订单金额', byStore.map(s => ({label: s.store, value: s.total})));
+    renderChart('chartSource', '订单数', bySource.map(s => ({label: s.source, value: s.c})), 'doughnut');
+    renderChart('chartStatus', '订单数', byStatus.map(s => ({label: s.status, value: s.c})), 'bar', C_S);
+    renderRecent(recent);
+    renderStores(stores);
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+  } catch(e) {
+    console.error('刷新失败:', e);
+  }
+}
+
+async function createDemoOrder() {
+  const desc = document.getElementById('demoItem').value;
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ 调用 MCP Tool 中...';
+  try {
+    const r = await fetch('/api/sync/demo-order', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ desc }),
+    });
+    const data = await r.json();
+    if (data.success) {
+      btn.textContent = '✅ 订单 ' + data.order.id + ' 已写入';
+      setTimeout(() => { btn.textContent = '➕ 通过 MCP Server 下单'; btn.disabled = false; }, 1500);
+      refreshAll();
+    } else {
+      btn.textContent = '❌ ' + (data.error || '失败');
+      setTimeout(() => { btn.textContent = '➕ 通过 MCP Server 下单'; btn.disabled = false; }, 1500);
+    }
+  } catch(e) {
+    btn.textContent = '❌ ' + e.message;
+    setTimeout(() => { btn.textContent = '➕ 通过 MCP Server 下单'; btn.disabled = false; }, 1500);
+  }
+}
+
+async function clearDemoData() {
+  if (!confirm('清理所有 SYNC- 前缀的测试订单？')) return;
+  try {
+    const r = await fetch('/api/sync/clear-demo', {method: 'POST'});
+    const data = await r.json();
+    alert('已清理 ' + data.ordersRemoved + ' 条订单');
+    refreshAll();
+  } catch(e) {
+    alert('清理失败: ' + e.message);
+  }
+}
+
+refreshAll();
+setInterval(refreshAll, 3000);
+</script>
+</body>
+</html>

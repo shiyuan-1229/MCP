@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Forge POC · 零售门店 AI 助手 — 测试客户端</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#F1F5F9;color:#1E293B;padding:20px}
+h1{font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{font-size:13px;color:#64748B;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:280px 1fr;gap:16px;max-width:1200px;margin:0 auto}
+.sidebar{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);height:fit-content}
+.sidebar h3{font-size:13px;font-weight:600;margin-bottom:8px;color:#64748B;text-transform:uppercase;letter-spacing:.5px}
+.sidebar .group{margin-bottom:14px}
+.sidebar .tool-item{padding:6px 10px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:12px;transition:all .15s;border:none;background:transparent;width:100%;text-align:left;display:flex;align-items:center;gap:6px}
+.sidebar .tool-item:hover{background:#EEF2FF;color:#4F46E5}
+.sidebar .tool-item.active{background:#4F46E5;color:#fff}
+.sidebar .tag{font-size:9px;background:#E0E7FF;color:#3730A3;padding:1px 6px;border-radius:6px}
+.main{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06);min-height:400px}
+.main h2{font-size:16px;font-weight:600;margin-bottom:4px}
+.main .desc{font-size:12px;color:#64748B;margin-bottom:12px}
+.form-row{display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
+.form-row label{font-size:12px;font-weight:600;min-width:70px}
+.form-row input,.form-row select{padding:6px 10px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;flex:1;min-width:120px;outline:none}
+.form-row input:focus,.form-row select:focus{border-color:#4F46E5}
+.btn{background:#4F46E5;color:#fff;border:none;padding:7px 20px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+.btn:hover{background:#3730A3}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.result{background:#0F172A;color:#E2E8F0;padding:14px;border-radius:8px;font-size:13px;font-family:'SF Mono','Menlo','Monaco',monospace;white-space:pre-wrap;min-height:80px;line-height:1.5;margin-top:10px;overflow-x:auto;max-height:400px;overflow-y:auto}
+.result .success{color:#10B981}
+.result .error{color:#EF4444}
+.status-bar{display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:#64748B}
+.status-bar .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.status-bar .dot.green{background:#10B981}
+.status-bar .dot.red{background:#EF4444}
+.quick-btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.quick-btns button{background:#F1F5F9;border:1px solid #E2E8F0;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}
+.quick-btns button:hover{background:#EEF2FF;border-color:#4F46E5}
+.server-info{font-size:11px;color:#94A3B8;margin-bottom:10px;display:flex;gap:12px;align-items:center}
+.server-info input{border:1px solid #E2E8F0;padding:4px 8px;border-radius:4px;font-size:11px;width:240px;font-family:monospace}
+</style>
+</head>
+<body>
+
+<h1>⚡ MCP Forge POC · 测试客户端</h1>
+<p class="sub">零售门店 AI 助手 — 直接调用 MCP Server 的 Tool 和 Resource，验证每个接口是否正常工作</p>
+
+<div class="grid">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <h3>📦 商品模板</h3>
+    <div class="group" id="tools-group-product"></div>
+    <h3>📋 库存模板</h3>
+    <div class="group" id="tools-group-inventory"></div>
+    <h3>👤 会员模板</h3>
+    <div class="group" id="tools-group-member"></div>
+    <h3>📍 门店模板</h3>
+    <div class="group" id="tools-group-store"></div>
+    <h3>🛒 订单模板</h3>
+    <div class="group" id="tools-group-order"></div>
+    <h3 style="margin-top:12px;">📚 知识库</h3>
+    <div class="group" id="resources-group"></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="server-info">
+      <span>🔗 服务器地址</span>
+      <input id="serverUrl" value="http://localhost:3100" spellcheck="false">
+      <button class="btn" onclick="connectServer()" style="padding:4px 12px;font-size:11px">连接</button>
+      <span id="connStatus"><span class="dot" style="background:#EF4444"></span>未连接</span>
+    </div>
+
+    <div id="toolPanel" style="display:none">
+      <h2 id="toolTitle">选择一个 Tool</h2>
+      <p class="desc" id="toolDesc">点击左侧列表选择一个 MCP Tool</p>
+
+      <div class="status-bar" id="paramForm"></div>
+      <div class="quick-btns" id="quickBtns"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="callBtn" onclick="callTool()" disabled>🚀 调用 Tool</button>
+        <span style="font-size:11px;color:#94A3B8;align-self:center" id="callStatus"></span>
+      </div>
+      <div class="result" id="resultBox">等待调用...</div>
+    </div>
+
+    <div id="welcomePanel">
+      <div style="text-align:center;padding:40px 20px;color:#64748B">
+        <div style="font-size:48px;margin-bottom:12px">🏪</div>
+        <h2 style="font-size:18px;margin-bottom:8px">MCP Forge · 零售门店 AI 助手</h2>
+        <p style="font-size:13px;margin-bottom:16px">点击左侧 <strong>Tool 列表</strong> 查看详情并测试调用</p>
+        <div style="text-align:left;background:#F8FAFC;padding:12px 16px;border-radius:8px;font-size:12px;max-width:400px;margin:0 auto">
+          <p><strong>📌 验证步骤：</strong></p>
+          <p>1. 确认 MCP Server 已启动（见终端）</p>
+          <p>2. 在左上角输入服务器地址</p>
+          <p>3. 点击「连接」验证服务是否正常</p>
+          <p>4. 点击左侧 Tool 测试每个接口</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SERVER_URL = 'http://localhost:3100';
+let currentTool = null;
+
+const TEMPLATE_GROUPS = {
+  product: { label: '商品模板', tools: ['product_search','product_detail','price_query','promo_list'] },
+  inventory: { label: '库存模板', tools: ['inventory_query','inventory_alert'] },
+  member: { label: '会员模板', tools: ['member_info','member_points','coupon_query'] },
+  store: { label: '门店模板', tools: ['store_list','store_status'] },
+  order: { label: '订单模板', tools: ['create_order','order_status'] },
+};
+
+const QUICK_ARGS = {
+  product_search: [{k:'keyword',v:'元气森林'},{k:'keyword',v:'可乐'},{k:'keyword',v:'牛奶'}],
+  product_detail: [{k:'product_name',v:'元气森林海盐菠萝'},{k:'product_name',v:'鲜牛奶'}],
+  price_query: [{k:'product_name',v:'元气森林海盐菠萝'},{k:'product_name',v:'薯片大礼包'}],
+  promo_list: [],
+  inventory_query: [{k:'product_name',v:'元气森林海盐菠萝'},{k:'product_name',v:'可乐330ml'}],
+  inventory_alert: [],
+  member_info: [],
+  member_points: [],
+  coupon_query: [],
+  store_list: [],
+  store_status: [{k:'store_name',v:'天河北'}],
+  create_order: [
+    {k:'product_name',v:'元气森林海盐菠萝',extra:{quantity:2,store_id:'thb',pickup:true}},
+    {k:'product_name',v:'鲜牛奶',extra:{quantity:1,store_id:'thb',pickup:true}},
+  ],
+  order_status: [{k:'order_id',v:'ORD20260702001'}],
+};
+
+// ── Tool definitions ──
+const TOOL_DEFS = [
+  {name:'product_search', desc:'搜索商品', params:[{n:'keyword',t:'string',l:'搜索关键词'}]},
+  {name:'product_detail', desc:'商品详情', params:[{n:'product_name',t:'string',l:'商品名称'}]},
+  {name:'price_query', desc:'价格查询', params:[{n:'product_name',t:'string',l:'商品名称'}]},
+  {name:'promo_list', desc:'促销活动', params:[]},
+  {name:'inventory_query', desc:'库存查询', params:[{n:'product_name',t:'string',l:'商品名称'}]},
+  {name:'inventory_alert', desc:'库存预警', params:[]},
+  {name:'member_info', desc:'会员信息', params:[{n:'member_id',t:'string',l:'会员ID（可选）',opt:true}]},
+  {name:'member_points', desc:'会员积分', params:[{n:'member_id',t:'string',l:'会员ID（可选）',opt:true}]},
+  {name:'coupon_query', desc:'优惠券查询', params:[{n:'member_id',t:'string',l:'会员ID（可选）',opt:true}]},
+  {name:'store_list', desc:'门店列表', params:[{n:'location',t:'string',l:'位置（可选）',opt:true}]},
+  {name:'store_status', desc:'门店状态', params:[{n:'store_name',t:'string',l:'门店名称'}]},
+  {name:'create_order', desc:'创建订单', params:[
+    {n:'product_name',t:'string',l:'商品名称'},
+    {n:'quantity',t:'number',l:'数量'},
+    {n:'store_id',t:'select',l:'门店',opts:[{v:'thb',l:'天河北店'},{v:'kyl',l:'科韵路店'},{v:'hj',l:'华景店'}]},
+  ]},
+  {name:'order_status', desc:'订单状态', params:[{n:'order_id',t:'string',l:'订单号'}]},
+];
+
+const RESOURCE_DEFS = [
+  {uri:'knowledge://store-policy', name:'门店政策', desc:'营业政策与取货规则'},
+  {uri:'knowledge://return-policy', name:'退换货政策', desc:'退换货规则'},
+  {uri:'knowledge://delivery-info', name:'配送说明', desc:'配送服务说明'},
+  {uri:'promos://active', name:'当前促销', desc:'所有促销活动'},
+  {uri:'stores://nearby', name:'附近门店', desc:'门店信息'},
+];
+
+// ── Render sidebar ──
+function renderSidebar(){
+  for(const [gid, grp] of Object.entries(TEMPLATE_GROUPS)){
+    const el = document.getElementById(`tools-group-${gid}`);
+    el.innerHTML = TOOL_DEFS
+      .filter(t => grp.tools.includes(t.name))
+      .map(t => `<button class="tool-item" onclick="selectTool('${t.name}')"><span>${getIcon(t.name)}</span>${t.desc}</button>`)
+      .join('');
+  }
+  const rg = document.getElementById('resources-group');
+  rg.innerHTML = RESOURCE_DEFS.map(r =>
+    `<button class="tool-item" onclick="readResource('${r.uri}')"><span>📄</span>${r.name} <span class="tag">${r.desc}</span></button>`
+  ).join('');
+}
+
+function getIcon(name){
+  const map = {
+    product_search:'🔍', product_detail:'📄', price_query:'💰', promo_list:'🏷️',
+    inventory_query:'📦', inventory_alert:'⚠️',
+    member_info:'👤', member_points:'⭐', coupon_query:'🎫',
+    store_list:'📍', store_status:'🔵',
+    create_order:'🛒', order_status:'📋',
+  };
+  return map[name] || '🔧';
+}
+
+// ── Select tool ──
+function selectTool(name){
+  const def = TOOL_DEFS.find(t => t.name === name);
+  if(!def) return;
+  currentTool = name;
+  document.getElementById('welcomePanel').style.display = 'none';
+  document.getElementById('toolPanel').style.display = 'block';
+  document.querySelectorAll('.tool-item').forEach(t=>t.classList.remove('active'));
+  document.querySelector(`.tool-item:nth-child(${TOOL_DEFS.indexOf(def)+1})`)?.classList.add('active');
+
+  document.getElementById('toolTitle').textContent = getIcon(name) + ' ' + def.desc;
+  document.getElementById('toolDesc').textContent = `参数说明：${def.params.map(p=>`${p.l}(${p.t})`).join('、') || '无需参数'}`;
+
+  // Build form
+  let html = '';
+  def.params.forEach(p => {
+    if(p.t === 'select'){
+      html += `<div class="form-row"><label>${p.l}</label><select id="param-${p.n}">${p.opts.map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}</select></div>`;
+    } else {
+      html += `<div class="form-row"><label>${p.l}</label><input id="param-${p.n}" type="${p.t==='number'?'number':'text'}" placeholder="输入${p.l}"></div>`;
+    }
+  });
+  document.getElementById('paramForm').innerHTML = html;
+
+  // Quick buttons
+  const qb = document.getElementById('quickBtns');
+  const qArgs = QUICK_ARGS[name] || [];
+  if(qArgs.length){
+    qb.innerHTML = '<span style="font-size:11px;color:#94A3B8;margin-right:4px">快捷填充：</span>' +
+      qArgs.map((a,i) => {
+        const label = a.extra ? `${a.v}×${a.extra.quantity}` : a.v;
+        return `<button onclick="fillQuick('${name}',${i})">${label}</button>`;
+      }).join('');
+  } else {
+    qb.innerHTML = '<span style="font-size:11px;color:#94A3B8">无需参数，直接调用</span>';
+  }
+
+  document.getElementById('callBtn').disabled = false;
+  document.getElementById('resultBox').textContent = '点击「调用 Tool」查看结果';
+  document.getElementById('callStatus').textContent = '';
+}
+
+// ── Fill quick args ──
+function fillQuick(name, idx){
+  const qArgs = QUICK_ARGS[name];
+  if(!qArgs || !qArgs[idx]) return;
+  const a = qArgs[idx];
+  const params = TOOL_DEFS.find(t=>t.name===name)?.params || [];
+  params.forEach(p => {
+    const el = document.getElementById(`param-${p.n}`);
+    if(!el) return;
+    if(p.n === a.k && a.v) el.value = a.v;
+    if(a.extra && a.extra[p.n] !== undefined) el.value = a.extra[p.n];
+  });
+  // Auto call after fill
+  setTimeout(()=>callTool(), 200);
+}
+
+// ── Call tool ──
+async function callTool(){
+  if(!currentTool) return;
+  const def = TOOL_DEFS.find(t => t.name === currentTool);
+  if(!def) return;
+  const args = {};
+  def.params.forEach(p => {
+    const el = document.getElementById(`param-${p.n}`);
+    if(!el) return;
+    const v = el.value.trim();
+    if(v) args[p.n] = p.t === 'number' ? Number(v) : v;
+  });
+
+  const btn = document.getElementById('callBtn');
+  const status = document.getElementById('callStatus');
+  const result = document.getElementById('resultBox');
+  btn.disabled = true;
+  status.textContent = '⏳ 调用中...';
+
+  try {
+    const url = document.getElementById('serverUrl').value || SERVER_URL;
+    const res = await fetch(`${url}/api/tools/${currentTool}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(args),
+    });
+    const data = await res.json();
+    if(data.content && data.content.length){
+      result.innerHTML = `<span class="success">✓ 调用成功</span>\n\n${data.content.map(c => c.text).join('\n---\n')}`;
+    } else {
+      result.textContent = JSON.stringify(data, null, 2);
+    }
+    status.textContent = `✅ 完成 (${(new Date() - window._callStart)||'?'}ms)`;
+  } catch(e) {
+    result.innerHTML = `<span class="error">✗ 调用失败: ${e.message}\n\n请确认 MCP Server 已启动 (npm start)</span>`;
+    status.textContent = '❌ 失败';
+  }
+  btn.disabled = false;
+}
+
+// ── Read resource ──
+async function readResource(uri){
+  document.getElementById('welcomePanel').style.display = 'none';
+  document.getElementById('toolPanel').style.display = 'block';
+  document.getElementById('toolTitle').textContent = '📚 知识库：' + (RESOURCE_DEFS.find(r=>r.uri===uri)?.name || uri);
+  document.getElementById('toolDesc').textContent = 'Resource 内容（只读）';
+  document.getElementById('paramForm').innerHTML = '';
+  document.getElementById('quickBtns').innerHTML = '';
+  document.getElementById('callBtn').disabled = true;
+  document.getElementById('callStatus').textContent = '⏳ 读取中...';
+  document.getElementById('resultBox').textContent = '';
+
+  try {
+    const url = document.getElementById('serverUrl').value || SERVER_URL;
+    const res = await fetch(`${url}/api/resources/${encodeURIComponent(uri)}`);
+    const data = await res.json();
+    document.getElementById('resultBox').innerHTML = `<span class="success">✓ 读取成功</span>\n\n${data.text || JSON.stringify(data, null, 2)}`;
+    document.getElementById('callStatus').textContent = '✅ 完成';
+  } catch(e) {
+    document.getElementById('resultBox').innerHTML = `<span class="error">✗ 读取失败: ${e.message}</span>`;
+    document.getElementById('callStatus').textContent = '❌ 失败';
+  }
+}
+
+// ── Connect / health check ──
+async function connectServer(){
+  const url = document.getElementById('serverUrl').value || SERVER_URL;
+  const status = document.getElementById('connStatus');
+  status.innerHTML = '<span class="dot" style="background:#F59E0B"></span>检测中...';
+  try {
+    const res = await fetch(`${url}/health`);
+    const data = await res.json();
+    if(data.status === 'ok'){
+      status.innerHTML = `<span class="dot green"></span>已连接 (${data.tools} Tools, ${data.resources} Resources)`;
+    } else {
+      status.innerHTML = `<span class="dot red"></span>响应异常`;
+    }
+  } catch(e) {
+    status.innerHTML = `<span class="dot red"></span>连接失败: ${e.message}`;
+  }
+}
+
+// ── Init ──
+renderSidebar();
+window._callStart = Date.now();
+
+// Auto-connect on load
+setTimeout(connectServer, 500);
+</script>
+</body>
+</html>

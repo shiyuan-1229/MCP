@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Forge · 零售门店 AI 助手 — 真实可交互原型</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--primary:#4F46E5;--primary-light:#818CF8;--primary-dark:#3730A3;--success:#10B981;--warning:#F59E0B;--danger:#EF4444;--bg:#F1F5F9;--card:#FFF;--text:#1E293B;--text-light:#64748B;--border:#E2E8F0;--shadow:0 2px 12px rgba(0,0,0,.08);--radius:12px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#0F172A;color:var(--text);display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:16px}
+.page-title{color:#fff;text-align:center;margin-bottom:16px}
+.page-title h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.page-title p{font-size:13px;color:#94A3B8;margin-top:2px}
+.page-title .badge{display:inline-block;background:var(--success);margin-top:6px;padding:2px 12px;border-radius:10px;font-size:11px;font-weight:600}
+
+/* ── Screens container ── */
+.screens{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;width:100%;max-width:1300px}
+
+/* ── Desktop ── */
+.desktop{width:780px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;border:1px solid #334155;flex-shrink:0}
+.topbar{background:var(--primary);color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:space-between;font-size:13px}
+.topbar .logo{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px}
+.nav-tabs{display:flex;gap:2px;background:rgba(255,255,255,.1);padding:3px;border-radius:8px}
+.nav-tabs button{background:transparent;border:none;color:rgba(255,255,255,.7);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.nav-tabs button.active{background:rgba(255,255,255,.2);color:#fff}
+.topbar .user{display:flex;align-items:center;gap:6px;font-size:12px}
+.topbar .avatar{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:11px}
+
+.content{padding:20px;min-height:440px}
+.page-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-light);margin-bottom:2px}
+.page-h2{font-size:18px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.page-h2 .small{font-size:12px;font-weight:400;color:var(--text-light)}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.stat{border:1px solid var(--border);border-radius:10px;padding:14px 16px;transition:all .2s}
+.stat:hover{border-color:var(--primary);background:#F8FAFC}
+.stat .num{font-size:20px;font-weight:700;color:var(--primary)}
+.stat .label{font-size:11px;color:var(--text-light);margin-top:2px}
+.stat .trend{font-size:10px;margin-top:2px}
+.stat .trend.up{color:var(--success)}
+.stat .trend.down{color:var(--danger)}
+
+/* Table */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+table.data{width:100%;border-collapse:collapse;font-size:13px}
+table.data th{text-align:left;padding:10px 14px;background:var(--bg);font-weight:600;font-size:12px;color:var(--text-light);border-bottom:1px solid var(--border)}
+table.data td{padding:9px 14px;border-bottom:1px solid var(--border);font-size:13px}
+table.data tr:last-child td{border-bottom:none}
+table.data tr:hover td{background:#F8FAFC}
+.tag{font-size:11px;padding:2px 10px;border-radius:10px;font-weight:500;display:inline-block}
+.tag.on{background:#D1FAE5;color:#065F46}
+.tag.off{background:#FEE2E2;color:#991B1B}
+.tag.warn{background:#FEF3C7;color:#92400E}
+.tag.info{background:#E0E7FF;color:#3730A3}
+
+/* Templates */
+.tmpl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.tmpl{border:2px solid var(--border);border-radius:10px;padding:14px;cursor:pointer;transition:all .2s;user-select:none}
+.tmpl:hover{border-color:var(--primary-light)}
+.tmpl.sel{border-color:var(--primary);background:#EEF2FF}
+.tmpl .icon{font-size:22px;margin-bottom:2px}
+.tmpl h4{font-size:13px;font-weight:600}
+.tmpl p{font-size:11px;color:var(--text-light);margin-top:2px}
+.tmpl .badge-sel{display:none}
+.tmpl.sel .badge-sel{display:inline-block;font-size:10px;background:var(--primary);color:#fff;padding:1px 8px;border-radius:8px;margin-top:4px;font-weight:600}
+
+/* Wizard */
+.wiz{display:none;animation:fadeIn .3s ease}
+.wiz.on{display:block}
+.bar-empty{height:4px;background:var(--border);border-radius:4px;margin:12px auto;overflow:hidden;width:200px}
+.bar-fill{height:100%;background:var(--primary);border-radius:4px;transition:width .3s}
+
+/* Gen success */
+.success-banner{background:#D1FAE5;border:1px solid #A7F3D0;border-radius:10px;padding:20px;text-align:center;margin-bottom:12px}
+.success-banner h3{color:#065F46;font-size:16px}
+.success-banner p{font-size:13px;color:#065F46;margin-top:4px}
+.url-box{background:var(--bg);padding:10px 14px;border-radius:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.url-box code{background:#1E293B;color:#A5B4FC;padding:3px 8px;border-radius:4px;font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Phone ── */
+.phone{width:340px;background:var(--card);border-radius:36px;box-shadow:var(--shadow);border:3px solid #334155;overflow:hidden;flex-shrink:0;display:flex;flex-direction:column}
+.phone .p-top{display:flex;align-items:center;justify-content:center;padding:8px 16px 4px;background:#F8FAFC;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;color:var(--text)}
+.phone .p-header{background:#07C160;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+.phone .p-header .back{font-size:20px;cursor:pointer;opacity:.8}
+.phone .p-body{padding:14px;min-height:320px;background:#EDEDED;font-size:13px;overflow-y:auto;flex:1;max-height:440px}
+.msg{margin-bottom:10px;display:flex;flex-direction:column}
+.msg.u{align-items:flex-end}
+.msg.a{align-items:flex-start}
+.msg .b{max-width:82%;padding:9px 13px;border-radius:10px;line-height:1.6;font-size:13px}
+.msg.u .b{background:#07C160;color:#fff;border-bottom-right-radius:3px}
+.msg.a .b{background:#fff;color:var(--text);border-bottom-left-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.msg .b .hl{color:#D97706;font-weight:600}
+.msg .b .pr{font-weight:700;color:#E53E3E}
+.msg .b .btn-pay{display:inline-block;margin-top:4px;background:#07C160;color:#fff;padding:5px 16px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;border:none}
+.msg .b .btn-pay:hover{opacity:.85}
+.phone .p-foot{display:flex;padding:8px 12px;gap:8px;border-top:1px solid var(--border);background:#fff}
+.phone .p-foot input{flex:1;border:none;outline:none;padding:6px 0;font-size:13px}
+.phone .p-foot input::placeholder{color:#94A3B8}
+.phone .p-foot .send{background:#07C160;color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.phone .p-foot .send:hover{opacity:.85}
+
+/* Quick replies */
+.qr{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;background:#F8FAFC;border-bottom:1px solid var(--border)}
+.qr button{background:#fff;border:1px solid var(--border);padding:4px 12px;border-radius:12px;font-size:11px;cursor:pointer;transition:all .2s;color:var(--text)}
+.qr button:hover{background:#07C160;color:#fff;border-color:#07C160}
+
+/* Footer nav */
+.nav-footer{display:flex;justify-content:center;gap:6px;margin-top:12px;flex-wrap:wrap}
+.nav-footer button{padding:5px 14px;border:1px solid #475569;background:transparent;color:#94A3B8;border-radius:8px;font-size:11px;cursor:pointer;transition:all .2s}
+.nav-footer button:hover,.nav-footer button.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+
+/* Gen button */
+.btn{background:var(--primary);color:#fff;border:none;padding:9px 24px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{background:var(--primary-dark);transform:translateY(-1px)}
+.btn.green{background:var(--success)}
+.btn.green:hover{background:#059669}
+.btn.sm{padding:6px 14px;font-size:12px}
+
+/* Fade */
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.tab-pane{display:none;animation:fadeIn .25s ease}
+.tab-pane.on{display:block}
+
+@media(max-width:820px){
+  .desktop{width:100%}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .tmpl-grid{grid-template-columns:repeat(2,1fr)}
+  .phone{width:100%;max-width:360px}
+}
+</style>
+</head>
+<body>
+
+<div class="page-title">
+  <h1>🏪 MCP Forge · 零售门店 AI 助手</h1>
+  <p>基于产品规格书 v1.0 构建的真实可交互原型 — 右侧微信对话可直接体验</p>
+  <span class="badge">P0 优先 · 暑期 POC</span>
+</div>
+
+<div class="nav-footer" id="navFooter">
+  <button class="active" onclick="switchTab('dashboard')">📊 商家总览</button>
+  <button onclick="switchTab('templates')">📦 MCP 模板</button>
+  <button onclick="switchTab('generate')">⚡ 生成</button>
+  <button onclick="switchTab('monitor')">🔍 监控</button>
+  <button onclick="switchTab('orders')">📋 订单</button>
+</div>
+
+<div class="screens" style="margin-top:12px;">
+  <!-- ── Desktop ── -->
+  <div class="desktop">
+    <div class="topbar">
+      <div class="logo">⚡ MCP Forge</div>
+      <div class="nav-tabs">
+        <button class="active" onclick="switchTab('dashboard')">总览</button>
+        <button onclick="switchTab('templates')">模板</button>
+        <button onclick="switchTab('generate')">生成</button>
+        <button onclick="switchTab('monitor')">监控</button>
+        <button onclick="switchTab('orders')">订单</button>
+      </div>
+      <div class="user"><span>科传</span><div class="avatar">👤</div></div>
+    </div>
+    <div class="content">
+
+      <!-- ── Dashboard ── -->
+      <div class="tab-pane on" id="pane-dashboard">
+        <div class="page-label">MCP Forge · 管理后台</div>
+        <div class="page-h2">📊 商家总览 <span class="small">最后更新：刚刚</span></div>
+        <div class="stats" id="statsContainer"></div>
+        <div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:600;">最近接入的门店</span>
+          <span style="font-size:11px;color:var(--text-light);">点击门店查看详情</span>
+        </div>
+        <div class="table-wrap"><table class="data" id="storeTable"></table></div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn sm" onclick="switchTab('templates')">📦 管理模板</button>
+          <button class="btn sm green" onclick="switchTab('generate')">⚡ 接入新门店</button>
+          <button class="btn sm" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" onclick="simulateCall()">🔄 模拟调用</button>
+        </div>
+      </div>
+
+      <!-- ── Templates ── -->
+      <div class="tab-pane" id="pane-templates">
+        <div class="page-label">MCP Forge · 模板管理</div>
+        <div class="page-h2">📦 MCP 行业模板库 <span class="small">选择模板即可生成 MCP Server</span></div>
+        <p style="font-size:12px;color:var(--text-light);margin-bottom:10px;">点击模板可选择/取消，选中的模板将出现在 MCP Server 中</p>
+        <div class="tmpl-grid" id="tmplGrid"></div>
+        <div id="tmplFooter" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0">
+          <span style="font-size:13px;color:var(--text-light);"><span id="selCount">5</span> 个模板已选 · 预计生成 <span id="toolCount">12</span> 个 MCP Tool</span>
+          <button class="btn" onclick="switchTab('generate')">⚡ 下一步：生成 MCP Server</button>
+        </div>
+      </div>
+
+      <!-- ── Generate ── -->
+      <div class="tab-pane" id="pane-generate">
+        <div class="page-label">MCP Forge · MCP 生成器</div>
+        <div class="page-h2">⚡ 一键生成 MCP Server</div>
+
+        <!-- Step 1 -->
+        <div class="wiz on" id="genStep1">
+          <div class="url-box"><span>📌 数据源配置：美佳便利店 · 天河北店</span><span style="color:var(--success);font-weight:600;">● 已连接</span></div>
+          <div class="table-wrap" style="margin-bottom:12px">
+            <table class="data" id="sourceTable"></table>
+          </div>
+          <div style="text-align:center"><button class="btn" onclick="startGen()">🚀 一键生成 MCP Server</button></div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="wiz" id="genStep2" style="text-align:center;padding:30px 0">
+          <div style="font-size:40px;animation:spin 1.2s linear infinite">⚙️</div>
+          <p style="margin-top:12px;color:var(--text-light);">正在生成 MCP Server...</p>
+          <div class="bar-empty"><div class="bar-fill" style="width:0%" id="genBar"></div></div>
+          <p style="font-size:11px;color:var(--text-light);margin-top:6px;" id="genLog">连接数据源...</p>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="wiz" id="genStep3">
+          <div class="success-banner">
+            <h3>✅ MCP Server 生成成功！</h3>
+            <p>已生成 12 个 MCP Tool，服务已自动部署至云端</p>
+          </div>
+          <div class="url-box"><span>SSE 地址</span><code id="sseUrl">https://mcp.kepro.cn/s/meijia-tianhe-001</code><button class="btn sm" style="background:transparent;color:var(--primary);border:1px solid var(--primary);padding:3px 10px" onclick="copyUrl()">📋 复制</button></div>
+          <div class="url-box" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span style="font-size:11px;font-weight:600;">Claude Desktop / 微信 Agent 配置</span>
+            <code style="font-size:10px;word-break:break-all;" id="configCode">{
+  "mcpServers": {
+    "meijia-store": {
+      "url": "https://mcp.kepro.cn/s/meijia-tianhe-001",
+      "type": "sse"
+    }
+  }
+}</code>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
+            <button class="btn sm" onclick="switchTab('monitor')">🔍 查看监控</button>
+            <button class="btn sm green" onclick="switchTab('dashboard')">🏠 返回总览</button>
+            <button class="btn sm" style="background:var(--bg);color:var(--text);border:1px solid var(--border)" onclick="resetGen()">🔄 重新生成</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Monitor ── -->
+      <div class="tab-pane" id="pane-monitor">
+        <div class="page-label">MCP Forge · 运行监控</div>
+        <div class="page-h2">🔍 MCP Server 监控 <span class="small" id="monitorStatus">● 在线运行中</span></div>
+        <div class="url-box"><span>美佳便利店 · 天河北店</span><span style="color:var(--success);font-weight:600;">● 正常</span></div>
+        <div class="table-wrap"><table class="data" id="monitorTable"><thead><tr><th>Tool 名称</th><th>状态</th><th>今日调用</th><th>延迟</th><th>错误率</th></tr></thead><tbody id="monitorBody"></tbody></table></div>
+        <p style="font-size:11px;color:var(--text-light);margin-top:6px;" id="monitorTime">最后更新：2026-07-02 10:52:00</p>
+      </div>
+
+      <!-- ── Orders ── -->
+      <div class="tab-pane" id="pane-orders">
+        <div class="page-label">MCP Forge · 订单中心</div>
+        <div class="page-h2">📋 门店订单管理</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input placeholder="🔍 搜索订单号..." id="orderSearch" style="flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;outline:none" oninput="filterOrders()">
+          <select id="orderFilter" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;outline:none" onchange="filterOrders()">
+            <option value="all">全部门店</option>
+            <option value="天河北店">天河北店</option>
+            <option value="科韵路店">科韵路店</option>
+          </select>
+          <select id="orderSource" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;outline:none" onchange="filterOrders()">
+            <option value="all">全部来源</option>
+            <option value="🤖 微信 AI">微信 AI</option>
+            <option value="🛒 门店 POS">门店 POS</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table class="data" id="orderTable"><thead><tr><th>订单号</th><th>门店</th><th>商品</th><th>金额</th><th>来源</th><th>状态</th><th>时间</th></tr></thead><tbody id="orderBody"></tbody></table></div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text-light);" id="orderStats"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Phone (WeChat) ── -->
+  <div class="phone">
+    <div class="p-top">10:52</div>
+    <div class="p-header">
+      <span class="back">‹</span>
+      <span>🏪 美佳便利店 · 天河北店</span>
+      <span style="margin-left:auto;font-size:11px;opacity:.8">● AI 在线</span>
+    </div>
+    <div class="qr">
+      <button onclick="quickMsg('附近有美佳便利店吗？还有没有元气森林海盐菠萝？','q')">📍 查库存</button>
+      <button onclick="quickMsg('今天有什么优惠？','q')">🎉 看优惠</button>
+      <button onclick="quickMsg('查一下我的会员积分','q')">👤 查积分</button>
+      <button onclick="quickMsg('帮我下单买一箱鲜牛奶，到店自提','q')">🛒 下单</button>
+    </div>
+    <div class="p-body" id="chatBody"></div>
+    <div class="p-foot">
+      <input placeholder="输入消息..." id="chatInput" onkeydown="if(event.key==='Enter')sendMsg()">
+      <button class="send" onclick="sendMsg()">↵</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════ DATA ═══════════════
+
+const stores = [
+  {name:'美佳便利店·天河北店',status:'on',calls:2341,version:'v1.2',date:'2026-06-28',url:'meijia-tianhe-001'},
+  {name:'美佳便利店·科韵路店',status:'on',calls:1892,version:'v1.2',date:'2026-06-28',url:'meijia-keyun-002'},
+  {name:'美佳便利店·华景店',status:'warn',calls:0,version:'-',date:'配置中',url:'meijia-huajing-003'},
+  {name:'鲜多多生鲜·龙口西店',status:'on',calls:682,version:'v1.0',date:'2026-07-01',url:'xianduoduo-lk-004'},
+  {name:'鲜多多生鲜·体育西店',status:'on',calls:503,version:'v1.0',date:'2026-07-01',url:'xianduoduo-ty-005'},
+  {name:'美佳便利店·岗顶店',status:'warn',calls:0,version:'-',date:'待接入',url:'meijia-gangding-006'},
+];
+
+const toolsData = [
+  {name:'商品搜索',calls:1024,lat:86,err:0.2},
+  {name:'商品详情',calls:893,lat:72,err:0.1},
+  {name:'价格查询',calls:612,lat:65,err:0},
+  {name:'门店库存查询',calls:1534,lat:94,err:0.3},
+  {name:'库存预警',calls:267,lat:58,err:0},
+  {name:'到货通知',calls:134,lat:62,err:0},
+  {name:'会员信息',calls:445,lat:78,err:0.1},
+  {name:'会员积分',calls:376,lat:82,err:0},
+  {name:'优惠券查询',calls:298,lat:70,err:0},
+  {name:'附近门店',calls:1210,lat:58,err:0},
+  {name:'营业状态',calls:356,lat:45,err:0},
+  {name:'创建订单',calls:185,lat:152,err:0.5},
+];
+
+const orders = [
+  {id:'20260702001',store:'天河北店',items:'元气森林海盐菠萝×2',amt:'¥106.20',src:'🤖 微信 AI',sta:'✅ 已完成',time:'09:32',pickup:'6688'},
+  {id:'20260702002',store:'科韵路店',items:'农夫山泉5L×1',amt:'¥9.90',src:'🤖 微信 AI',sta:'✅ 已完成',time:'09:45',pickup:'6689'},
+  {id:'20260702003',store:'天河北店',items:'鲜牛奶×2 + 面包×1',amt:'¥25.80',src:'🤖 微信 AI',sta:'⏳ 待取货',time:'10:02',pickup:'6690'},
+  {id:'20260702004',store:'天河北店',items:'薯片大礼包×1',amt:'¥39.90',src:'🛒 门店 POS',sta:'✅ 已完成',time:'10:15',pickup:'-'},
+  {id:'20260702005',store:'华景店',items:'可乐×6 + 雪碧×6',amt:'¥35.00',src:'🤖 微信 AI',sta:'⏳ 待取货',time:'10:28',pickup:'6691'},
+  {id:'20260702006',store:'科韵路店',items:'方便面×5',amt:'¥24.50',src:'🛒 门店 POS',sta:'✅ 已完成',time:'10:35',pickup:'-'},
+  {id:'20260702007',store:'天河北店',items:'元气森林海盐菠萝×2',amt:'¥106.20',src:'🤖 微信 AI',sta:'⏳ 待取货',time:'10:41',pickup:'6692'},
+  {id:'20260702008',store:'天河北店',items:'纯牛奶×1',amt:'¥12.80',src:'🤖 微信 AI',sta:'✅ 已完成',time:'10:48',pickup:'6693'},
+];
+
+const templates = [
+  {id:'product',icon:'📦',name:'商品查询',desc:'商品搜索·详情·价格·促销',tools:4,ds:'POS 系统'},
+  {id:'inventory',icon:'📋',name:'库存查询',desc:'门店库存·库存预警·到货通知',tools:3,ds:'WMS 系统'},
+  {id:'member',icon:'👤',name:'会员中心',desc:'会员信息·积分查询·优惠券',tools:3,ds:'CRM 系统'},
+  {id:'store',icon:'📍',name:'门店服务',desc:'门店列表·营业状态·自提预约',tools:3,ds:'静态配置'},
+  {id:'order',icon:'🛒',name:'订单管理',desc:'创建订单·订单状态·退货申请',tools:3,ds:'POS 系统'},
+];
+
+// ═══════════════ RENDER ═══════════════
+
+let selectedTmpls = new Set(templates.map(t => t.id));
+
+function tmplToolCount(){return templates.filter(t=>selectedTmpls.has(t.id)).reduce((s,t)=>s+t.tools,0)}
+
+function renderStats(){
+  const s = document.getElementById('statsContainer');
+  const onStores = stores.filter(x=>x.status==='on').length;
+  const totalCalls = stores.reduce((s,x)=>s+x.calls,0);
+  const aiOrders = orders.filter(x=>x.src.includes('微信 AI'));
+  const aiAmt = aiOrders.reduce((s,x)=>s+parseFloat(x.amt.replace('¥','')),0);
+  const totalAmt = orders.reduce((s,x)=>s+parseFloat(x.amt.replace('¥','')),0);
+  s.innerHTML = `
+    <div class="stat"><div class="num" id="statStores">${onStores}</div><div class="label">在线门店 / ${stores.length}</div><div class="trend up">↑ 较昨日 +2</div></div>
+    <div class="stat"><div class="num" id="statCalls">${totalCalls.toLocaleString()}</div><div class="label">今日 MCP 调用</div><div class="trend up">↑ 较昨日 +12.3%</div></div>
+    <div class="stat"><div class="num">¥${totalAmt.toFixed(0)}</div><div class="label">今日交易额</div><div class="trend up">↑ AI 订单占 ${Math.round(aiOrders.length/orders.length*100)}%</div></div>
+    <div class="stat"><div class="num" id="statUptime">99.2%</div><div class="label">MCP 可用率</div><div class="trend up">↑ 过去 7 天 98.7%</div></div>
+  `;
+}
+
+function renderStores(){
+  const t = document.getElementById('storeTable');
+  t.innerHTML = `<thead><tr><th>门店</th><th>MCP 状态</th><th>今日调用</th><th>模板版本</th><th>接入日期</th><th>操作</th></tr></thead><tbody>
+    ${stores.map(s => `<tr>
+      <td>🏪 ${s.name}</td>
+      <td><span class="tag ${s.status}">${s.status==='on'?'● 在线':s.status==='warn'?'⚙️ 配置中':'● 离线'}</span></td>
+      <td>${s.calls||'-'}</td>
+      <td>${s.version}</td>
+      <td>${s.date}</td>
+      <td><button class="btn sm" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:3px 10px" onclick="showStoreDetail('${s.name}')">详情</button></td>
+    </tr>`).join('')}
+  </tbody>`;
+}
+
+function renderTmpls(){
+  const g = document.getElementById('tmplGrid');
+  g.innerHTML = templates.map(t => `
+    <div class="tmpl ${selectedTmpls.has(t.id)?'sel':''}" onclick="toggleTmpl('${t.id}')">
+      <div class="icon">${t.icon}</div>
+      <h4>${t.name}</h4>
+      <p>${t.desc}</p>
+      <span class="badge-sel">已选 ✓</span>
+    </div>
+  `).join('');
+  updateTmplFooter();
+}
+
+function updateTmplFooter(){
+  document.getElementById('selCount').textContent = selectedTmpls.size;
+  document.getElementById('toolCount').textContent = tmplToolCount();
+}
+
+function toggleTmpl(id){
+  if(selectedTmpls.has(id)) selectedTmpls.delete(id); else selectedTmpls.add(id);
+  renderTmpls();
+}
+
+function renderSources(){
+  const t = document.getElementById('sourceTable');
+  t.innerHTML = `<thead><tr><th>模板</th><th>数据源</th><th>状态</th></tr></thead><tbody>
+    ${templates.filter(tm=>selectedTmpls.has(tm.id)).map(tm => `<tr>
+      <td>${tm.icon} ${tm.name}</td>
+      <td>美佳 ${tm.ds}</td>
+      <td><span class="tag on">✅ 已连接</span></td>
+    </tr>`).join('')}
+  </tbody>`;
+}
+
+function renderMonitor(){
+  const b = document.getElementById('monitorBody');
+  b.innerHTML = toolsData.map(t => `
+    <tr><td>${t.name}</td><td><span class="tag on">● 在线</span></td><td>${t.calls.toLocaleString()}</td><td>${t.lat}ms</td><td>${t.err}%</td></tr>
+  `).join('');
+}
+
+function renderOrders(filter){
+  const b = document.getElementById('orderBody');
+  const store = document.getElementById('orderFilter').value;
+  const src = document.getElementById('orderSource').value;
+  const q = document.getElementById('orderSearch').value.toLowerCase();
+  let list = orders;
+  if(store!=='all') list = list.filter(o=>o.store===store);
+  if(src!=='all') list = list.filter(o=>o.src===src);
+  if(q) list = list.filter(o=>o.id.includes(q)||o.items.includes(q));
+  b.innerHTML = list.map(o => `<tr>
+    <td style="font-family:monospace">${o.id}</td>
+    <td>${o.store}</td>
+    <td>${o.items}</td>
+    <td style="font-weight:600">${o.amt}</td>
+    <td>${o.src}</td>
+    <td><span class="tag ${o.sta.includes('完成')?'on':o.sta.includes('待')?'warn':'info'}">${o.sta}</span></td>
+    <td style="color:var(--text-light)">${o.time}</td>
+  </tr>`).join('');
+  if(!list.length) b.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-light)">没有匹配的订单</td></tr>';
+  const total = orders.length;
+  const ai = orders.filter(o=>o.src.includes('微信 AI')).length;
+  document.getElementById('orderStats').textContent = `共 ${total} 笔订单 · AI 订单 ${ai} 笔（${Math.round(ai/total*100)}%）`;
+}
+
+function filterOrders(){renderOrders()}
+
+function showStoreDetail(name){
+  const s = stores.find(x=>x.name===name);
+  if(!s) return;
+  alert(`🏪 ${s.name}\nMCP 状态：${s.status==='on'?'在线':'配置中'}\n今日调用：${s.calls||'暂无'}\n模板版本：${s.version}\n接入日期：${s.date}\nSSE URL：https://mcp.kepro.cn/s/${s.url}`);
+}
+
+// ═══════════════ GENERATE ═══════════════
+
+function startGen(){
+  document.getElementById('genStep1').classList.remove('on');
+  document.getElementById('genStep2').classList.add('on');
+  const bar = document.getElementById('genBar');
+  const log = document.getElementById('genLog');
+  const steps = ['连接数据源...','解析模板配置...','生成 MCP Tool Schema...','编译 Server 代码...','部署至云端...','运行健康检查...'];
+  let i=0;
+  const iv = setInterval(()=>{
+    i++;
+    const pct = Math.min(100, Math.round(i / steps.length * 100));
+    bar.style.width = pct + '%';
+    log.textContent = steps[Math.min(i, steps.length-1)];
+    if(i >= steps.length){
+      clearInterval(iv);
+      setTimeout(()=>{
+        document.getElementById('genStep2').classList.remove('on');
+        document.getElementById('genStep3').classList.add('on');
+      },300);
+    }
+  },400);
+}
+
+function resetGen(){
+  document.getElementById('genStep3').classList.remove('on');
+  document.getElementById('genStep1').classList.add('on');
+}
+
+function copyUrl(){
+  const url = document.getElementById('sseUrl').textContent;
+  navigator.clipboard.writeText(url).then(()=>alert('✅ SSE URL 已复制'));
+}
+
+// ═══════════════ INTERACTION ═══════════════
+
+function simulateCall(){
+  const c = document.getElementById('statCalls');
+  const cur = parseInt(c.textContent.replace(/,/g,''));
+  c.textContent = (cur + Math.floor(Math.random()*30+5)).toLocaleString();
+  document.getElementById('statUptime').textContent = (99 + Math.random()*0.8).toFixed(1) + '%';
+  renderMonitor();
+}
+
+// ═══════════════ CHAT ═══════════════
+
+let paying = false;
+
+function addChatMsg(role, html){
+  const body = document.getElementById('chatBody');
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'u' : 'a');
+  div.innerHTML = '<div class="b">' + html + '</div>';
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+
+function processMsg(txt){
+  if(txt.includes('附近')||txt.includes('门店')){
+    addChatMsg('ai','📍 为您找到附近 <span class="hl">3 家</span> 门店：<br>1️⃣ 天河北店 — 库存：<span class="hl">32 箱</span> ⭐<br>2️⃣ 科韵路店 — 库存：8 箱<br>3️⃣ 华景店 — 已售罄<br><br>天河北店今日特惠：<span class="hl">买 2 箱享 9 折</span>，会员额外赠 500 积分 🎉');
+  } else if(txt.includes('优惠')||txt.includes('特价')||txt.includes('打折')){
+    addChatMsg('ai','🎉 <strong>今日优惠精选</strong><br>• 元气森林系列：<span class="hl">买 2 箱 9 折</span><br>• 鲜牛奶：<span class="hl">第二件半价</span><br>• 面包组合：<span class="pr">¥9.9</span> 特惠<br>• 全场会员购物：<span class="hl">双倍积分</span><br><br>会员价更优惠，您当前积分可抵 ¥23.50 🎁');
+  } else if(txt.includes('积分')||txt.includes('会员')){
+    addChatMsg('ai','👤 <strong>会员信息</strong><br>当前积分：<span class="hl">2,350 分</span><br>等级：黄金会员<br><br>可用积分兑换：<br>• 10 元无门槛券 — 500 分<br>• 鲜牛奶 1 箱 — 800 分<br>• 抵扣 ¥23.50 — 2,350 分<br><br>回复「兑换」可操作');
+  } else if(txt.includes('单')||txt.includes('买')||txt.includes('下')){
+    if(paying) return;
+    addChatMsg('ai','✅ <strong>订单已创建！</strong><br><br>商品：元气森林海盐菠萝 × 2 箱<br>金额：¥118.00 → <span class="pr">¥106.20</span><br>会员优惠：<span class="hl">-¥11.80 (9折)</span><br>会员积分：<span class="hl">+500</span><br>自提门店：天河北店<br><br><button class="btn-pay" onclick="payOrder()">💳 微信支付 ¥106.20</button>');
+  } else if(txt.includes('你好')||txt.includes('嗨')||txt.includes('hi')||txt.includes('在吗')){
+    addChatMsg('ai','👋 您好！我是美佳便利店 AI 助手。<br><br>您可以问我：<br>📍 "<span class="hl">附近有门店吗？</span>" — 查门店库存<br>🎉 "<span class="hl">今天有什么优惠？</span>" — 看促销活动<br>👤 "<span class="hl">查一下我的积分</span>" — 查会员信息<br>🛒 "<span class="hl">帮我下单</span>" — 下单购物');
+  } else {
+    addChatMsg('ai','🤔 我没有理解您的意思，您可以试试：<br><br>📍 "<span class="hl">附近有门店吗？</span>" 查库存<br>🎉 "<span class="hl">今天有什么优惠？</span>" 看促销<br>🛒 "<span class="hl">帮我下单</span>" 开始购物');
+  }
+}
+
+function sendMsg(){
+  const input = document.getElementById('chatInput');
+  const txt = input.value.trim();
+  if(!txt) return;
+  addChatMsg('user', txt);
+  input.value = '';
+  setTimeout(()=>processMsg(txt), 500);
+}
+
+function quickMsg(txt,type){
+  addChatMsg('user', txt);
+  setTimeout(()=>processMsg(txt), 500);
+}
+
+function payOrder(){
+  if(paying) return;
+  paying = true;
+  addChatMsg('user','💳 已确认支付 ¥106.20');
+  setTimeout(()=>{
+    addChatMsg('ai','✅ <strong>支付成功！</strong> 🎉<br><br>订单号：ORD20260702001<br>取货码：<span class="hl" style="font-size:20px;">6688</span><br><br>📍 到 <strong>天河北店</strong> 出示取货码即可取货<br>预计到货时间：今天 15:00<br><br>感谢您的惠顾，祝您购物愉快 🎊');
+    // Update orders
+    orders.unshift({id:'20260702009',store:'天河北店',items:'元气森林海盐菠萝×2',amt:'¥106.20',src:'🤖 微信 AI',sta:'⏳ 待取货',time:'10:52',pickup:'6694'});
+    renderOrders();
+    // Update stats
+    const c = document.getElementById('statCalls');
+    const cur = parseInt(c.textContent.replace(/,/g,''));
+    c.textContent = (cur + 2).toLocaleString();
+  },600);
+}
+
+// ═══════════════ TAB SWITCH ═══════════════
+
+function switchTab(id){
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('on'));
+  document.getElementById('pane-'+id)?.classList.add('on');
+  document.querySelectorAll('.nav-tabs button, #navFooter button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll(`.nav-tabs button[onclick*="'${id}'"], #navFooter button[onclick*="'${id}'"]`).forEach(b=>b.classList.add('active'));
+  if(id==='generate') renderSources();
+  if(id==='monitor') document.getElementById('monitorTime').textContent = '最后更新：' + new Date().toLocaleString('zh-CN',{hour12:false});
+}
+
+// ═══════════════ INIT ═══════════════
+
+renderStats();
+renderStores();
+renderTmpls();
+renderSources();
+renderMonitor();
+renderOrders();
+
+// Greeting message
+addChatMsg('ai','👋 您好！我是 <strong>美佳便利店 · 天河北店</strong> 的 AI 助手。<br><br>您可以试试：<br>📍 "<span class="hl">附近有门店吗？</span>" — 查库存<br>🎉 "<span class="hl">今天有什么优惠？</span>" — 看促销<br>👤 "<span class="hl">查一下我的积分</span>" — 查会员<br>🛒 或者直接点击上方快捷按钮');
+
+// Spin animation
+const style = document.createElement('style');
+style.textContent = `@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`;
+document.head.appendChild(style);
+</script>
+</body>
+</html>
