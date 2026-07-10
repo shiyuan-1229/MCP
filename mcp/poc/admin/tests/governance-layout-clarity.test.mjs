@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const adminRoot = path.resolve(__dirname, '..');
+const indexFilePath = path.join(adminRoot, 'index.html');
+const stylesFilePath = path.join(adminRoot, 'assets/styles.css');
+
+const html = await readFile(indexFilePath, 'utf8');
+const styles = await readFile(stylesFilePath, 'utf8');
+
+assert.match(html, /switchAccessTab\('access-audit'\)">审计</u);
+assert.match(html, /<div class="panel-head"><h3>接入审计日志<\/h3><\/div>/u);
+assert.doesNotMatch(html, /switchAccessTab\('access-audit'\)">变更</u);
+assert.doesNotMatch(html, /<div class="panel-head"><h3>变更记录<\/h3><\/div>/u);
+
+assert.match(styles, /\.governance-main-grid\s*\{\s*grid-template-columns:\s*1fr;/u);
+
+console.log('governance layout clarity checks passed');

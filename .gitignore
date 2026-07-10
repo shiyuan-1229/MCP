@@ -1,0 +1,33 @@
+# Dependencies (can be restored with npm install)
+node_modules/
+
+# Database (auto-seeded on server start)
+*.db
+*.db-shm
+*.db-wal
+
+# WorkBuddy internal state
+.workbuddy/
+
+# Temporary files
+tmp/
+__MACOSX/
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Compressed archives (build artifacts, not source)
+mcp方案_*.zip
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Word temp files
+~$*.docx
+
+# NUL artifact (Windows)
+nul
