@@ -212,6 +212,19 @@ function renderIntake() {
   const stepBar = $('intakeStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(1);
 
+  // AI 引擎状态标识
+  const aiBadge = $('aiStatusBadge');
+  if (aiBadge) {
+    const cfg = state.aiConfig || {};
+    if (cfg.configured) {
+      aiBadge.textContent = `AI 引擎已就绪 · ${cfg.model || ''}`;
+      aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#dcfce7;color:#16a34a;font-weight:600';
+    } else {
+      aiBadge.textContent = 'AI 引擎未配置';
+      aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#fef9c3;color:#a16207;font-weight:600';
+    }
+  }
+
   // 表格行
   renderSimpleRows('sourceRows', items.map(item => {
     const recStatus = item.recognition_status || 'draft';

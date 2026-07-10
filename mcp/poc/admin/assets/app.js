@@ -49,7 +49,7 @@ async function loadAll() {
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, timeline] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, timeline, aiConfig] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -67,7 +67,8 @@ async function loadAll() {
     api('/api/platform/policy-changes'),
     api('/api/platform/knowledge-bases'),
     api('/api/platform/openapi-specs'),
-    api('/api/platform/timeline')
+    api('/api/platform/timeline'),
+    api('/api/platform/ai-config').catch(() => ({ configured: false }))
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
@@ -90,7 +91,8 @@ async function loadAll() {
     policyChanges,
     knowledgeBases: Array.isArray(knowledgeBases) ? knowledgeBases : [],
     openapiSpecs: Array.isArray(openapiSpecs) ? openapiSpecs : [],
-    timeline: Array.isArray(timeline) ? timeline : []
+    timeline: Array.isArray(timeline) ? timeline : [],
+    aiConfig: aiConfig || { configured: false }
   });
 }
 
@@ -1388,17 +1390,165 @@ window.revokeApiKey = revokeApiKey;
 async function triggerRecognition(sourceId) {
   if (!sourceId) return;
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
-  try {
-    showToast('AI 正在识别接口并生成 OpenAPI 草案...', 'warning');
-    const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, { method: 'POST' });
-    await loadAll();
-    // 自动跳转到接口识别页
-    state.currentPage = 'recognition';
-    renderAll();
-    showToast('接口识别完成，OpenAPI 草案已生成。', 'success');
-  } catch (error) {
-    showToast(error.message, 'error');
-  }
+
+  // 先显示 AI 分析输入弹窗（输入样本内容）
+  openAiRecognizeModal(sourceId);
+}
+
+function openAiRecognizeModal(sourceId) {
+  const source = (state.sources || []).find(s => s.id === sourceId);
+  if (!source) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:640px;max-height:88vh;overflow-y:auto">
+      <h3>🤖 AI 识别分析</h3>
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:14px">
+        <strong>${escapeHtml(source.name || '未命名资料')}</strong>
+        <span class="badge info" style="margin-left:8px">${escapeHtml(source.type || '-')}</span>
+        <span class="muted-line" style="margin-left:4px">认证: ${escapeHtml(source.auth_mode || '-')}</span>
+      </div>
+      <form onsubmit="return false">
+        <label>
+          <span>资料描述 / 样本内容（可选，提供给 AI 分析）</span>
+          <textarea id="aiSampleContent" rows="6" placeholder="粘贴接口文档、DDL 语句、Excel 表头、API 示例等。内容越详细，AI 识别越准确。" style="width:100%;font-family:monospace;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:6px;resize:vertical"></textarea>
+        </label>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="aiUseReal" checked style="cursor:pointer">
+            <span>使用真实 AI 大模型分析（取消则走静态模板识别）</span>
+          </label>
+        </div>
+        <div id="aiStatusHint" style="margin-top:8px;font-size:12px"></div>
+      </form>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" data-action="cancel">取消</button>
+        <button type="button" class="primary-btn" data-action="run" id="aiRunBtn">开始 AI 识别</button>
+      </div>
+    </div>`;
+
+  overlay.addEventListener('click', async event => {
+    const action = event.target?.dataset?.action;
+    if (action === 'cancel') { document.body.removeChild(overlay); return; }
+    if (event.target === overlay) { document.body.removeChild(overlay); return; }
+    if (action === 'run') {
+      const sampleContent = $('aiSampleContent')?.value?.trim() || '';
+      const useAI = $('aiUseReal')?.checked !== false;
+      const btn = $('aiRunBtn');
+      const hint = $('aiStatusHint');
+
+      btn.disabled = true;
+      btn.textContent = 'AI 分析中...';
+      hint.innerHTML = useAI
+        ? '<span style="color:#b46b06">⏳ 正在调用大模型分析业务数据，生成 OpenAPI 和 Tool 定义...</span>'
+        : '<span style="color:#64748b">正在执行静态模板识别...</span>';
+
+      try {
+        const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
+          method: 'POST',
+          body: JSON.stringify({ use_ai: useAI, sample_content: sampleContent, description: sampleContent })
+        });
+
+        await loadAll();
+        renderAll();
+        document.body.removeChild(overlay);
+
+        if (result.ai_used) {
+          // 显示 AI 分析结果面板
+          showAiAnalysisResult(result);
+          showToast(`AI 识别完成：识别 ${result.analysis?.endpoints?.length || 0} 个接口，生成 ${result.tools?.length || 0} 个 Tool（模型: ${result.model}）`, 'success');
+        } else if (result.error) {
+          showToast(`AI 失败，已回退静态识别: ${result.error}`, 'warning');
+          state.currentPage = 'recognition';
+          renderAll();
+        } else {
+          showToast('静态识别完成', 'success');
+          state.currentPage = 'recognition';
+          renderAll();
+        }
+      } catch (error) {
+        btn.disabled = false;
+        btn.textContent = '开始 AI 识别';
+        hint.innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(error.message)}</span>`;
+      }
+    }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+function showAiAnalysisResult(result) {
+  const panel = $('aiAnalysisPanel');
+  if (!panel) return;
+  panel.style.display = '';
+
+  // 模型标识
+  const badge = $('aiModelBadge');
+  if (badge && result.model) badge.textContent = `模型: ${result.model}`;
+
+  // 总结
+  const summaryEl = $('aiAnalysisSummary');
+  const analysis = result.analysis || {};
+  const endpointCount = (analysis.endpoints || []).length;
+  const toolCount = (result.tools || []).length;
+  const categoryNames = Object.keys(result.categories || {});
+  summaryEl.innerHTML = `
+    <div style="font-size:14px;line-height:1.8">
+      <p style="margin:0 0 6px"><strong>分析总结：</strong>${escapeHtml(analysis.summary || 'AI 已完成业务数据分析')}</p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <span><strong style="color:var(--primary)">${endpointCount}</strong> 个接口</span>
+        <span><strong style="color:var(--primary)">${toolCount}</strong> 个 Tool</span>
+        <span><strong style="color:var(--primary)">${categoryNames.length}</strong> 个分类</span>
+        ${analysis.data_type ? `<span><span class="badge info">${escapeHtml(analysis.data_type)}</span></span>` : ''}
+        ${result.usage?.total_tokens ? `<span class="muted-line">Token: ${result.usage.total_tokens}</span>` : ''}
+      </div>
+    </div>`;
+
+  // 端点列表
+  const endpointsEl = $('aiEndpointsList');
+  const endpoints = analysis.endpoints || [];
+  endpointsEl.innerHTML = endpoints.length ? endpoints.map(ep => `
+    <div class="info-card" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px">
+        <strong>${escapeHtml(ep.name || ep.path || '接口')}</strong>
+        <span class="badge ${ep.method === 'GET' ? 'success' : 'warning'}" style="font-size:11px">${escapeHtml(ep.method || 'GET')}</span>
+      </div>
+      <p class="muted-line" style="margin:2px 0;font-family:monospace;font-size:12px">${escapeHtml(ep.path || '/')}</p>
+      <p style="margin:4px 0 0;font-size:12px">${escapeHtml(ep.description || '')}</p>
+      ${ep.category ? `<span class="cap-chip" style="margin-top:4px;display:inline-block">${escapeHtml(ep.category)}</span>` : ''}
+      ${ep.parameters?.length ? `<details style="margin-top:6px"><summary style="font-size:11px;color:#64748b;cursor:pointer">参数 (${ep.parameters.length})</summary><div style="margin-top:4px;font-size:12px">${ep.parameters.map(p => `<div style="padding:2px 0"><code>${escapeHtml(p.name)}</code> <span class="muted-line">${escapeHtml(p.type || 'string')}${p.required ? ' *' : ''}</span> - ${escapeHtml(p.description || '')}</div>`).join('')}</div></details>` : ''}
+    </div>
+  `).join('') : '<div class="empty-state">未识别到接口端点</div>';
+
+  // 分类 Tool 列表
+  const toolsEl = $('aiToolsList');
+  const categories = result.categories || {};
+  toolsEl.innerHTML = Object.keys(categories).length ? Object.entries(categories).map(([cat, tools]) => `
+    <div class="info-card" style="padding:12px;margin-bottom:8px">
+      <h4 style="margin:0 0 8px;display:flex;align-items:center;gap:6px">
+        <span class="cap-chip">${escapeHtml(cat)}</span>
+        <span class="muted-line" style="font-size:12px">${tools.length} 个 Tool</span>
+      </h4>
+      ${tools.map(t => `
+        <div style="padding:6px 0;border-top:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:13px">${escapeHtml(t.display_name || t.name)}</strong>
+            <code style="font-size:11px;color:var(--primary)">${escapeHtml(t.name)}</code>
+          </div>
+          <p style="margin:2px 0 0;font-size:12px;color:#64748b">${escapeHtml(t.description || '')}</p>
+          ${t.inputSchema?.properties && Object.keys(t.inputSchema.properties).length ? `<details style="margin-top:4px"><summary style="font-size:11px;color:#94a3b8;cursor:pointer">参数</summary><div style="margin-top:4px;font-size:12px">${Object.entries(t.inputSchema.properties).map(([k, v]) => `<div><code>${escapeHtml(k)}</code> <span class="muted-line">${escapeHtml(v.type || '')}${t.inputSchema.required?.includes(k) ? ' *' : ''}</span></div>`).join('')}</div></details>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `).join('') : '<div class="empty-state">未生成分类 Tool</div>';
+
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeAiAnalysis() {
+  const panel = $('aiAnalysisPanel');
+  if (panel) panel.style.display = 'none';
 }
 
 async function selectOpenapiSpec(specId) {
@@ -1480,6 +1630,9 @@ function viewAssetTimeline(assetId) {
 }
 
 window.triggerRecognition = triggerRecognition;
+window.openAiRecognizeModal = openAiRecognizeModal;
+window.showAiAnalysisResult = showAiAnalysisResult;
+window.closeAiAnalysis = closeAiAnalysis;
 window.selectOpenapiSpec = selectOpenapiSpec;
 window.confirmOpenapiSpec = confirmOpenapiSpec;
 window.viewSourceOpenapi = viewSourceOpenapi;

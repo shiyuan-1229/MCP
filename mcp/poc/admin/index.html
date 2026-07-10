@@ -72,7 +72,7 @@
       <section id="intake" class="page" data-title="资料接入" data-eyebrow="上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
+          <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
           <div class="table-wrap">
             <table class="intake-table">
               <thead><tr><th>资料名称</th><th>所属项目</th><th>类型</th><th>认证方式</th><th>接入状态</th><th>识别进度</th><th>产出物</th><th>操作</th></tr></thead>
@@ -80,6 +80,29 @@
             </table>
           </div>
         </div>
+
+        <!-- AI 分析结果展示区 -->
+        <div id="aiAnalysisPanel" class="panel" style="margin-bottom:14px;display:none">
+          <div class="panel-head">
+            <h3>🤖 AI 识别分析结果</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge info" id="aiModelBadge"></span>
+              <button type="button" class="ghost-btn small" onclick="closeAiAnalysis()">收起</button>
+            </div>
+          </div>
+          <div id="aiAnalysisSummary" style="padding:12px 14px;background:var(--surface-2);border-radius:8px;margin-bottom:12px"></div>
+          <div class="content-grid two-col">
+            <div>
+              <h4 style="margin:0 0 8px">识别接口（OpenAPI 端点）</h4>
+              <div id="aiEndpointsList" class="card-list"></div>
+            </div>
+            <div>
+              <h4 style="margin:0 0 8px">分类 Tools（MCP 工具）</h4>
+              <div id="aiToolsList" class="card-list"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="content-grid two-col">
           <article class="panel">
             <div class="panel-head"><h3>资料接入引导</h3></div>
@@ -397,7 +420,7 @@
   </aside>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script type="module" src="/admin/assets/app.js?v=27"></script>
+  <script type="module" src="/admin/assets/app.js?v=28"></script>
 </body>
 </html>
 

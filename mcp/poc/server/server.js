@@ -5,6 +5,21 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import fs from "fs";
 import Database from "better-sqlite3";
+import { runFullPipeline, analyzeBusinessData, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
+import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
+
+// 加载 .env
+const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
+const envPath = path.join(__dirname_env, ".env");
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const match = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2].trim();
+    }
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -280,7 +295,6 @@ function runMigrations() {
   ensureColumn('kb_collections', 'indexed_at', 'TEXT');
   ensureColumn('kb_documents', 'updated_at', 'TEXT');
   ensureColumn('platform_data_sources', 'recognition_status', "TEXT DEFAULT 'draft'");
-  ensureColumn('platform_openapi_specs', 'status', "TEXT DEFAULT 'draft'");
 
   // 阶段三：数据源 OpenAPI 描述与生成时间线
   db.exec(`CREATE TABLE IF NOT EXISTS platform_openapi_specs (
@@ -292,6 +306,7 @@ function runMigrations() {
     status TEXT DEFAULT 'draft',
     generated_at TEXT DEFAULT (datetime('now'))
   )`);
+  ensureColumn('platform_openapi_specs', 'status', "TEXT DEFAULT 'draft'");
   db.exec(`CREATE TABLE IF NOT EXISTS platform_asset_timeline (
     id TEXT PRIMARY KEY,
     asset_id TEXT NOT NULL,
@@ -301,6 +316,21 @@ function runMigrations() {
     operator TEXT,
     completed_at TEXT,
     notes TEXT
+  )`);
+
+  // AI 分析结果表
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_analysis_results (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    analysis_json TEXT,
+    openapi_spec_id TEXT,
+    tools_json TEXT,
+    categories_json TEXT,
+    model TEXT,
+    usage_json TEXT,
+    raw_content TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
   )`);
 }
 
@@ -515,7 +545,8 @@ function seed() {
     ["cust_manufacturing", "华智制造", "华智", "智能制造", "工单与质检", "testing"],
     ["cust_finance", "鑫融金服", "鑫融", "金融科技", "风控对账", "draft"],
     ["cust_property", "安和物业", "安和", "物业服务", "居民报修", "testing"],
-    ["cust_education", "知行教育", "知行", "教育科技", "校园助手", "draft"]
+    ["cust_education", "知行教育", "知行", "教育科技", "校园助手", "draft"],
+    ["cust_lvcheng", "绿城中国", "绿城", "地产商业", "CDP客户数据平台", "testing"]
   ];
   const custStmt = db.prepare("INSERT OR IGNORE INTO platform_customers (id, name, short_name, industry, main_scene, status) VALUES (?,?,?,?,?,?)");
   customers.forEach(item => custStmt.run(...item));
@@ -526,7 +557,8 @@ function seed() {
     ["usr_hzm", "hzm", "华智工程师", "123456", "customer", "cust_manufacturing"],
     ["usr_xrf", "xrf", "鑫融风控经理", "123456", "customer", "cust_finance"],
     ["usr_ahwy", "ahwy", "安和物业主管", "123456", "customer", "cust_property"],
-    ["usr_zxjy", "zxjy", "知行教务主任", "123456", "customer", "cust_education"]
+    ["usr_zxjy", "zxjy", "知行教务主任", "123456", "customer", "cust_education"],
+    ["usr_lvcheng", "lvcheng", "绿城数据工程师", "lv2026", "customer", "cust_lvcheng"]
   ];
   const userStmt = db.prepare("INSERT OR IGNORE INTO platform_users (id, username, display_name, password_hash, role, customer_id) VALUES (?,?,?,?,?,?)");
   users.forEach(([id, username, display, password, role, customerId]) => {
@@ -538,7 +570,8 @@ function seed() {
     ["proj_manufacturing_ops", "cust_manufacturing", "华智工单质检 MCP", "testing", "王实施", 62, "2026-07-25"],
     ["proj_finance_risk", "cust_finance", "鑫融风控问答 MCP", "data-source", "陈实施", 38, "2026-08-02"],
     ["proj_property_service", "cust_property", "安和居民服务 MCP", "testing", "赵实施", 55, "2026-07-28"],
-    ["proj_education_campus", "cust_education", "知行校园 AI 助手 MCP", "draft", "孙实施", 30, "2026-08-10"]
+    ["proj_education_campus", "cust_education", "知行校园 AI 助手 MCP", "draft", "孙实施", 30, "2026-08-10"],
+    ["proj_lvcheng_cdp", "cust_lvcheng", "绿城 CDP 客户数据平台 MCP", "data-source", "周数据", 20, "2026-09-01"]
   ];
   const projStmt = db.prepare("INSERT OR IGNORE INTO platform_projects (id, customer_id, name, status, implementer, progress, deadline) VALUES (?,?,?,?,?,?,?)");
   projects.forEach(item => projStmt.run(...item));
@@ -557,6 +590,14 @@ function seed() {
   ];
   const srcStmt = db.prepare("INSERT OR IGNORE INTO platform_data_sources (id, project_id, name, type, auth_mode, status, recognition_status) VALUES (?,?,?,?,?,?,?)");
   sources.forEach(item => srcStmt.run(...item));
+
+  // 绿城 CDP 真实 DDL 数据源种子
+  const lvchengSources = getLvchengSeedSources();
+  lvchengSources.forEach(src => {
+    db.prepare("INSERT OR IGNORE INTO platform_data_sources (id, project_id, name, type, auth_mode, status, recognition_status) VALUES (?,?,?,?,?,?,?)").run(
+      src.id, src.project_id, src.name, src.type, src.auth_mode, 'draft', 'draft'
+    );
+  });
 
   // 阶段三：为已识别资料预生成 OpenAPI 草案
   const openapiSeed = [
@@ -1341,42 +1382,167 @@ app.post("/api/platform/data-sources", requireAuth, requireAdmin, (req, res) => 
     JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?`).get(id));
 });
 
-// 触发 AI 接口识别：更新 source 的 recognition_status 并自动生成 OpenAPI 草案
-app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, (req, res) => {
+// 触发 AI 接口识别：异步调用大模型 → 生成 OpenAPI + Tools
+app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, async (req, res) => {
   const source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(req.params.id);
   if (!source) return res.status(404).json({ error: "data source not found" });
-  // 更新识别状态为 done
-  db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(
-    source.type === "Knowledge Base" ? "indexed" : "connected",
-    source.id
-  );
-  // 如果还没有 OpenAPI 草案，自动生成一个
-  const existing = db.prepare("SELECT id FROM platform_openapi_specs WHERE source_id = ?").get(source.id);
-  let specId = existing?.id;
-  if (!existing) {
-    specId = makeId("spec");
-    const autoSpec = {
+
+  const useAI = req.body?.use_ai !== false; // 默认使用 AI
+  const sampleContent = req.body?.sample_content || req.body?.description || '';
+
+  // 标记识别中
+  db.prepare("UPDATE platform_data_sources SET recognition_status = 'pending' WHERE id = ?").run(source.id);
+  const pendingSource = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
+
+  // 如果未配置 AI 或明确要求不使用 AI，走静态 fallback
+  if (!useAI || !isAIConfigured()) {
+    db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(
+      source.type === "Knowledge Base" ? "indexed" : "connected", source.id
+    );
+    const existing = db.prepare("SELECT id FROM platform_openapi_specs WHERE source_id = ?").get(source.id);
+    let specId = existing?.id;
+    if (!existing) {
+      specId = makeId("spec");
+      const autoSpec = {
+        openapi: "3.0.0",
+        info: { title: source.name || "AI 识别结果", version: "1.0.0" },
+        paths: {
+          [source.type === "Database" ? "/records/{id}" : "/api/query"]: {
+            get: {
+              operationId: `${source.id}_query`,
+              summary: `${source.name || source.id} 查询`,
+              parameters: source.type === "Database"
+                ? [{ name: "id", in: "path", required: true, schema: { type: "string" } }]
+                : [{ name: "keyword", in: "query", schema: { type: "string" } }],
+              responses: { "200": { description: "查询结果" } }
+            }
+          }
+        }
+      };
+      db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
+        specId, source.id, source.project_id, `${source.name} OpenAPI 草案`, JSON.stringify(autoSpec), "draft"
+      );
+    }
+    const updated = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
+    return res.json({ source: updated, spec_id: specId, ai_used: false, message: isAIConfigured() ? '静态识别模式' : 'AI 未配置，使用静态识别' });
+  }
+
+  // 真实 AI 识别流程
+  try {
+    // 如果前端未提供样本内容，尝试从种子数据中获取
+    let effectiveSample = sampleContent;
+    if (!effectiveSample) {
+      const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
+      if (lvchengSrc) {
+        effectiveSample = lvchengSrc.sampleContent;
+      }
+    }
+
+    const pipelineResult = await runFullPipeline({
+      name: source.name,
+      type: source.type,
+      auth_mode: source.auth_mode,
+      description: effectiveSample ? effectiveSample.slice(0, 500) : `业务资料类型: ${source.type}`,
+      sampleContent: effectiveSample || ''
+    });
+
+    // 更新数据源状态
+    db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(
+      source.type === "Knowledge Base" ? "indexed" : "connected", source.id
+    );
+
+    // 删除旧的 spec（如果有），重新生成
+    db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(source.id);
+    const specId = makeId("spec");
+    db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
+      specId, source.id, source.project_id,
+      `${source.name} OpenAPI 草案（AI 生成）`,
+      JSON.stringify(pipelineResult.openapiSpec),
+      "draft"
+    );
+
+    // 将 AI 分析结果存入数据库（新表 ai_analysis_results）
+    const analysisId = makeId("ai");
+    db.prepare(`INSERT OR REPLACE INTO ai_analysis_results
+      (id, source_id, project_id, analysis_json, openapi_spec_id, tools_json, categories_json, model, usage_json, raw_content, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))`).run(
+      analysisId, source.id, source.project_id,
+      JSON.stringify(pipelineResult.analysis),
+      specId,
+      JSON.stringify(pipelineResult.tools),
+      JSON.stringify(pipelineResult.categories),
+      pipelineResult.model,
+      JSON.stringify(pipelineResult.usage || {}),
+      pipelineResult.rawContent || ''
+    );
+
+    const updated = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
+    res.json({
+      source: updated,
+      spec_id: specId,
+      ai_used: true,
+      analysis_id: analysisId,
+      analysis: pipelineResult.analysis,
+      tools: pipelineResult.tools,
+      categories: pipelineResult.categories,
+      model: pipelineResult.model,
+      usage: pipelineResult.usage
+    });
+  } catch (err) {
+    // AI 失败时 fallback 到静态识别
+    db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(
+      source.type === "Knowledge Base" ? "indexed" : "connected", source.id
+    );
+    const fallbackSpecId = makeId("spec");
+    const fallbackSpec = {
       openapi: "3.0.0",
       info: { title: source.name || "AI 识别结果", version: "1.0.0" },
       paths: {
         [source.type === "Database" ? "/records/{id}" : "/api/query"]: {
-          get: {
-            operationId: `${source.id}_query`,
-            summary: `${source.name || source.id} 查询`,
+          get: { operationId: `${source.id}_query`, summary: `${source.name || source.id} 查询`,
             parameters: source.type === "Database"
               ? [{ name: "id", in: "path", required: true, schema: { type: "string" } }]
               : [{ name: "keyword", in: "query", schema: { type: "string" } }],
-            responses: { "200": { description: "查询结果" } }
-          }
+            responses: { "200": { description: "查询结果" } } }
         }
       }
     };
     db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
-      specId, source.id, source.project_id, `${source.name} OpenAPI 草案`, JSON.stringify(autoSpec), "draft"
+      fallbackSpecId, source.id, source.project_id, `${source.name} OpenAPI 草案`, JSON.stringify(fallbackSpec), "draft"
     );
+    const updated = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
+    res.json({
+      source: updated,
+      spec_id: fallbackSpecId,
+      ai_used: false,
+      error: err.message,
+      message: `AI 调用失败，已回退到静态识别: ${err.message}`
+    });
   }
-  const updated = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
-  res.json({ source: updated, spec_id: specId });
+});
+
+// 获取 AI 分析详情
+app.get("/api/platform/data-sources/:id/ai-analysis", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT * FROM ai_analysis_results WHERE source_id = ? ORDER BY created_at DESC LIMIT 1").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "no AI analysis found" });
+  res.json({
+    id: row.id,
+    source_id: row.source_id,
+    project_id: row.project_id,
+    analysis: safeParse(row.analysis_json),
+    openapi_spec_id: row.openapi_spec_id,
+    tools: safeParse(row.tools_json) || [],
+    categories: safeParse(row.categories_json) || {},
+    model: row.model,
+    usage: safeParse(row.usage_json),
+    raw_content: row.raw_content,
+    created_at: row.created_at
+  });
+});
+
+// AI 引擎配置查询
+app.get("/api/platform/ai-config", requireAuth, (req, res) => {
+  res.json(getAIConfig());
 });
 
 // 更新数据源状态
