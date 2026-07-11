@@ -337,7 +337,7 @@ function runMigrations() {
     categories_json TEXT,
     model TEXT,
     usage_json TEXT,
-    raw_content TEXT,
+    raw_content TEXT
   )`);
 
   // 接口资产治理：候选资产（AI 初判 + 人工卡点）
