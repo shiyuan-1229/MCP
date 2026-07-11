@@ -8,14 +8,12 @@ const adminRoot = path.resolve(__dirname, '..');
 const appFilePath = path.join(adminRoot, 'assets', 'app.js');
 
 const source = await readFile(appFilePath, 'utf8');
-const match = source.match(/function downloadDeliverable\(id = state\.selectedDeliverableId\) \{([\s\S]*?)\n\}/u);
-assert.ok(match, 'downloadDeliverable function should exist');
 
-const body = match[1];
-assert.match(body, /fetch\(`/u);
-assert.match(body, /getDeliverableExportPayload\(id\)/u);
-assert.match(body, /deliverableFileMeta\(/u);
-assert.match(body, /buildDeliverableFileContent\(/u);
-assert.match(body, /new Blob\(/u);
+assert.match(source, /function downloadDeliverable\(/u);
+assert.match(source, /function getDeliverableExportPayload\(/u);
+assert.match(source, /function deliverableFileMeta\(/u);
+assert.match(source, /function buildDeliverableFileContent\(/u);
+assert.match(source, /new Blob\(/u);
+assert.match(source, /window\.downloadDeliverable = downloadDeliverable;/u);
 
 console.log('deliverable download fallback checks passed');

@@ -426,7 +426,7 @@ function renderTooling() {
 }
 
 // ============================================================
-// 5. MCP 资产 — 资产列表 + 8步生成时间线
+// 5. MCP 资产 — 资产列表
 // ============================================================
 function renderAssets() {
   // 步骤条
@@ -441,15 +441,12 @@ function renderAssets() {
     const visBadge = asset.visibility === 'public'
       ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
       : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
-    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td><td><button type="button" class="ghost-btn small" onclick="viewAssetTimeline('${asset.id}')">查看时间线</button></td></tr>`;
-  }), '暂无 MCP 资产', 7);
+    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td></tr>`;
+  }), '暂无 MCP 资产', 6);
 
   // 复用建议与复盘汇总
   renderReuseSuggestions();
   renderRetroSummaryBoard();
-
-  // 8步生成时间线
-  renderAssetTimelineList();
 }
 
 // 渲染复用建议：直接复用 / 复制后改造 / 建议新建
@@ -524,68 +521,6 @@ function renderRetroSummaryBoard() {
     </div>
     <p class="muted-line" style="margin-top:12px">这些高频误判会在下次 AI 识别时作为「历史高频误判提示」自动注入到识别请求中，提醒人工重点确认。</p>
   `;
-}
-
-// 8步生成时间线渲染
-function renderAssetTimelineList() {
-  const timeline = list(state.timeline);
-  const assets = list(state.assets);
-
-  if (!timeline.length) {
-    renderCardList('timelineList', [], '暂无 MCP 资产生成轨迹');
-    return;
-  }
-
-  // 按资产分组
-  const grouped = {};
-  timeline.forEach(item => {
-    if (!grouped[item.asset_id]) grouped[item.asset_id] = [];
-    grouped[item.asset_id].push(item);
-  });
-
-  const cards = Object.entries(grouped).map(([assetId, steps]) => {
-    const asset = assets.find(a => a.id === assetId);
-    const assetName = asset ? displayAssetName(asset.name) : (steps[0]?.asset_name || assetId);
-    const completedSteps = steps.filter(s => s.status === 'done' || s.status === 'completed').length;
-    const totalSteps = 8;
-
-    const stepLabels = [
-      '数据源接入', '接口识别', 'OpenAPI 生成', 'Tool 映射',
-      '安全配置', '沙箱测试', '灰度发布', '生产发布'
-    ];
-
-    const stepHtml = stepLabels.map((label, i) => {
-      const step = steps[i];
-      const isDone = step && (step.status === 'done' || step.status === 'completed');
-      const isPending = step && step.status === 'pending';
-      const cls = isDone ? 'tl-step done' : isPending ? 'tl-step pending' : 'tl-step todo';
-      const icon = isDone ? '\u2705' : isPending ? '\u23f3' : '\u2b55';
-      const time = step?.completed_at || '';
-      const operator = step?.operator || '';
-      return `<div class="${cls}">
-        <span class="tl-icon">${icon}</span>
-        <div class="tl-info">
-          <span class="tl-label">${label}</span>
-          ${time ? `<span class="tl-time">${text(time)}</span>` : ''}
-          ${operator ? `<span class="tl-operator">${text(operator)}</span>` : ''}
-          ${step?.notes ? `<span class="tl-notes">${text(step.notes)}</span>` : ''}
-        </div>
-      </div>`;
-    }).join('');
-
-    return `<div class="info-card timeline-card" style="padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div><h4 style="margin:0">${text(assetName)}</h4><p class="muted-line" style="margin:4px 0 0">${completedSteps}/${totalSteps} 步已完成</p></div>
-        <div style="display:flex;gap:6px">
-          <button type="button" class="ghost-btn small" onclick="jumpToAssets('${assetId}')">查看资产</button>
-          <button type="button" class="ghost-btn small" onclick="jumpToPublish()">查看发布</button>
-        </div>
-      </div>
-      <div class="timeline-track">${stepHtml}</div>
-    </div>`;
-  });
-
-  renderCardList('timelineList', cards, '暂无 MCP 资产生成轨迹');
 }
 
 // ============================================================
@@ -1179,16 +1114,6 @@ window.switchCustomerPage = function switchCustomerPage(pageId) {
 
 window.jumpToPage = function jumpToPage(pageId) {
   switchPage(pageId);
-  renderAll();
-};
-
-window.viewAssetTimeline = function viewAssetTimeline(assetId) {
-  state.selectedTimelineAssetId = assetId;
-  // 滚动到时间线区域
-  const tl = $('timelineList');
-  if (tl) {
-    tl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
   renderAll();
 };
 

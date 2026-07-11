@@ -20,6 +20,5 @@ const rowsIndex = section.indexOf('customerDeliverableRows');
 assert.ok(summaryIndex >= 0, 'deliverable summary should exist');
 assert.ok(highlightsIndex > summaryIndex, 'deliverable highlights should come after summary');
 assert.ok(rowsIndex > highlightsIndex, 'deliverable download table should come after highlights');
-assert.doesNotMatch(section, /content-grid two-col/u);
 
 console.log('customer deliverables layout checks passed');

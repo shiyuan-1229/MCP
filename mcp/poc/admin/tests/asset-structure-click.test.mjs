@@ -9,8 +9,7 @@ const appFilePath = path.join(adminRoot, 'assets', 'app.js');
 
 const source = await readFile(appFilePath, 'utf8');
 
-assert.match(source, /function viewAssetStructure\(id\)/u);
-assert.match(source, /jumpToAssets\(id\)/u);
-assert.match(source, /window\.viewAssetStructure = viewAssetStructure;/u);
+assert.match(source, /function jumpToAssets\(/u);
+assert.match(source, /window\.jumpToAssets = jumpToAssets;/u);
 
 console.log('asset structure click checks passed');

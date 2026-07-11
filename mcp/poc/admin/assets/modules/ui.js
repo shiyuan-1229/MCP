@@ -18,7 +18,9 @@ export function escapeHtml(value) {
 
 export function text(value) {
   if (value == null || value === '') return '-';
-  return escapeHtml(value);
+  // 清理乱码：替换 Unicode replacement character（U+FFFD）和连续不可读字节
+  const cleaned = String(value).replace(/\ufffd+/g, '').replace(/[\xc0-\xc1][\x80-\xbf]|[\xf5-\xf7][\x80-\xbf]{2,3}/g, '');
+  return escapeHtml(cleaned || '-');
 }
 
 export function displayStatus(status) {

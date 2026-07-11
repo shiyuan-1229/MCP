@@ -1327,39 +1327,6 @@ function seed() {
   const specStmt2 = db.prepare("INSERT OR IGNORE INTO platform_openapi_specs (id, source_id, project_id, title, spec) VALUES (?,?,?,?,?)");
   openapiSpecs.forEach(item => specStmt2.run(...item));
 
-  // 阶段三：生成流程时间线 seed
-  const timelineStages = [
-    { stage: "source-connected", label: "数据源接入" },
-    { stage: "api-identified", label: "接口识别" },
-    { stage: "openapi-generated", label: "OpenAPI 生成" },
-    { stage: "tool-mapped", label: "Tool 映射" },
-    { stage: "security-configured", label: "安全配置" },
-    { stage: "sandbox-tested", label: "沙箱测试" },
-    { stage: "canary-published", label: "灰度发布" },
-    { stage: "production-published", label: "生产发布" }
-  ];
-  const timelineSeeds = [
-    // mcp_sales_top: published -> all 8 done
-    ["tl_sales_1", "mcp_sales_top", "source-connected", "数据源接入", "done", "李实施", "2026-06-28 09:00:00", "POS 销售报表接口已接入"],
-    ["tl_sales_2", "mcp_sales_top", "api-identified", "接口识别", "done", "李实施", "2026-06-28 11:00:00", "识别出 /api/sales/top 接口"],
-    ["tl_sales_3", "mcp_sales_top", "openapi-generated", "OpenAPI 生成", "done", "李实施", "2026-06-29 10:00:00", "OpenAPI 3.0 描述已生成"],
-    ["tl_sales_4", "mcp_sales_top", "tool-mapped", "Tool 映射", "done", "李实施", "2026-06-29 14:00:00", "映射为 sales_top_products"],
-    ["tl_sales_5", "mcp_sales_top", "security-configured", "安全配置", "done", "平台管理员", "2026-06-30 09:00:00", "脱敏规则已配置"],
-    ["tl_sales_6", "mcp_sales_top", "sandbox-tested", "沙箱测试", "done", "李实施", "2026-07-02 10:00:00", "沙箱测试通过"],
-    ["tl_sales_7", "mcp_sales_top", "canary-published", "灰度发布", "done", "平台管理员", "2026-07-04 16:00:00", "灰度发布完成"],
-    ["tl_sales_8", "mcp_sales_top", "production-published", "生产发布", "done", "平台管理员", "2026-07-05 10:00:00", "v1.2.0 生产上线"],
-    // mcp_work_order: testing -> 1-6 done, 7-8 pending
-    ["tl_wo_1", "mcp_work_order", "source-connected", "数据源接入", "done", "王实施", "2026-06-25 09:00:00", "MES 工单接口已接入"],
-    ["tl_wo_2", "mcp_work_order", "api-identified", "接口识别", "done", "王实施", "2026-06-25 14:00:00", "识别出工单接口"],
-    ["tl_wo_3", "mcp_work_order", "openapi-generated", "OpenAPI 生成", "done", "王实施", "2026-06-26 10:00:00", "OpenAPI 描述已生成"],
-    ["tl_wo_4", "mcp_work_order", "tool-mapped", "Tool 映射", "done", "王实施", "2026-06-26 15:00:00", "映射为 work_order_lookup"],
-    ["tl_wo_5", "mcp_work_order", "security-configured", "安全配置", "done", "平台管理员", "2026-06-27 09:00:00", "OAuth 认证已配置"],
-    ["tl_wo_6", "mcp_work_order", "sandbox-tested", "沙箱测试", "done", "王实施", "2026-07-06 16:00:00", "沙箱测试通过"],
-    ["tl_wo_7", "mcp_work_order", "canary-published", "灰度发布", "pending", "", "", "等待灰度发布审批"],
-    ["tl_wo_8", "mcp_work_order", "production-published", "生产发布", "pending", "", "", "等待生产发布"]
-  ];
-  const tlStmt = db.prepare("INSERT OR IGNORE INTO platform_asset_timeline (id, asset_id, stage, stage_label, status, operator, completed_at, notes) VALUES (?,?,?,?,?,?,?,?)");
-  timelineSeeds.forEach(item => tlStmt.run(...item));
 }
 
 // ============== Auth API ==============
@@ -1808,27 +1775,6 @@ app.put("/api/platform/openapi-specs/:id/confirm", requireAuth, requireAdmin, (r
       );
     }
 
-    // 生成 8 步时间线（如果还没有）
-    const existingTimeline = db.prepare("SELECT id FROM platform_asset_timeline WHERE asset_id = ? LIMIT 1").get(assetId);
-    if (!existingTimeline) {
-      const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      const stages = [
-        { stage: "source-connected", label: "数据源接入", status: "done", operator: req.user?.display_name || '系统', notes: `${source?.name || '资料'} 已接入` },
-        { stage: "api-identified", label: "接口识别", status: "done", operator: 'AI 引擎', notes: `AI 模型 ${aiResult.model} 识别完成` },
-        { stage: "openapi-generated", label: "OpenAPI 生成", status: "done", operator: 'AI 引擎', notes: `生成 ${analysis.endpoints?.length || 0} 个端点` },
-        { stage: "tool-mapped", label: "Tool 映射", status: "done", operator: '系统', notes: `映射 ${tools.length} 个 Tool，${categoryNames.length} 个分类` },
-        { stage: "security-configured", label: "安全配置", status: "pending", operator: '', notes: '待配置' },
-        { stage: "sandbox-tested", label: "沙箱测试", status: "pending", operator: '', notes: '待测试' },
-        { stage: "canary-published", label: "灰度发布", status: "pending", operator: '', notes: '待发布' },
-        { stage: "production-published", label: "生产发布", status: "pending", operator: '', notes: '待发布' }
-      ];
-      const tlStmt = db.prepare("INSERT OR IGNORE INTO platform_asset_timeline (id, asset_id, stage, stage_label, status, operator, completed_at, notes) VALUES (?,?,?,?,?,?,?,?)");
-      stages.forEach((s, i) => {
-        const tlId = `tl_${assetId}_${i}`;
-        tlStmt.run(tlId, assetId, s.stage, s.label, s.status, s.operator, s.status === 'done' ? now : '', s.notes);
-      });
-    }
-
     // ── 生成下游数据：release + deliverable + gateway policy ──
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -1924,20 +1870,6 @@ app.get("/api/platform/openapi-specs/:id", requireAuth, (req, res) => {
     WHERE o.id = ? AND o.project_id IN (${ids.map(() => "?").join(",")})`).get(req.params.id, ...ids);
   if (!spec) return res.status(404).json({ error: "not found" });
   res.json({ ...spec, spec: safeParse(spec.spec) });
-});
-
-// 阶段三：生成流程时间线 API
-app.get("/api/platform/timeline", requireAuth, (req, res) => {
-  const { asset_id } = req.query || {};
-  const ids = scopedAssets(req).map(a => a.id);
-  if (!ids.length) return res.json([]);
-  let sql = `SELECT t.*, a.name AS asset_name FROM platform_asset_timeline t
-    JOIN platform_mcp_assets a ON a.id = t.asset_id
-    WHERE t.asset_id IN (${ids.map(() => "?").join(",")})`;
-  const params = [...ids];
-  if (asset_id) { sql += " AND t.asset_id = ?"; params.push(asset_id); }
-  sql += " ORDER BY t.completed_at ASC";
-  res.json(db.prepare(sql).all(...params));
 });
 
 app.get("/api/platform/knowledge-bases", requireAuth, (req, res) => {
@@ -2166,15 +2098,7 @@ app.post("/api/platform/releases/:id/publish", requireAuth, requireAdmin, (req, 
   // 2. 更新资产状态为 published
   db.prepare("UPDATE platform_mcp_assets SET status = 'published' WHERE id = ?").run(release.asset_id);
 
-  // 3. 更新时间线：灰度发布 + 生产发布标记为 done
-  db.prepare("UPDATE platform_asset_timeline SET status = 'done', completed_at = ?, operator = ?, notes = '灰度验证通过，直接全量' WHERE asset_id = ? AND stage = 'canary-published'").run(
-    now, req.user?.display_name || '管理员', release.asset_id
-  );
-  db.prepare("UPDATE platform_asset_timeline SET status = 'done', completed_at = ?, operator = ?, notes = ? WHERE asset_id = ? AND stage = 'production-published'").run(
-    now, req.user?.display_name || '管理员', `${release.version} 生产上线`, release.asset_id
-  );
-
-  // 4. 更新交付物为 ready
+  // 3. 更新交付物为 ready
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(release.asset_id);
   db.prepare("UPDATE platform_deliverables SET status = 'ready', updated_at = ? WHERE project_id = ? AND status = 'generating'").run(now, asset.project_id);
 
@@ -2190,7 +2114,6 @@ app.post("/api/platform/releases/:id/rollback", requireAuth, requireAdmin, (req,
     `已回滚（${req.user?.display_name || '管理员'}，${now}）`, req.params.id
   );
   db.prepare("UPDATE platform_mcp_assets SET status = 'testing' WHERE id = ?").run(release.asset_id);
-  db.prepare("UPDATE platform_asset_timeline SET status = 'pending', completed_at = '', notes = '已回滚，待重新发布' WHERE asset_id = ? AND stage IN ('canary-published', 'production-published')").run(release.asset_id);
   res.json({ ok: true, release_id: req.params.id, rolled_back_at: now });
 });
 
@@ -2857,12 +2780,8 @@ app.post("/api/platform/mcp-assets/:id/sandbox-test", requireAuth, requireAdmin,
 
   results.total_duration_ms = Date.now() - startTime;
 
-  // 如果全部通过，将时间线中的"沙箱测试"步骤标记为 done
+  // 如果全部通过，将 release 标记为 tested
   if (results.overall_status === 'pass' || results.overall_status === 'warn') {
-    db.prepare("UPDATE platform_asset_timeline SET status = 'done', completed_at = datetime('now'), operator = ?, notes = ? WHERE asset_id = ? AND stage = 'sandbox-tested'").run(
-      req.user?.display_name || '系统', `沙箱测试${results.summary.failed ? '部分通过' : '全部通过'}（${results.summary.passed}/${results.summary.total}）`, asset.id
-    );
-    // 如果测试通过，将 release 标记为 tested
     db.prepare("UPDATE platform_mcp_releases SET status = 'tested', tested_at = datetime('now') WHERE asset_id = ? AND status = 'testing'").run(asset.id);
   }
 

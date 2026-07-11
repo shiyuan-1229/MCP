@@ -11,31 +11,26 @@ const renderersFilePath = path.join(adminRoot, 'assets/modules/renderers.js');
 const html = await readFile(indexFilePath, 'utf8');
 const renderers = await readFile(renderersFilePath, 'utf8');
 
+// 当前 tooling 页面的核心元素
 for (const id of [
-  'toolPackagingFlow',
-  'assetStructurePreview'
+  'toolingSummary',
+  'toolMappingList'
 ]) {
   assert.match(html, new RegExp(`id="${id}"`, 'u'));
 }
 
 for (const label of [
-  'Tool 封装关系',
-  '封装预览',
-  '内部使用',
-  '外部使用',
-  '包含 Tool',
-  '资产结构预览',
-  '查看结构'
+  'Tool 映射看板',
+  'Tool 映射清单',
+  '接口端点',
+  'MCP Tool'
 ]) {
   assert.match(html, new RegExp(label, 'u'));
 }
 
 for (const token of [
-  'toolPackagingFlow',
-  'assetStructurePreview',
-  '内部使用',
-  '外部使用',
-  '查看结构'
+  'toolingSummary',
+  'toolMappingList'
 ]) {
   assert.match(renderers, new RegExp(token, 'u'));
 }

@@ -12,28 +12,23 @@ const html = await readFile(indexFilePath, 'utf8');
 const renderers = await readFile(renderersFilePath, 'utf8');
 
 for (const id of [
-  'customerAssetUsageBoard',
-  'customerBillingAssetRows'
+  'customerAssetCards',
+  'customerBillingSummary'
 ]) {
   assert.match(html, new RegExp(`id="${id}"`, 'u'));
 }
 
 for (const label of [
-  '使用类别',
-  '总 Token',
-  '累计调用量',
-  'Token 账单',
-  '按 MCP Token 账单'
+  '我的 MCP 资产',
+  '当期账单',
+  '近 30 天调用趋势'
 ]) {
   assert.match(html, new RegExp(label, 'u'));
 }
 
 for (const token of [
-  'customerAssetUsageBoard',
-  'customerBillingAssetRows',
-  '内部使用',
-  '外部使用',
-  'Token 账单'
+  'customerAssetCards',
+  'customerBillingSummary'
 ]) {
   assert.match(renderers, new RegExp(token, 'u'));
 }

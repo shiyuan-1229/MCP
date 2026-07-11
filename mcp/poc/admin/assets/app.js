@@ -49,7 +49,7 @@ async function loadAll() {
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, timeline, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -67,7 +67,6 @@ async function loadAll() {
     api('/api/platform/policy-changes'),
     api('/api/platform/knowledge-bases'),
     api('/api/platform/openapi-specs'),
-    api('/api/platform/timeline'),
     api('/api/platform/ai-config').catch(() => ({ configured: false })),
     api('/api/platform/builder/metrics').catch(() => null),
     api('/api/platform/governance/retro-summary').catch(() => null),
@@ -95,7 +94,6 @@ async function loadAll() {
     policyChanges,
     knowledgeBases: Array.isArray(knowledgeBases) ? knowledgeBases : [],
     openapiSpecs: Array.isArray(openapiSpecs) ? openapiSpecs : [],
-    timeline: Array.isArray(timeline) ? timeline : [],
     aiConfig: aiConfig || { configured: false },
     builderMetrics: builderMetrics || null,
     retroSummary: retroSummary || null,
@@ -729,15 +727,12 @@ function resetKnowledgeDrawerState() {
 
 function jumpFromKnowledgeToOpenapi(id = '') {
   state.selectedOpenapiSpecId = id || "";
-  state.selectedTimelineAssetId = "";
   resetKnowledgeDrawerState();
   state.currentPage = 'recognition';
   renderAll();
 }
 
 function jumpFromKnowledgeToAsset(id = '') {
-  state.selectedTimelineAssetId = id || "";
-  state.selectedOpenapiSpecId = "";
   resetKnowledgeDrawerState();
   state.currentPage = 'assets';
   renderAll();
@@ -745,7 +740,6 @@ function jumpFromKnowledgeToAsset(id = '') {
 
 function jumpFromKnowledgeToRelease(id = '') {
   state.selectedOpenapiSpecId = "";
-  state.selectedTimelineAssetId = "";
   resetKnowledgeDrawerState();
   state.currentPage = 'publish';
   renderAll();
@@ -754,7 +748,6 @@ function jumpFromKnowledgeToRelease(id = '') {
 
 function jumpFromKnowledgeToDeliverable(id = '') {
   state.selectedOpenapiSpecId = "";
-  state.selectedTimelineAssetId = "";
   resetKnowledgeDrawerState();
   state.currentPage = 'delivery';
   renderAll();
@@ -1741,18 +1734,6 @@ function jumpToPage(pageId) {
   renderAll();
 }
 
-// 查看资产详情的 8 步生成时间线
-function viewAssetTimeline(assetId) {
-  state.selectedAssetId = assetId;
-  state.currentPage = 'assets';
-  renderAll();
-  // 延迟滚动到时间线区域
-  setTimeout(() => {
-    const el = document.getElementById('assetTimelineDetail');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 100);
-}
-
 window.triggerRecognition = triggerRecognition;
 window.openAiRecognizeModal = openAiRecognizeModal;
 window.showAiAnalysisResult = showAiAnalysisResult;
@@ -1831,7 +1812,6 @@ window.jumpToTooling = jumpToTooling;
 window.jumpToAssets = jumpToAssets;
 window.jumpToPublish = jumpToPublish;
 window.jumpToPage = jumpToPage;
-window.viewAssetTimeline = viewAssetTimeline;
 
 async function bootApp() {
   if (!state.user) state.user = await api('/auth/me');

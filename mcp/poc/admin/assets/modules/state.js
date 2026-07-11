@@ -35,9 +35,7 @@ export const state = {
   accessGuide: null,
   // 阶段三：生成流程可视化
   openapiSpecs: [],
-  timeline: [],
   selectedOpenapiSpecId: '',
-  selectedTimelineAssetId: '',
   customerBillingExpanded: {},
   selectedProjectId: '',
   selectedReleaseId: '',

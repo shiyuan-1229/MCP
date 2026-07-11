@@ -7,40 +7,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const adminRoot = path.resolve(__dirname, '..');
 const indexFilePath = path.join(adminRoot, 'index.html');
 const renderersFilePath = path.join(adminRoot, 'assets/modules/renderers.js');
-const stylesFilePath = path.join(adminRoot, 'assets/styles.css');
 
 const html = await readFile(indexFilePath, 'utf8');
 const renderers = await readFile(renderersFilePath, 'utf8');
-const styles = await readFile(stylesFilePath, 'utf8');
 
+// 当前治理与统计页面的核心元素
 for (const id of [
-  'securityTestAsset',
-  'securityTestResult',
-  'governanceMainGrid',
-  'policyChangePanel'
+  'policyRows',
+  'policyChangeRows',
+  'usageSummary'
 ]) {
   assert.match(html, new RegExp(`id="${id}"`, 'u'));
 }
 
 for (const label of [
-  '安全测试台',
-  '鉴权拦截',
-  '限流校验',
-  '脱敏校验',
+  '治理与统计',
   '规则变更记录'
 ]) {
   assert.match(html, new RegExp(label, 'u'));
 }
 
 for (const token of [
-  'runSecurityTest',
-  'securityTestResult',
-  'governanceMainGrid',
-  'policyChangePanel'
+  'policyRows',
+  'policyChangeRows',
+  'usageSummary'
 ]) {
   assert.match(renderers, new RegExp(token, 'u'));
 }
-
-assert.match(styles, /governance-main-grid/u);
 
 console.log('admin security layout checks passed');

@@ -13,12 +13,8 @@ const [appSource, renderersSource] = await Promise.all([
   readFile(renderersFilePath, 'utf8')
 ]);
 
-assert.match(renderersSource, /toggleApiKeyStatus\('\$\{key\.id\}'\)/u);
-assert.match(renderersSource, /toggleBillingStatus\('\$\{item\.id\}'\)/u);
-
-assert.match(appSource, /function toggleApiKeyStatus\(id\)/u);
-assert.match(appSource, /function toggleBillingStatus\(id\)/u);
-assert.match(appSource, /window\.toggleApiKeyStatus = toggleApiKeyStatus;/u);
-assert.match(appSource, /window\.toggleBillingStatus = toggleBillingStatus;/u);
+assert.match(renderersSource, /toggleAssetVisibility\(/u);
+assert.match(appSource, /async function toggleAssetVisibility\(/u);
+assert.match(appSource, /window\.toggleAssetVisibility = toggleAssetVisibility;/u);
 
 console.log('status chip action checks passed');

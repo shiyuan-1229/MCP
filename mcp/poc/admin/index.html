@@ -52,7 +52,7 @@
         <div class="user-pill"><span class="status-dot"></span><span id="currentUser">未登录</span></div>
       </header>
 
-      <section id="summary" class="page active" data-title="打造总览" data-eyebrow="企业 MCP 打造工作台 · B 端价值指标 · 产能趋势 · 动态时间线">
+      <section id="summary" class="page active" data-title="打造总览" data-eyebrow="企业 MCP 打造工作台 · B 端价值指标 · 产能趋势">
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head">
             <h3>企业 MCP 打造工作台 · B 端价值看板</h3>
@@ -154,15 +154,11 @@
 
       <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 复用建议与误识别复盘">
         <div id="assetsStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>可见性</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
+        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>MCP 资产目录</h3></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>可见性</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
         <div class="content-grid two-col" style="margin-bottom:14px">
           <article class="panel"><div class="panel-head"><h3>复用建议</h3><small class="muted-line">直接复用 / 复制后改造 / 建议新建</small></div><div id="reuseSuggestionBoard"></div></article>
           <article class="panel"><div class="panel-head"><h3>误识别复盘汇总</h3><small class="muted-line">AI 哪里识别错了？历史高频误判反哺下一轮</small></div><div id="retroSummaryBoard"></div></article>
         </div>
-        <article class="panel" style="margin-top:20px">
-          <div class="panel-head"><h3>8 步生成时间线</h3><small class="muted-line">每个 MCP 资产从资料接入到生产发布的完整轨迹</small></div>
-          <div id="timelineList" class="timeline-list"></div>
-        </article>
       </section>
 
       <section id="publish" class="page" data-title="测试发布" data-eyebrow="交付负责人验收发布 · 沙箱试调 · 灰度发布 · 版本管理 · 回滚">

@@ -12,29 +12,24 @@ const html = await readFile(indexFilePath, 'utf8');
 assert.doesNotMatch(html, /\?{3,}/u);
 
 for (const title of [
-  '工厂总览',
-  '业务资料',
-  'OpenAPI 草案',
-  'Tool 装配',
+  '打造总览',
+  '资料接入',
+  '接口识别',
+  'Tool 映射',
   'MCP 资产',
-  '验证发布',
-  '交付资料',
-  '运行成效',
-  '资料与结算'
+  '测试发布',
+  '交付管理',
+  '治理与统计'
 ]) {
   assert.match(html, new RegExp(title, 'u'));
 }
 
 for (const heading of [
-  '业务资料池',
-  'OpenAPI 草案池',
-  'Tool 装配清单',
+  '资料接入工作台',
+  'OpenAPI 草案列表',
+  'Tool 映射看板',
   'MCP 资产目录',
-  '验证发布清单',
-  '交付资料清单',
-  '运行成效总览',
-  '知识资料清单',
-  '结算资料清单'
+  '规则变更记录'
 ]) {
   assert.match(html, new RegExp(heading, 'u'));
 }

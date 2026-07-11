@@ -23,5 +23,6 @@ globalThis.window = globalThis;
 const fileUrl = pathToFileURL(path.resolve('D:/桌面/mcp方案/mcp/poc/admin/assets/modules/renderers.js')).href;
 const mod = await import(`${fileUrl}?case=renderers-import`);
 assert.equal(typeof mod.renderAll, 'function');
-assert.equal(typeof mod.renderAssetGovernanceWorkbench, 'function');
+assert.equal(typeof mod.renderNav, 'function');
+assert.equal(typeof mod.renderBuilderValueBoard, 'function');
 console.log('renderers import check passed');

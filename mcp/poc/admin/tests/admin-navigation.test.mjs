@@ -32,15 +32,15 @@ async function verifyNavItems() {
   assert.deepEqual(
     navItems.map(item => ({ id: item.id, label: item.label })),
     [
-      { id: 'summary', label: '工厂总览' },
-      { id: 'intake', label: '业务资料' },
-      { id: 'recognition', label: 'OpenAPI 草案' },
-      { id: 'tooling', label: 'Tool 装配' },
+      { id: 'summary', label: '生成总览' },
+      { id: 'intake', label: '资料接入' },
+      { id: 'recognition', label: '接口识别' },
+      { id: 'tooling', label: 'Tool 映射' },
       { id: 'assets', label: 'MCP 资产' },
-      { id: 'publish', label: '验证发布' },
-      { id: 'delivery', label: '交付资料' },
-      { id: 'governance', label: '运行成效' },
-      { id: 'settings', label: '资料与结算' }
+      { id: 'publish', label: '测试发布' },
+      { id: 'delivery', label: '交付管理' },
+      { id: 'governance', label: '治理与统计' },
+      { id: 'settings', label: '设置' }
     ]
   );
 }
