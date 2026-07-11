@@ -76,9 +76,8 @@
         </div>
       </section>
 
-      <section id="intake" class="page" data-title="资料接入" data-eyebrow="上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
+      <section id="intake" class="page" data-title="资料接入" data-eyebrow="实施顾问确认资料来源 · 上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <div id="retroHintBanner" style="margin-bottom:12px"></div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
           <div class="table-wrap">
@@ -127,9 +126,8 @@
         </div>
       </section>
 
-      <section id="recognition" class="page" data-title="接口识别" data-eyebrow="AI 将业务资料识别为 OpenAPI 3.0 接口草案，可确认并下载">
+      <section id="recognition" class="page" data-title="接口识别" data-eyebrow="产品/技术确认识别结果 · AI 将业务资料识别为 OpenAPI 3.0 接口草案，可确认并下载">
         <div id="recognitionStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <div id="retroHintBannerRecognition" style="margin-bottom:12px"></div>
         <div class="content-grid two-col" style="margin-bottom:14px">
           <article class="panel">
             <div class="panel-head"><h3>OpenAPI 草案列表</h3><small class="muted-line">选择草案查看详情</small></div>
@@ -142,7 +140,7 @@
         </div>
       </section>
 
-      <section id="tooling" class="page" data-title="Tool 映射" data-eyebrow="OpenAPI 端点映射为 MCP Tool + 安全规则配置">
+      <section id="tooling" class="page" data-title="Tool 映射" data-eyebrow="产品/技术确认 Tool 边界 · OpenAPI 端点映射为 MCP Tool + 安全规则配置">
         <div id="toolingStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>Tool 映射看板</h3><small class="muted-line">接口端点 → MCP Tool → 安全规则</small></div>
@@ -154,16 +152,20 @@
         </article>
       </section>
 
-      <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 8 步生成时间线">
+      <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 复用建议与误识别复盘">
         <div id="assetsStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>可见性</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
+        <div class="content-grid two-col" style="margin-bottom:14px">
+          <article class="panel"><div class="panel-head"><h3>复用建议</h3><small class="muted-line">直接复用 / 复制后改造 / 建议新建</small></div><div id="reuseSuggestionBoard"></div></article>
+          <article class="panel"><div class="panel-head"><h3>误识别复盘汇总</h3><small class="muted-line">AI 哪里识别错了？历史高频误判反哺下一轮</small></div><div id="retroSummaryBoard"></div></article>
+        </div>
         <article class="panel" style="margin-top:20px">
           <div class="panel-head"><h3>8 步生成时间线</h3><small class="muted-line">每个 MCP 资产从资料接入到生产发布的完整轨迹</small></div>
           <div id="timelineList" class="timeline-list"></div>
         </article>
       </section>
 
-      <section id="publish" class="page" data-title="测试发布" data-eyebrow="沙箱试调 · 灰度发布 · 版本管理 · 回滚">
+      <section id="publish" class="page" data-title="测试发布" data-eyebrow="交付负责人验收发布 · 沙箱试调 · 灰度发布 · 版本管理 · 回滚">
         <div id="publishStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="content-grid two-col">
           <article class="panel">
@@ -188,8 +190,12 @@
         </div>
       </section>
 
-      <section id="delivery" class="page" data-title="交付管理" data-eyebrow="配置包 · 测试报告 · 调用日志 · 效果报告下载">
+      <section id="delivery" class="page" data-title="交付管理" data-eyebrow="交付团队归档与复盘 · 配置包 · 测试报告 · 调用日志 · 效果报告下载">
         <div id="deliveryStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <article class="panel" style="margin-bottom:14px">
+          <div class="panel-head"><h3>交付闭环状态</h3><small class="muted-line">每个项目的 5 类交付资料齐全性一览：配置包 / 测试报告 / 调用日志 / 运行说明 / 复盘结论</small></div>
+          <div id="deliveryClosureBoard" class="metric-grid"></div>
+        </article>
         <article class="panel">
           <div class="panel-head"><h3>交付资料清单</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
           <div id="deliverableControls" class="project-controls"></div>
@@ -266,13 +272,6 @@
               </table>
             </div>
           </article>
-      </section>
-
-      <section id="asset-governance" class="page" data-title="接口资产治理" data-eyebrow="AI 初判 → 人工审核 → 资产入库 → 复用推荐 · 内部 IT 团队工作台">
-        <article class="panel">
-          <div class="panel-head"><h3>接口资产治理工作台</h3></div>
-          <div id="assetGovernanceWorkbench"></div>
-        </article>
       </section>
 
       <section id="settings" class="page" data-title="设置" data-eyebrow="客户管理 · 项目管理 · 计费配置 · 知识库 · API 凭证">
@@ -435,7 +434,7 @@
   </aside>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script type="module" src="/admin/assets/app.js?v=36"></script>
+  <script type="module" src="/admin/assets/app.js?v=38"></script>
 </body>
 </html>
 

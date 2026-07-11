@@ -798,10 +798,17 @@ function seed() {
     ["del_logs_retail", "proj_retail_ai", "调用日志 CSV", "log", "ready"],
     ["del_review_retail", "proj_retail_ai", "月度效果复盘", "effect-report", "generating"],
     ["del_kb_retail", "proj_retail_ai", "门店知识库导出", "knowledge-base", "ready"],
+    ["del_rguide_retail", "proj_retail_ai", "运行说明文档", "run-guide", "ready"],
+    ["del_retro_retail", "proj_retail_ai", "误识别复盘结论", "retro-conclusion", "generating"],
     ["del_cfg_manuf", "proj_manufacturing_ops", "华智 MCP 配置包", "config", "ready"],
     ["del_test_manuf", "proj_manufacturing_ops", "华智测试报告", "test-report", "ready"],
+    ["del_logs_manuf", "proj_manufacturing_ops", "华智调用日志", "log", "generating"],
+    ["del_rguide_manuf", "proj_manufacturing_ops", "华智运行说明", "run-guide", "ready"],
+    ["del_retro_manuf", "proj_manufacturing_ops", "华智复盘结论", "retro-conclusion", "ready"],
     ["del_cfg_property", "proj_property_service", "物业 MCP 配置包", "config", "ready"],
-    ["del_cfg_edu", "proj_education_campus", "校园 AI 配置包", "config", "ready"]
+    ["del_test_property", "proj_property_service", "物业测试报告", "test-report", "generating"],
+    ["del_cfg_edu", "proj_education_campus", "校园 AI 配置包", "config", "ready"],
+    ["del_rguide_edu", "proj_education_campus", "校园运行说明", "run-guide", "generating"]
   ];
   const delStmt = db.prepare("INSERT OR IGNORE INTO platform_deliverables (id, project_id, name, type, status) VALUES (?,?,?,?,?)");
   deliverables.forEach(item => delStmt.run(...item));
