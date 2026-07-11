@@ -327,7 +327,7 @@ D:\桌面\mcp方案\mcp\poc\presentation.html
                        下次识别顶部 banner 提示团队
 ```
 
-6 类原因：`classification_error` / `field_understanding` / `sensitivity_miss` / `boundary_error` / `business_caliber` / `other`
+6 类原因：`classification_error` / `field_understanding_error` / `sensitivity_misjudge` / `tool_boundary_error` / `business_meaning_error` / `other`
 
 ### 13.6 Tool 打造台三栏（Task 3）
 
