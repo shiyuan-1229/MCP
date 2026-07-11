@@ -1096,12 +1096,36 @@ async function createDataSource() {
   });
   fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
 
-  function handleFile(file) {
+  async function handleFile(file) {
     selectedFile = file;
     $('fileName').textContent = file.name;
     $('fileSize').textContent = formatFileSize(file.size);
     $('filePreview').style.display = 'block';
     uploadZone.style.display = 'none';
+
+    // 如果是 SQL 文件，快速扫描 CREATE TABLE 数量给用户预览
+    const isSQL = file.name.toLowerCase().endsWith('.sql');
+    if (isSQL && file.size < 5 * 1024 * 1024) {
+      try {
+        const text = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('read error'));
+          reader.readAsText(file, 'UTF-8');
+        });
+        const tableCount = (text.match(/CREATE\s+TABLE\s+/gi) || []).length;
+        if (tableCount > 0) {
+          const hint = document.createElement('div');
+          hint.id = 'ddlPreviewHint';
+          hint.style.cssText = 'margin-top:8px;padding:6px 12px;background:#dcfce7;color:#16a34a;border-radius:6px;font-size:12px';
+          hint.innerHTML = `✅ 已扫描到 <strong>${tableCount}</strong> 张表的 CREATE TABLE 语句，AI 将自动识别字段与关联。`;
+          const preview = $('filePreview');
+          const old = $('ddlPreviewHint');
+          if (old) old.remove();
+          preview.appendChild(hint);
+        }
+      } catch { /* 预览失败不影响主流程 */ }
+    }
   }
 
   window.clearUploadFile = () => {
@@ -1109,6 +1133,8 @@ async function createDataSource() {
     fileInput.value = '';
     $('filePreview').style.display = 'none';
     uploadZone.style.display = '';
+    const old = $('ddlPreviewHint');
+    if (old) old.remove();
   };
 
   // 取消 / 保存
@@ -1129,15 +1155,68 @@ async function createDataSource() {
 
       (async () => {
         try {
-          await api('/api/platform/data-sources', {
+          // 先读取上传文件内容（如果是文本类）
+          let ddlContent = null;
+          let ddlFileName = null;
+          let ddlFileSize = null;
+          if (selectedFile) {
+            ddlFileName = selectedFile.name;
+            ddlFileSize = selectedFile.size;
+            const textExts = ['.sql', '.csv', '.json', '.md', '.txt', '.yaml', '.yml'];
+            const isText = textExts.some(ext => selectedFile.name.toLowerCase().endsWith(ext));
+            if (isText) {
+              // 限制 5MB 文本
+              if (selectedFile.size > 5 * 1024 * 1024) {
+                showToast('文本文件超过 5MB，请精简后再上传。', 'warning');
+                btn.disabled = false;
+                btn.textContent = '确认导入';
+                return;
+              }
+              ddlContent = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('文件读取失败'));
+                reader.readAsText(selectedFile, 'UTF-8');
+              });
+            } else {
+              // 二进制文件（.xlsx .pdf .docx）：保存文件名，提示后续手工补充
+              ddlContent = `[二进制文件占位] 文件名: ${selectedFile.name}，大小: ${formatFileSize(selectedFile.size)}。请管理员在识别结果中补充字段信息。`;
+            }
+          }
+
+          const response = await api('/api/platform/data-sources', {
             method: 'POST',
-            body: JSON.stringify({ project_id, name, type, auth_mode })
+            body: JSON.stringify({
+              project_id,
+              name,
+              type,
+              auth_mode,
+              ddl_content: ddlContent,
+              ddl_file_name: ddlFileName,
+              ddl_file_size: ddlFileSize
+            })
           });
+
           await loadAll();
           renderAll();
           document.body.removeChild(overlay);
           const typeLabel = $('ds_type').options[$('ds_type').selectedIndex].text.split('（')[0];
-          showToast(`「${name}」已导入（${typeLabel}）。${selectedFile ? '文件已接收，平台正在解析中...' : '请继续完善资料详情。'}`, 'success');
+
+          // 根据后端解析结果显示友好提示
+          let msg = `「${name}」已导入（${typeLabel}）。`;
+          if (response?.parsed && type === 'Database') {
+            const p = response.parsed;
+            if (p.total_tables > 0) {
+              msg += ` ✅ 已解析 ${p.total_tables} 张表，共 ${p.total_columns} 个字段。`;
+            } else if (p.warnings?.length) {
+              msg += ` ⚠️ ${p.warnings[0]}`;
+            }
+          } else if (selectedFile) {
+            msg += ' 文件已接收，平台正在解析中...';
+          } else {
+            msg += ' 请继续完善资料详情。';
+          }
+          showToast(msg, 'success');
         } catch (error) {
           btn.disabled = false;
           btn.textContent = '确认导入';

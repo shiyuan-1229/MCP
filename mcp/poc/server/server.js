@@ -13,6 +13,7 @@ import { suggestReuse, REUSE_CATEGORY_TEXT } from "./modules/governance/reuse-se
 import { detectSensitiveHits, buildManualGate, validateManualDecision, validateAcceptanceChecklist, explainPublishBlock, getAcceptanceRequiredFields } from "./modules/governance/manual-checks.mjs";
 import { validateRetroReason, RETRO_REASONS, buildRetroHint, summarizeRetro } from "./modules/governance/retro-service.mjs";
 import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUNDARY_RULE_REFERENCE } from "./modules/governance/boundary-detector.mjs";
+import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -121,7 +122,11 @@ function runMigrations() {
     type TEXT,
     auth_mode TEXT,
     status TEXT,
-    recognition_status TEXT DEFAULT 'draft'
+    recognition_status TEXT DEFAULT 'draft',
+    sample_ddl TEXT,
+    parsed_summary TEXT,
+    ddl_file_name TEXT,
+    ddl_file_size INTEGER
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS platform_mcp_assets (
     id TEXT PRIMARY KEY,
@@ -302,6 +307,10 @@ function runMigrations() {
   ensureColumn('kb_collections', 'indexed_at', 'TEXT');
   ensureColumn('kb_documents', 'updated_at', 'TEXT');
   ensureColumn('platform_data_sources', 'recognition_status', "TEXT DEFAULT 'draft'");
+  ensureColumn('platform_data_sources', 'sample_ddl', 'TEXT');
+  ensureColumn('platform_data_sources', 'parsed_summary', 'TEXT');
+  ensureColumn('platform_data_sources', 'ddl_file_name', 'TEXT');
+  ensureColumn('platform_data_sources', 'ddl_file_size', 'INTEGER');
   ensureColumn('platform_mcp_assets', 'visibility', "TEXT DEFAULT 'internal'");
 
   // 阶段三：数据源 OpenAPI 描述与生成时间线
@@ -1455,21 +1464,48 @@ app.get("/api/platform/data-sources", requireAuth, (req, res) => {
 });
 
 app.post("/api/platform/data-sources", requireAuth, requireAdmin, (req, res) => {
-  const { project_id, name, type, auth_mode, scope, status } = req.body || {};
+  const { project_id, name, type, auth_mode, scope, status, ddl_content, ddl_file_name, ddl_file_size, description } = req.body || {};
   if (!project_id || !name || !type) return res.status(400).json({ error: "project_id, name and type required" });
   const project = db.prepare("SELECT id FROM platform_projects WHERE id = ?").get(project_id);
   if (!project) return res.status(404).json({ error: "project not found" });
+
+  // 解析上传的 DDL/CSV/Excel-表头（如果是 Database / Knowledge Base 类型且带了 ddl_content）
+  let parsedSummary = null;
+  let sampleDdl = null;
+  if (ddl_content && typeof ddl_content === 'string' && ddl_content.trim()) {
+    sampleDdl = ddl_content;
+    if (type === 'Database') {
+      const parsed = parseDDL(ddl_content);
+      parsedSummary = JSON.stringify(parsed.summary);
+    } else if (type === 'Knowledge Base') {
+      // 知识库：尝试 CSV 头解析
+      const parsed = parseCSVHeader(ddl_content);
+      parsedSummary = JSON.stringify({ total_columns: parsed.columns.length, columns: parsed.columns.map(c => c.name) });
+    }
+  }
+
   const id = makeId("ds");
-  db.prepare("INSERT INTO platform_data_sources (id, project_id, name, type, auth_mode, status) VALUES (?,?,?,?,?,?)").run(
+  db.prepare(`INSERT INTO platform_data_sources
+    (id, project_id, name, type, auth_mode, status, sample_ddl, parsed_summary, ddl_file_name, ddl_file_size)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     id,
     project_id,
     name,
     type,
     auth_mode || "API Key",
-    status || (type === "Knowledge Base" ? "indexed" : "draft")
+    status || (type === "Knowledge Base" ? "indexed" : "draft"),
+    sampleDdl,
+    parsedSummary,
+    ddl_file_name || null,
+    ddl_file_size || null
   );
-  res.status(201).json(db.prepare(`SELECT s.*, p.name AS project_name FROM platform_data_sources s
-    JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?`).get(id));
+  const created = db.prepare(`SELECT s.*, p.name AS project_name FROM platform_data_sources s
+    JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?`).get(id);
+  res.status(201).json({
+    ...created,
+    parsed: parsedSummary ? JSON.parse(parsedSummary) : null,
+    ddl_received: !!sampleDdl
+  });
 });
 
 // 触发 AI 接口识别：异步调用大模型 → 生成 OpenAPI + Tools
@@ -1478,7 +1514,22 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
   if (!source) return res.status(404).json({ error: "data source not found" });
 
   const useAI = req.body?.use_ai !== false; // 默认使用 AI
-  const sampleContent = req.body?.sample_content || req.body?.description || '';
+  let sampleContent = req.body?.sample_content || req.body?.description || '';
+
+  // 优先使用数据源本身已存储的 sample_ddl
+  let ddlParsedSummary = null;
+  if (!sampleContent && source.sample_ddl) {
+    if (source.type === 'Database') {
+      const parsed = parseDDL(source.sample_ddl);
+      sampleContent = parsed.ai_prompt;
+      ddlParsedSummary = parsed.summary;
+    } else if (source.type === 'Knowledge Base') {
+      const parsed = parseCSVHeader(source.sample_ddl);
+      sampleContent = parsed.ai_prompt || source.sample_ddl.slice(0, 4000);
+    } else {
+      sampleContent = source.sample_ddl.slice(0, 4000);
+    }
+  }
 
   // 标记识别中
   db.prepare("UPDATE platform_data_sources SET recognition_status = 'pending' WHERE id = ?").run(source.id);
@@ -1493,10 +1544,44 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
     let specId = existing?.id;
     if (!existing) {
       specId = makeId("spec");
-      const autoSpec = {
-        openapi: "3.0.0",
-        info: { title: source.name || "AI 识别结果", version: "1.0.0" },
-        paths: {
+      // 根据 DDL 解析结果生成动态 OpenAPI（不再写死 /records/{id}）
+      let paths = {};
+      if (source.type === 'Database' && source.sample_ddl) {
+        const parsed = parseDDL(source.sample_ddl);
+        ddlParsedSummary = parsed.summary;
+        for (const table of parsed.tables) {
+          const tagBase = table.name;
+          // 查询列表
+          paths[`/db/${table.name}/list`] = {
+            get: {
+              operationId: `${source.id}_${table.name}_list`,
+              summary: table.comment ? `${table.name}（${table.comment}）查询列表` : `${table.name} 查询列表`,
+              tags: [tagBase],
+              parameters: [
+                { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+                { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } }
+              ],
+              responses: { '200': { description: `${table.name} 列表` } }
+            }
+          };
+          // 按主键查询
+          const pkCol = table.columns.find(c => c.pk);
+          if (pkCol) {
+            paths[`/db/${table.name}/{id}`] = {
+              get: {
+                operationId: `${source.id}_${table.name}_get`,
+                summary: `${table.name} 按主键查询`,
+                tags: [tagBase],
+                parameters: [
+                  { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+                ],
+                responses: { '200': { description: `${table.name} 详情` } }
+              }
+            };
+          }
+        }
+      } else {
+        paths = {
           [source.type === "Database" ? "/records/{id}" : "/api/query"]: {
             get: {
               operationId: `${source.id}_query`,
@@ -1507,14 +1592,31 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
               responses: { "200": { description: "查询结果" } }
             }
           }
-        }
+        };
+      }
+      const autoSpec = {
+        openapi: "3.0.0",
+        info: {
+          title: source.name || "AI 识别结果",
+          version: "1.0.0",
+          description: source.type === 'Database' && ddlParsedSummary
+            ? `从 DDL 解析：${ddlParsedSummary.total_tables} 张表，${ddlParsedSummary.total_columns} 个字段（${ddlParsedSummary.table_names.join(', ')}）`
+            : undefined
+        },
+        paths
       };
       db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
         specId, source.id, source.project_id, `${source.name} OpenAPI 草案`, JSON.stringify(autoSpec), "draft"
       );
     }
     const updated = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id);
-    return res.json({ source: updated, spec_id: specId, ai_used: false, message: isAIConfigured() ? '静态识别模式' : 'AI 未配置，使用静态识别' });
+    return res.json({
+      source: updated,
+      spec_id: specId,
+      ai_used: false,
+      ddl_summary: ddlParsedSummary,
+      message: isAIConfigured() ? '静态识别模式' : 'AI 未配置，使用静态识别'
+    });
   }
 
   // 真实 AI 识别流程
@@ -1577,7 +1679,8 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
       tools: pipelineResult.tools,
       categories: pipelineResult.categories,
       model: pipelineResult.model,
-      usage: pipelineResult.usage
+      usage: pipelineResult.usage,
+      ddl_summary: ddlParsedSummary
     });
   } catch (err) {
     // AI 失败时 fallback 到静态识别
