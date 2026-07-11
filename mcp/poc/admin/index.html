@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MCP Forge - 业务资料 -> MCP 资产生成工厂</title>
+  <title>MCP Forge - 企业 MCP 打造工作台</title>
   <link rel="stylesheet" href="/admin/assets/styles.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
         <img src="/admin/brand-icon.png" alt="MCP Forge" onerror="this.style.display='none'">
         <div>
           <h1 id="loginTitle">MCP Forge</h1>
-          <p>业务资料 -> MCP 资产生成工厂 · 面向交付的企业 MCP 生产台</p>
+          <p>企业 MCP 打造工作台 · 业务资料 → MCP 资产生成 · 面向交付的生产台</p>
         </div>
       </div>
       <div class="role-hint">
@@ -23,7 +23,7 @@
       </div>
       <label><span>账号</span><input id="loginUser" autocomplete="username" value="admin"></label>
       <label><span>密码</span><input id="loginPass" type="password" autocomplete="current-password" value="admin123"></label>
-      <button id="loginBtn" type="button" class="primary-btn">进入工厂</button>
+      <button id="loginBtn" type="button" class="primary-btn">进入工作台</button>
       <p id="loginError" class="form-error" role="alert"></p>
       <div class="quick-accounts" aria-label="示例账号">
         <button type="button" data-user="admin" data-pass="admin123">平台管理员</button>
@@ -38,7 +38,7 @@
 
   <div id="app" class="app-shell hidden">
     <aside class="sidebar">
-      <div class="side-brand"><strong>MCP Forge</strong><span id="roleLabel">MCP 资产生成工厂</span></div>
+      <div class="side-brand"><strong>MCP Forge</strong><span id="roleLabel">企业 MCP 打造工作台</span></div>
       <nav id="nav" aria-label="工厂导航"></nav>
       <button id="logoutBtn" type="button" class="ghost-btn logout-btn">退出登录</button>
     </aside>
@@ -46,14 +46,21 @@
     <main class="main-panel">
       <header class="topbar">
         <div>
-          <p class="eyebrow" id="pageEyebrow">业务资料 -> MCP 资产生成工厂的全链路看板</p>
+          <p class="eyebrow" id="pageEyebrow">企业 MCP 打造工作台 · 资料到资产的打造链路</p>
           <h2 id="pageTitle">生成总览</h2>
         </div>
         <div class="user-pill"><span class="status-dot"></span><span id="currentUser">未登录</span></div>
       </header>
 
-      <section id="summary" class="page active" data-title="生成总览" data-eyebrow="资产生成全链路漏斗 · 产能趋势 · 动态时间线">
-        <div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>厂长驾驶舱</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="summaryCards" class="metric-grid"></div></div>
+      <section id="summary" class="page active" data-title="打造总览" data-eyebrow="企业 MCP 打造工作台 · B 端价值指标 · 产能趋势 · 动态时间线">
+        <div class="panel" style="margin-bottom:14px">
+          <div class="panel-head">
+            <h3>企业 MCP 打造工作台 · B 端价值看板</h3>
+            <small class="muted-line">资料 → 候选 → 审核 → 验收 → 发布 → 复用，每一环都看得到 AI 与人共同创造的价值</small>
+          </div>
+          <div id="builderValueBoard" class="metric-grid"></div>
+        </div>
+        <div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>打造驾驶舱</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="summaryCards" class="metric-grid"></div></div>
         <article class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资产生成漏斗</h3><small class="muted-line">点击各阶段可跳转到对应页面</small></div>
           <div id="generationFunnel" class="funnel-container" style="padding:16px;display:grid;gap:8px"></div>
@@ -71,6 +78,7 @@
 
       <section id="intake" class="page" data-title="资料接入" data-eyebrow="上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div id="retroHintBanner" style="margin-bottom:12px"></div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
           <div class="table-wrap">
@@ -121,6 +129,7 @@
 
       <section id="recognition" class="page" data-title="接口识别" data-eyebrow="AI 将业务资料识别为 OpenAPI 3.0 接口草案，可确认并下载">
         <div id="recognitionStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div id="retroHintBannerRecognition" style="margin-bottom:12px"></div>
         <div class="content-grid two-col" style="margin-bottom:14px">
           <article class="panel">
             <div class="panel-head"><h3>OpenAPI 草案列表</h3><small class="muted-line">选择草案查看详情</small></div>
@@ -257,6 +266,13 @@
               </table>
             </div>
           </article>
+      </section>
+
+      <section id="asset-governance" class="page" data-title="接口资产治理" data-eyebrow="AI 初判 → 人工审核 → 资产入库 → 复用推荐 · 内部 IT 团队工作台">
+        <article class="panel">
+          <div class="panel-head"><h3>接口资产治理工作台</h3></div>
+          <div id="assetGovernanceWorkbench"></div>
+        </article>
       </section>
 
       <section id="settings" class="page" data-title="设置" data-eyebrow="客户管理 · 项目管理 · 计费配置 · 知识库 · API 凭证">

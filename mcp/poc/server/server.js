@@ -7,6 +7,12 @@ import fs from "fs";
 import Database from "better-sqlite3";
 import { runFullPipeline, analyzeBusinessData, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
 import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
+import { createGovernanceRepository } from "./modules/governance/repository.mjs";
+import { buildReviewTasksForCandidate, decideReviewLevel } from "./modules/governance/review-orchestrator.mjs";
+import { suggestReuse, REUSE_CATEGORY_TEXT } from "./modules/governance/reuse-service.mjs";
+import { detectSensitiveHits, buildManualGate, validateManualDecision, validateAcceptanceChecklist, explainPublishBlock, getAcceptanceRequiredFields } from "./modules/governance/manual-checks.mjs";
+import { validateRetroReason, RETRO_REASONS, buildRetroHint, summarizeRetro } from "./modules/governance/retro-service.mjs";
+import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUNDARY_RULE_REFERENCE } from "./modules/governance/boundary-detector.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +34,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "mcp_forge.db"
 const db = new Database(DB_PATH);
 const ADMIN_DIR = path.join(__dirname, "..", "admin");
 const CLIENT_DIR = path.join(__dirname, "..", "client");
+const governanceRepo = createGovernanceRepository(db);
 
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
@@ -331,6 +338,81 @@ function runMigrations() {
     model TEXT,
     usage_json TEXT,
     raw_content TEXT,
+  )`);
+
+  // 接口资产治理：候选资产（AI 初判 + 人工卡点）
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_candidate_assets (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    name TEXT NOT NULL,
+    business_domain TEXT,
+    confidence REAL DEFAULT 0,
+    risk_level TEXT DEFAULT 'medium',
+    sensitive_hits TEXT DEFAULT '[]',
+    mapping_status TEXT DEFAULT 'unknown',
+    ai_summary TEXT,
+    raw_payload TEXT,
+    status TEXT DEFAULT 'pending_review',
+    manual_screen_status TEXT DEFAULT 'pending',
+    manual_screen_by TEXT,
+    manual_screen_at TEXT,
+    manual_screen_decision TEXT,
+    manual_screen_reason TEXT,
+    needs_human_review INTEGER DEFAULT 0,
+    acceptance_passed INTEGER DEFAULT 0,
+    acceptance_by TEXT,
+    acceptance_at TEXT,
+    acceptance_checklist TEXT,
+    publish_block_reason TEXT,
+    retro_reason TEXT,
+    retro_note TEXT,
+    retro_recorded_by TEXT,
+    retro_recorded_at TEXT,
+    ai_tools_snapshot TEXT,
+    human_tools_snapshot TEXT,
+    business_rule_notes TEXT,
+    boundary_warning TEXT,
+    built_by TEXT,
+    built_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  // 审核任务
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_review_tasks (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    review_type TEXT NOT NULL,
+    review_reason TEXT NOT NULL,
+    assignee_role TEXT NOT NULL,
+    status TEXT DEFAULT 'open',
+    decision TEXT,
+    decision_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+  )`);
+
+  // 已发布的接口资产（审核通过）
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_published_assets (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    business_domain TEXT,
+    asset_payload TEXT NOT NULL,
+    published_by TEXT,
+    published_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  // 复用推荐记录
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_reuse_suggestions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    published_asset_id TEXT NOT NULL,
+    score REAL DEFAULT 0,
+    suggestion_reason TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
 }
@@ -2096,6 +2178,209 @@ app.get("/api/platform/billing", requireAuth, (req, res) => {
   const sql = `SELECT br.*, c.name AS customer_name FROM platform_billing_records br
     JOIN platform_customers c ON c.id = br.customer_id` + (cid ? ` WHERE br.customer_id = ?` : ``) + ` ORDER BY br.period DESC, br.item`;
   res.json(cid ? db.prepare(sql).all(cid) : db.prepare(sql).all());
+});
+
+// ============== 接口资产治理（governance MVP） ==============
+app.get("/api/platform/governance/candidates", requireAuth, (req, res) => {
+  const cid = customerScope(req);
+  const sql = `SELECT * FROM platform_candidate_assets` + (cid ? ` WHERE project_id IN (SELECT id FROM platform_projects WHERE customer_id = ?)` : ``) + ` ORDER BY created_at DESC`;
+  res.json({ items: cid ? db.prepare(sql).all(cid) : db.prepare(sql).all() });
+});
+
+app.get("/api/platform/governance/reviews", requireAuth, (req, res) => {
+  res.json({ items: governanceRepo.listReviewTasks() });
+});
+
+app.post("/api/platform/governance/reviews/:id/decision", requireAuth, (req, res) => {
+  const { decision, reason } = req.body || {};
+  if (!decision) return res.status(400).json({ error: "decision is required" });
+  const updated = governanceRepo.recordReviewDecision({ reviewId: req.params.id, decision, reason });
+  if (!updated) return res.status(404).json({ error: "review task not found" });
+  res.json({ ok: true, review_id: req.params.id, decision, reason });
+});
+
+app.get("/api/platform/governance/published-assets", requireAuth, (req, res) => {
+  res.json({ items: governanceRepo.listPublishedAssets() });
+});
+
+app.get("/api/platform/governance/reuse-suggestions", requireAuth, (req, res) => {
+  res.json({ items: governanceRepo.listReuseSuggestions() });
+});
+
+app.post("/api/platform/governance/candidates/:id/publish", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  // 防御性检查 1：若有未完成的审核任务，阻止发布
+  const openTasks = governanceRepo.listOpenReviewTasksForCandidate(candidate.id);
+  if (openTasks.length > 0) {
+    return res.status(409).json({
+      error: "candidate has open review tasks",
+      open_tasks: openTasks.map(t => ({ id: t.id, review_type: t.review_type, review_reason: t.review_reason }))
+    });
+  }
+
+  // 防御性检查 2：人工初筛未通过，阻止发布
+  if (candidate.manual_screen_decision === 'reject') {
+    return res.status(409).json({
+      error: "candidate rejected by manual screening",
+      reason: candidate.manual_screen_reason || '人工初筛已驳回'
+    });
+  }
+
+  // 防御性检查 3：发布前验收未通过，阻止发布
+  if (!candidate.acceptance_passed) {
+    return res.status(409).json({
+      error: "candidate not accepted for publish",
+      reason: candidate.publish_block_reason || '发布前验收清单未完成'
+    });
+  }
+
+  const published = governanceRepo.publishCandidate({ candidate, publishedBy: req.user.display_name || '' });
+  const suggestions = suggestReuse({ candidate, publishedAssets: governanceRepo.listPublishedAssets() });
+  governanceRepo.saveReuseSuggestions({ candidateId: candidate.id, projectId: candidate.project_id, suggestions });
+  res.json({ published, suggestions });
+});
+
+// ============== 接口资产治理：人工卡点 ==============
+
+// 人工初筛（approve / reject / modify）
+app.post("/api/platform/governance/candidates/:id/manual-screen", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  const validation = validateManualDecision(req.body || {});
+  if (!validation.ok) {
+    return res.status(400).json({ error: validation.error });
+  }
+  const { action, reason, notes, modified_fields } = validation.normalized;
+  const by = req.user?.display_name || req.user?.username || '';
+
+  const ok = governanceRepo.updateManualScreen({
+    id: candidate.id,
+    decision: action,
+    reason: reason || notes,
+    by
+  });
+  if (!ok) return res.status(500).json({ error: "failed to record manual screening" });
+
+  res.json({
+    ok: true,
+    candidate_id: candidate.id,
+    manual_screen_status: action,
+    manual_screen_decision: action,
+    manual_screen_reason: reason || notes,
+    manual_screen_by: by,
+    modified_fields
+  });
+});
+
+// 发布前人工验收清单
+app.post("/api/platform/governance/candidates/:id/acceptance", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  const checklist = (req.body && req.body.checklist) || {};
+  const result = validateAcceptanceChecklist(checklist);
+  const by = req.user?.display_name || req.user?.username || '';
+
+  governanceRepo.updateAcceptance({
+    id: candidate.id,
+    passed: result.passed,
+    checklist,
+    by,
+    blockReason: result.passed ? '' : (result.reason || '')
+  });
+
+  res.json({
+    ok: true,
+    candidate_id: candidate.id,
+    acceptance_passed: result.passed ? 1 : 0,
+    missing: result.missing,
+    reason: result.reason || '',
+    block_explanation: result.passed ? '' : explainPublishBlock(result),
+    required_fields: getAcceptanceRequiredFields()
+  });
+});
+
+// 列出发布前验收必填项（前端动态渲染 checklist 用）
+app.get("/api/platform/governance/acceptance-required-fields", requireAuth, (req, res) => {
+  res.json({ items: getAcceptanceRequiredFields() });
+});
+
+// ============== 企业 MCP 打造工作台：价值指标 ==============
+app.get("/api/platform/builder/metrics", requireAuth, (req, res) => {
+  res.json(governanceRepo.builderMetrics());
+});
+
+// ============== 误识别复盘（Task 6） ==============
+app.post("/api/platform/governance/candidates/:id/retro", requireAuth, (req, res) => {
+  const { reason, note, by } = req.body || {};
+  const check = validateRetroReason(reason);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+
+  const result = governanceRepo.recordRetro({ id: req.params.id, reason: check.normalized, note, by });
+  if (!result.ok) return res.status(409).json({ error: result.error || '记录复盘失败' });
+  res.json({ ok: true, candidate: result.candidate });
+});
+
+app.get("/api/platform/governance/retro-summary", requireAuth, (req, res) => {
+  res.json(governanceRepo.retroSummary());
+});
+
+app.get("/api/platform/governance/retro-reasons", requireAuth, (req, res) => {
+  res.json({ items: RETRO_REASONS });
+});
+
+// ============== Tool 打造工作台（Task 3） ==============
+// 保存人工打造的 Tool 版本（含 AI 原建议 + 人工修订 + 业务规则）
+app.post("/api/platform/governance/candidates/:id/build-tool", requireAuth, (req, res) => {
+  const { ai_tools, human_tools, business_rules, edits } = req.body || {};
+
+  // edits 是数组时，每条都做人工字段校验
+  let normalizedHuman = Array.isArray(human_tools) ? human_tools : [];
+  if (Array.isArray(edits) && edits.length) {
+    normalizedHuman = edits.map((edit, idx) => {
+      const check = validateHumanToolEdit(edit);
+      if (!check.ok) {
+        return { error: check.error, index: idx, input: edit };
+      }
+      return check.normalized;
+    });
+    const hasError = normalizedHuman.some(t => t && t.error);
+    if (hasError) {
+      return res.status(400).json({ error: '人工编辑字段不合法', details: normalizedHuman.filter(t => t.error) });
+    }
+  }
+
+  const result = governanceRepo.saveToolBuild({
+    id: req.params.id,
+    aiTools: ai_tools || [],
+    humanTools: normalizedHuman,
+    businessRules: business_rules || '',
+    by: req.user?.display_name || ''
+  });
+
+  if (!result.ok) return res.status(404).json({ error: result.error || '保存失败' });
+  res.json({
+    ok: true,
+    boundary_conflict: result.boundary_conflict,
+    boundary_warnings: result.boundary_warnings,
+    candidate: result.candidate
+  });
+});
+
+// 拉取某个候选的工具快照对比
+app.get("/api/platform/governance/candidates/:id/tool-snapshots", requireAuth, (req, res) => {
+  const snapshots = governanceRepo.getToolSnapshots(req.params.id);
+  if (!snapshots) return res.status(404).json({ error: 'candidate not found' });
+  // 额外返回 diff
+  const diff = diffToolSnapshots(snapshots.ai_tools, snapshots.human_tools);
+  res.json({ ...snapshots, diff });
+});
+
+app.get("/api/platform/governance/tool-edit-rules", requireAuth, (req, res) => {
+  res.json(BOUNDARY_RULE_REFERENCE);
 });
 
 app.get("/api/tools", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({

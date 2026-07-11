@@ -111,6 +111,21 @@ export const state = {
     search: '',
     sortBy: 'updated-desc'
   },
+  // 接口资产治理（governance MVP）
+  governance: {
+    candidates: [],
+    reviewTasks: [],
+    publishedAssets: [],
+    reuseSuggestions: []
+  },
+  // 误识别复盘（Task 6）
+  retroSummary: null,
+  retroReasons: [],
+  // Tool 打造台（Task 3）
+  toolEditRules: null,
+  toolBuildDrafts: {}, // candidateId -> { ai_tools, human_tools, business_rules }
+  // 企业 MCP 打造工作台：B 端价值指标
+  builderMetrics: null,
   currentPage: 'summary'
 };
 
@@ -123,6 +138,7 @@ export const navItems = [
   { id: 'publish', label: '测试发布', icon: '🚀', desc: '沙箱试调、灰度发布、版本管理与发布记录', roles: ['admin', 'customer'] },
   { id: 'delivery', label: '交付管理', icon: '📋', desc: '配置包、测试报告、调用日志等交付物下载', roles: ['admin'] },
   { id: 'governance', label: '治理与统计', icon: '🛡️', desc: '网关策略、调用监控、审计日志与使用统计', roles: ['admin'] },
+  { id: 'asset-governance', label: '接口资产治理', icon: '🧬', desc: 'AI 初判 → 人工审核 → 资产入库 → 复用推荐的内部 IT 团队工作台', roles: ['admin'] },
   { id: 'settings', label: '设置', icon: '⚙️', desc: '客户管理、项目管理、计费配置、知识库与 API 凭证', roles: ['admin'] }
 ];
 export const customerNavItems = [

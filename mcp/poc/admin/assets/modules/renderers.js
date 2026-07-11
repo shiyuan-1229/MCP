@@ -227,6 +227,12 @@ function renderIntake() {
     }
   }
 
+  // 高频误判提示（Task 6 反哺）
+  const retroHintEl = $('retroHintBanner');
+  if (retroHintEl) {
+    retroHintEl.innerHTML = renderRetroHintBanner();
+  }
+
   // 表格行
   renderSimpleRows('sourceRows', items.map(item => {
     const recStatus = item.recognition_status || 'draft';
@@ -263,6 +269,12 @@ function renderRecognition() {
   // 步骤条
   const stepBar = $('recognitionStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(2);
+
+  // 高频误判提示（Task 6 反哺）
+  const retroHintEl = $('retroHintBannerRecognition');
+  if (retroHintEl) {
+    retroHintEl.innerHTML = renderRetroHintBanner();
+  }
 
   // 草案列表卡片
   renderCardList('openapiSpecList', specs.map(item => {
@@ -1191,5 +1203,240 @@ export function renderAll() {
   renderDeliverableDrawer();
   renderKnowledgeDrawer();
   renderAccessGuideOverlay();
+  renderAssetGovernanceWorkbench();
+  renderBuilderValueBoard();
   switchPage(state.currentPage);
+}
+
+// ============================================================
+// 接口资产治理（governance MVP）工作台
+// 渲染候选资产 / 待审核任务 / 已发布资产 / 复用推荐四个区域
+// ============================================================
+export function renderAssetGovernanceWorkbench() {
+  const root = $('assetGovernanceWorkbench');
+  if (!root) return;
+  const g = state.governance || {};
+  const candidates = Array.isArray(g.candidates) ? g.candidates : [];
+  const tasks = Array.isArray(g.reviewTasks) ? g.reviewTasks : [];
+  const published = Array.isArray(g.publishedAssets) ? g.publishedAssets : [];
+  const suggestions = Array.isArray(g.reuseSuggestions) ? g.reuseSuggestions : [];
+  const retroSummary = state.retroSummary || null;
+  const retroReasons = Array.isArray(state.retroReasons) ? state.retroReasons : [];
+  const openTasks = tasks.filter(t => t.status === 'open');
+
+  root.innerHTML = `
+    <div class="governance-summary">
+      <div class="metric-card"><span class="metric-label">候选资产</span><strong>${candidates.length}</strong></div>
+      <div class="metric-card"><span class="metric-label">待审核任务</span><strong>${openTasks.length}</strong></div>
+      <div class="metric-card"><span class="metric-label">已发布资产</span><strong>${published.length}</strong></div>
+      <div class="metric-card"><span class="metric-label">复用推荐</span><strong>${suggestions.length}</strong></div>
+    </div>
+    <div class="governance-section">
+      <h3>候选资产（AI 初判）</h3>
+      ${candidates.length === 0 ? '<p class="muted-line">暂无候选资产。可通过「资料接入」或直接调用 AI 引擎生成。</p>' : `
+        <table class="data-table">
+          <thead><tr><th>名称</th><th>业务域</th><th>置信度</th><th>风险</th><th>状态</th><th>复盘</th><th>打造</th><th>操作</th></tr></thead>
+          <tbody>
+            ${candidates.slice(0, 20).map(c => {
+              const canRetro = c.manual_screen_decision === 'reject' || c.manual_screen_decision === 'modify';
+              const retroBadge = c.retro_reason
+                ? `<span class="badge warning" style="font-size:10px">${text(c.retro_reason)}</span>`
+                : '<span class="muted-line">—</span>';
+              const retroBtn = canRetro
+                ? `<button class="ghost-btn small" onclick="openRetroDialog('${text(c.id)}', '${text(c.name)}')">记录复盘</button>`
+                : '<span class="muted-line">—</span>';
+              const builtBadge = c.built_at
+                ? `<span class="badge success" style="font-size:10px" title="已由 ${text(c.built_by || '匿名')} 在 ${text(c.built_at)} 完成">已打造</span>`
+                : '<span class="muted-line">—</span>';
+              const buildBtn = c.ai_summary || c.raw_payload
+                ? `<button class="ghost-btn small" onclick="openToolBuildDialog('${text(c.id)}', '${text(c.name)}')">${c.built_at ? '修订 Tool' : '打造 Tool'}</button>`
+                : '<span class="muted-line">—</span>';
+              return `
+              <tr>
+                <td>${text(c.name)}</td>
+                <td>${text(c.business_domain || '-')}</td>
+                <td>${typeof c.confidence === 'number' ? c.confidence.toFixed(2) : '-'}</td>
+                <td><span class="risk-${text(c.risk_level || 'medium')}">${text(c.risk_level || 'medium')}</span></td>
+                <td>${text(c.status || '-')} ${c.manual_screen_decision ? `<span class="badge" style="font-size:10px">${text(c.manual_screen_decision)}</span>` : ''}</td>
+                <td>${retroBadge}</td>
+                <td>${builtBadge}</td>
+                <td>${retroBtn}<br/>${buildBtn}</td>
+              </tr>
+            `;
+            }).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+    <div class="governance-section">
+      <h3>审核任务</h3>
+      ${tasks.length === 0 ? '<p class="muted-line">暂无审核任务。</p>' : `
+        <table class="data-table">
+          <thead><tr><th>候选 ID</th><th>类型</th><th>原因</th><th>角色</th><th>状态</th></tr></thead>
+          <tbody>
+            ${tasks.slice(0, 20).map(t => `
+              <tr>
+                <td>${text(t.candidate_id || '-')}</td>
+                <td>${text(t.review_type || '-')}</td>
+                <td>${text(t.review_reason || '-')}</td>
+                <td>${text(t.assignee_role || '-')}</td>
+                <td>${text(t.status || '-')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+    <div class="governance-section">
+      <h3>已发布资产</h3>
+      ${published.length === 0 ? '<p class="muted-line">尚未发布资产。</p>' : `
+        <ul class="governance-list">
+          ${published.slice(0, 20).map(p => `<li><strong>${text(p.name)}</strong> <span class="muted-line">${text(p.business_domain || '')}</span></li>`).join('')}
+        </ul>
+      `}
+    </div>
+    <div class="governance-section">
+      <h3>复用推荐（按分数排序）</h3>
+      ${suggestions.length === 0 ? '<p class="muted-line">暂无复用推荐。发布资产后会自动生成。</p>' : `
+        <table class="data-table">
+          <thead><tr><th>候选资产 ID</th><th>已发布资产</th><th>分数</th><th>原因</th></tr></thead>
+          <tbody>
+            ${suggestions.slice(0, 20).map(s => `
+              <tr>
+                <td>${text(s.candidate_id || '-')}</td>
+                <td>${text(s.published_asset_id || '-')}</td>
+                <td>${typeof s.score === 'number' ? s.score.toFixed(2) : '-'}</td>
+                <td>${text(s.suggestion_reason || '-')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+    <div class="governance-section" id="retroSummarySection">
+      <h3>误识别复盘汇总</h3>
+      ${renderRetroSummary(retroSummary, retroReasons)}
+    </div>
+  `;
+}
+
+// 渲染复盘顶部提示横幅（出现在 intake / recognition 页面顶部）
+function renderRetroHintBanner() {
+  const summary = state.retroSummary;
+  const reasons = Array.isArray(state.retroReasons) ? state.retroReasons : [];
+  if (!summary || !summary.total_retros) {
+    return '<div class="muted-line" style="font-size:11px">💡 暂无复盘数据。在「接口资产治理」页驳回/修改候选时可记录复盘，反哺给下次识别。</div>';
+  }
+  const reasonMap = reasons.reduce((acc, r) => { acc[r.value] = r.label; return acc; }, {});
+  const ranked = Object.entries(summary.by_reason || {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+  const tip = ranked.map(([reason, count]) => `<strong style="color:#dc2626">${text(reasonMap[reason] || reason)}</strong>×${count}`).join('，');
+  return `<div style="padding:8px 14px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e">
+    🎯 <strong>历史高频误判：</strong>${tip}（共 ${summary.total_retros} 条）— AI 识别时请重点确认这些方向。
+  </div>`;
+}
+
+// 渲染复盘汇总：高频误判 + 已记录原因分布
+function renderRetroSummary(summary, reasons) {
+  if (!summary || !summary.total_retros) {
+    return '<p class="muted-line">暂无复盘记录。当候选被驳回/修改时，请在「候选资产」表格中点击「记录复盘」标记 AI 哪里识别错了，反哺给下一轮识别。</p>';
+  }
+  const ranked = Object.entries(summary.by_reason || {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const reasonMap = (reasons || []).reduce((acc, r) => { acc[r.value] = r.label; return acc; }, {});
+  return `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="metric-card"><span class="metric-label">累计复盘</span><strong>${summary.total_retros}</strong></div>
+      <div class="metric-card"><span class="metric-label">最常见误判</span><strong>${text(reasonMap[summary.top_reason] || summary.top_reason || '-')}</strong></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${ranked.map(([reason, count]) => {
+        const pct = summary.total_retros > 0 ? Math.round((count / summary.total_retros) * 100) : 0;
+        const color = pct >= 50 ? '#dc2626' : pct >= 25 ? '#d97706' : '#0f766e';
+        return `<div style="padding:8px 12px;border:1px solid var(--line);border-radius:8px;min-width:160px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:13px">${text(reasonMap[reason] || reason)}</strong>
+            <span style="font-size:18px;font-weight:700;color:${color}">${count}</span>
+          </div>
+          <div style="height:4px;background:#e2e8f0;border-radius:2px;margin-top:6px;overflow:hidden">
+            <div style="height:100%;background:${color};width:${pct}%"></div>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px">占比 ${pct}%</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <p class="muted-line" style="margin-top:12px">这些高频误判会在下次 AI 识别时作为「历史高频误判提示」自动注入到识别请求中，提醒人工重点确认。</p>
+  `;
+}
+
+// ============================================================
+// 企业 MCP 打造工作台：B 端价值看板
+// 渲染 Builder Workbench MVP 关键指标，让评委/客户一眼看到 AI + 人工协作带来的交付价值
+// ============================================================
+export function renderBuilderValueBoard() {
+  const root = $('builderValueBoard');
+  if (!root) return;
+  const m = state.builderMetrics;
+  if (!m) {
+    root.innerHTML = `
+      <div class="metric-card"><span class="metric-label">B 端价值指标</span><strong class="muted-line">加载中...</strong><span class="muted-line">暂无数据，等待人工卡点或发布数据</span></div>
+    `;
+    return;
+  }
+  const cycleText = m.avg_build_cycle_hours
+    ? `${m.avg_build_cycle_hours} 小时`
+    : '暂无样本';
+  const passText = m.pass_rate
+    ? `${(m.pass_rate * 100).toFixed(0)}%`
+    : '—';
+  const reuseRateText = m.reuse_rate
+    ? `${(m.reuse_rate * 100).toFixed(0)}%`
+    : '—';
+  const reuseText = m.reuse_category_text || {};
+  const breakdown = m.reuse_breakdown || {};
+  const breakdownItems = Object.keys(reuseText).map(key => ({
+    label: reuseText[key] || key,
+    value: breakdown[key] || 0
+  }));
+
+  root.innerHTML = `
+    <div class="metric-card">
+      <span class="metric-label">资料转资产周期（平均）</span>
+      <strong>${cycleText}</strong>
+      <span class="muted-line">从候选入站到正式发布的平均耗时</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">本周复用资产数</span>
+      <strong>${m.week_reuses}</strong>
+      <span class="muted-line">7 天内生成的复用建议</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">通过率（发布 / 已决策）</span>
+      <strong>${passText}</strong>
+      <span class="muted-line">${m.total_published} 已发布 / ${m.total_candidates} 候选</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">待发布项目数</span>
+      <strong>${m.pending_publishes}</strong>
+      <span class="muted-line">验收通过、等待最终发布</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">人工审核命中数</span>
+      <strong>${m.human_review_hits}</strong>
+      <span class="muted-line">AI 标记需要人工拍板的候选</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">待人工初筛</span>
+      <strong>${m.pending_manual_screen}</strong>
+      <span class="muted-line">进入初筛队列、未拍板</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">复用率（直接复用占比）</span>
+      <strong>${reuseRateText}</strong>
+      <span class="muted-line">${breakdownItems.map(b => `${b.label} ${b.value}`).join(' · ') || '暂无复用记录'}</span>
+    </div>
+  `;
 }

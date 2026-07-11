@@ -314,6 +314,103 @@ function snakeCase(str) {
 }
 
 // ============================================================
+// 治理 MVP：基于归一化源生成 CandidateAsset 列表
+// 当前是 stub：返回结构化的占位结果，便于 Task 3/4 串联。
+// 后续会接入真实大模型做业务分类与敏感识别。
+// ============================================================
+export async function generateGovernanceCandidates({ sourceName, normalizedSource, historicalRetroSummary }) {
+  // 复用 manual-checks：基于字段名自动识别敏感字段
+  let detectSensitiveHits = null;
+  let buildManualGate = null;
+  let buildRetroHint = null;
+  try {
+    const mod = await import('./modules/governance/manual-checks.mjs');
+    detectSensitiveHits = mod.detectSensitiveHits;
+    buildManualGate = mod.buildManualGate;
+  } catch {
+    detectSensitiveHits = null;
+    buildManualGate = null;
+  }
+  try {
+    const retroMod = await import('./modules/governance/retro-service.mjs');
+    buildRetroHint = retroMod.buildRetroHint;
+  } catch {
+    buildRetroHint = null;
+  }
+
+  // 把历史复盘汇总拼成提示（如果存在）
+  const retroHint = buildRetroHint && historicalRetroSummary
+    ? buildRetroHint(historicalRetroSummary, { top: 3 })
+    : '';
+
+  const items = Array.isArray(normalizedSource?.tables)
+    ? normalizedSource.tables.map(table => {
+        const sensitive_hits = detectSensitiveHits ? detectSensitiveHits(table.fields || []) : [];
+        const candidate = {
+          name: table.name,
+          businessDomain: 'unclassified',
+          confidence: 0.72,
+          riskLevel: sensitive_hits.length > 0 ? 'high' : 'medium',
+          sensitive_hits,
+          fields: table.fields || []
+        };
+        const gate = buildManualGate ? buildManualGate(candidate) : { needs_human_review: false, gate_reasons: [], gate_required_for: [] };
+        return {
+          name: candidate.name,
+          business_domain: candidate.businessDomain,
+          confidence: candidate.confidence,
+          risk_level: candidate.riskLevel,
+          sensitive_hits: candidate.sensitive_hits,
+          needs_human_review: gate.needs_human_review,
+          gate_reasons: gate.gate_reasons,
+          gate_required_for: gate.gate_required_for
+        };
+      })
+    : Array.isArray(normalizedSource?.endpoints)
+      ? normalizedSource.endpoints.map(ep => {
+          const sensitive_hits = detectSensitiveHits ? detectSensitiveHits(ep.parameters || []) : [];
+          const method = String(ep.method || 'GET').toUpperCase();
+          const candidate = {
+            name: ep.summary || ep.path,
+            business_domain: 'unclassified',
+            confidence: 0.72,
+            risk_level: method === 'DELETE' || method === 'PUT' || method === 'POST' ? 'high' : 'low',
+            operation: method.toLowerCase(),
+            sensitive_hits
+          };
+          const gate = buildManualGate ? buildManualGate(candidate) : { needs_human_review: false, gate_reasons: [], gate_required_for: [] };
+          return {
+            name: candidate.name,
+            business_domain: 'unclassified',
+            confidence: 0.72,
+            risk_level: candidate.risk_level,
+            operation: candidate.operation,
+            sensitive_hits,
+            needs_human_review: gate.needs_human_review,
+            gate_reasons: gate.gate_reasons,
+            gate_required_for: gate.gate_required_for
+          };
+        })
+      : [{
+          name: sourceName || 'unknown',
+          business_domain: 'unclassified',
+          confidence: 0.5,
+          risk_level: 'medium',
+          sensitive_hits: [],
+          needs_human_review: true,
+          gate_reasons: ['AI 无法识别业务类型，需要人工初筛'],
+          gate_required_for: ['product_owner']
+        }];
+
+  return {
+    sourceName: sourceName || 'unknown',
+    retro_hint: retroHint,
+    retro_summary: historicalRetroSummary || null,
+    candidates: items
+  };
+}
+
+// ============================================================
 // 完整流水线：分析 → OpenAPI → Tools（一站式）
 // ============================================================
 export async function runFullPipeline(sourceMeta) {

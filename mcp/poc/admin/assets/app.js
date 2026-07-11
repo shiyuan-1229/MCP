@@ -49,7 +49,7 @@ async function loadAll() {
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, timeline, aiConfig] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, timeline, aiConfig, govCandidates, govReviews, govPublished, govReuse, retroSummary, retroReasons, toolEditRules, builderMetrics] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -68,7 +68,15 @@ async function loadAll() {
     api('/api/platform/knowledge-bases'),
     api('/api/platform/openapi-specs'),
     api('/api/platform/timeline'),
-    api('/api/platform/ai-config').catch(() => ({ configured: false }))
+    api('/api/platform/ai-config').catch(() => ({ configured: false })),
+    api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
+    api('/api/platform/governance/reviews').catch(() => ({ items: [] })),
+    api('/api/platform/governance/published-assets').catch(() => ({ items: [] })),
+    api('/api/platform/governance/reuse-suggestions').catch(() => ({ items: [] })),
+    api('/api/platform/governance/retro-summary').catch(() => null),
+    api('/api/platform/governance/retro-reasons').catch(() => ({ items: [] })),
+    api('/api/platform/governance/tool-edit-rules').catch(() => null),
+    api('/api/platform/builder/metrics').catch(() => null)
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
@@ -92,7 +100,17 @@ async function loadAll() {
     knowledgeBases: Array.isArray(knowledgeBases) ? knowledgeBases : [],
     openapiSpecs: Array.isArray(openapiSpecs) ? openapiSpecs : [],
     timeline: Array.isArray(timeline) ? timeline : [],
-    aiConfig: aiConfig || { configured: false }
+    aiConfig: aiConfig || { configured: false },
+    governance: {
+      candidates: Array.isArray(govCandidates?.items) ? govCandidates.items : [],
+      reviewTasks: Array.isArray(govReviews?.items) ? govReviews.items : [],
+      publishedAssets: Array.isArray(govPublished?.items) ? govPublished.items : [],
+      reuseSuggestions: Array.isArray(govReuse?.items) ? govReuse.items : []
+    },
+    retroSummary: retroSummary || null,
+    retroReasons: Array.isArray(retroReasons?.items) ? retroReasons.items : [],
+    toolEditRules: toolEditRules || null,
+    builderMetrics: builderMetrics || null
   });
 }
 
@@ -1672,6 +1690,301 @@ window.showAiAnalysisResult = showAiAnalysisResult;
 window.closeAiAnalysis = closeAiAnalysis;
 window.toggleAssetVisibility = toggleAssetVisibility;
 window.runSandboxTest = runSandboxTest;
+
+// 打开复盘弹窗（Task 6）
+async function openRetroDialog(candidateId, candidateName) {
+  if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
+  let reasons = Array.isArray(state.retroReasons) ? state.retroReasons : [];
+  if (!reasons.length) {
+    try {
+      const data = await api('/api/platform/governance/retro-reasons');
+      reasons = Array.isArray(data?.items) ? data.items : [];
+      state.retroReasons = reasons;
+    } catch {
+      reasons = [];
+    }
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'retroDialogOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:480px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,.2)">
+      <h3 style="margin:0 0 6px">记录误识别复盘</h3>
+      <p class="muted-line" style="margin:0 0 16px">候选资产：<strong>${text(candidateName || candidateId)}</strong></p>
+      <p class="muted-line" style="margin:0 0 12px">AI 哪里识别错了？标记后会反哺到下一轮识别提示中。</p>
+      <label style="display:block;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:600">复盘原因</span>
+        <select id="retroReasonSelect" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:4px">
+          ${reasons.map(r => `<option value="${text(r.value)}">${text(r.label)} — ${text(r.description || '')}</option>`).join('')}
+        </select>
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;font-weight:600">补充说明（可选）</span>
+        <textarea id="retroNote" rows="3" placeholder="例如：AI 把它归到了会员域，实际是订单域的子功能" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:4px"></textarea>
+      </label>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="ghost-btn" onclick="closeRetroDialog()">取消</button>
+        <button class="primary-btn" id="retroSubmitBtn" onclick="submitRetro('${text(candidateId)}')">提交</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function closeRetroDialog() {
+  const overlay = $('retroDialogOverlay');
+  if (overlay) overlay.remove();
+}
+
+async function submitRetro(candidateId) {
+  const reason = $('retroReasonSelect')?.value;
+  const note = $('retroNote')?.value || '';
+  const btn = $('retroSubmitBtn');
+  if (!reason) { showToast('请选择复盘原因', 'error'); return; }
+  if (btn) btn.disabled = true;
+  try {
+    const by = state.user?.display_name || state.user?.username || '';
+    await api(`/api/platform/governance/candidates/${candidateId}/retro`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, note, by })
+    });
+    showToast('复盘已记录，下次识别会自动提示团队', 'success');
+    closeRetroDialog();
+    await loadAll();
+    renderAll();
+  } catch (error) {
+    showToast(error.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ============================================================
+// Tool 打造台（Task 3）— 三栏：AI 建议 / 人工修订 / 业务规则
+// ============================================================
+async function openToolBuildDialog(candidateId, candidateName) {
+  if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
+  // 拉取已有快照（含 AI / human / 业务规则）
+  let snapshots = null;
+  try {
+    snapshots = await api(`/api/platform/governance/candidates/${candidateId}/tool-snapshots`);
+  } catch (e) { /* 第一次打造 */ }
+
+  // 拉取候选详情取 ai_summary 推断初始 AI 工具
+  const candidate = (state.governance?.candidates || []).find(c => c.id === candidateId);
+  const fallbackAiTools = inferInitialAiTools(candidate);
+
+  const aiTools = snapshots?.ai_tools?.length ? snapshots.ai_tools : fallbackAiTools;
+  const humanTools = snapshots?.human_tools?.length ? snapshots.human_tools : (fallbackAiTools.length ? fallbackAiTools.map(t => ({ ...t, visibility: 'internal', write_permission_level: 'read_only' })) : []);
+  const businessRules = snapshots?.business_rule_notes || '';
+
+  // 缓存到 state
+  state.toolBuildDrafts[candidateId] = {
+    ai_tools: JSON.parse(JSON.stringify(aiTools)),
+    human_tools: JSON.parse(JSON.stringify(humanTools)),
+    business_rules: businessRules
+  };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'toolBuildDialogOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
+  overlay.innerHTML = renderToolBuildDialogHtml(candidateId, candidateName, aiTools, humanTools, businessRules);
+  document.body.appendChild(overlay);
+}
+
+function closeToolBuildDialog() {
+  const overlay = $('toolBuildDialogOverlay');
+  if (overlay) overlay.remove();
+}
+
+function renderToolBuildDialogHtml(candidateId, candidateName, aiTools, humanTools, businessRules) {
+  const rules = state.toolEditRules || { visibility_options: ['public', 'internal'], write_permission_options: ['read_only', 'controlled_write', 'unrestricted'] };
+  return `
+    <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,.2);max-height:90vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <h3 style="margin:0 0 4px">Tool 打造台：${text(candidateName || candidateId)}</h3>
+          <p class="muted-line" style="margin:0;font-size:12px">左：AI 原建议（只读） · 中：拟生成 Tool · 右：人工确认配置（可编辑）</p>
+        </div>
+        <button class="ghost-btn small" onclick="closeToolBuildDialog()">关闭</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:12px;margin-bottom:14px">
+        <div>
+          <h4 style="margin:0 0 8px;font-size:13px">① AI 原建议</h4>
+          <div id="aiToolPreviewList" style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:#f8fafc">
+            ${aiTools.length ? aiTools.map((t, i) => renderAiPreviewCard(t, i)).join('') : '<p class="muted-line">AI 暂无 Tool 建议。</p>'}
+          </div>
+        </div>
+        <div>
+          <h4 style="margin:0 0 8px;font-size:13px">② 拟生成 Tool（人工修订）</h4>
+          <div id="humanToolList" style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff">
+            ${humanTools.map((t, i) => renderHumanToolEditor(t, i, rules)).join('')}
+          </div>
+          <button class="ghost-btn small" style="margin-top:8px" onclick="addToolBuildRow('${text(candidateId)}')">+ 新增 Tool</button>
+        </div>
+        <div>
+          <h4 style="margin:0 0 8px;font-size:13px">③ 业务规则与说明</h4>
+          <textarea id="businessRulesInput" rows="14" placeholder="例如：&#10;1. 字段 user_phone 必须脱敏&#10;2. 返回金额加密，需网关层处理&#10;3. 接口限流 60 次/分钟&#10;4. 错误码 E1001 表示订单不存在" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-family:inherit;font-size:13px">${text(businessRules || '')}</textarea>
+          <p class="muted-line" style="font-size:11px;margin:6px 0 0">这些规则会作为提示词注入到 Tool 的运行时调用中，并参与 AI 后续理解。</p>
+        </div>
+      </div>
+      <div id="boundaryWarningArea"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="ghost-btn" onclick="closeToolBuildDialog()">取消</button>
+        <button class="primary-btn" id="toolBuildSubmitBtn" onclick="submitToolBuild('${text(candidateId)}')">保存打造结果</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAiPreviewCard(tool, idx) {
+  return `<div style="padding:8px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-bottom:6px;font-size:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font-size:12px">${text(tool.name || '(unnamed)')}</strong>
+      <span class="badge info" style="font-size:9px">AI #${idx + 1}</span>
+    </div>
+    <div class="muted-line" style="margin-top:2px">${text(tool.display_name || '')}</div>
+    <div style="margin-top:4px;font-size:11px;color:#64748b">${text(tool.description || '-')}</div>
+    ${tool.path ? `<div style="margin-top:2px;font-size:10px;color:#94a3b8"><code>${text(tool.path)}</code></div>` : ''}
+    ${tool.category ? `<div style="margin-top:4px"><span class="cap-chip" style="font-size:10px">${text(tool.category)}</span></div>` : ''}
+  </div>`;
+}
+
+function renderHumanToolEditor(tool, idx, rules) {
+  const visOptions = (rules.visibility_options || ['public', 'internal']).map(v =>
+    `<option value="${text(v)}" ${tool.visibility === v ? 'selected' : ''}>${text(v)}</option>`).join('');
+  const wpOptions = (rules.write_permission_options || ['read_only', 'controlled_write', 'unrestricted']).map(v =>
+    `<option value="${text(v)}" ${tool.write_permission_level === v ? 'selected' : ''}>${text(v)}</option>`).join('');
+  return `<div data-tool-index="${idx}" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;background:#fffbeb;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <strong style="font-size:12px">Tool #${idx + 1}</strong>
+      <button class="ghost-btn small" style="font-size:10px;color:#dc2626" onclick="removeToolBuildRow(${idx})">删除</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <label style="font-size:11px"><span style="display:block;color:#64748b">name（操作 ID）</span><input data-h-field="name" value="${text(tool.name || '')}" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px"></label>
+      <label style="font-size:11px"><span style="display:block;color:#64748b">display_name（业务名）</span><input data-h-field="display_name" value="${text(tool.display_name || '')}" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px"></label>
+    </div>
+    <label style="font-size:11px;display:block;margin-bottom:6px"><span style="display:block;color:#64748b">description（业务说明）</span><textarea data-h-field="description" rows="2" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px">${text(tool.description || '')}</textarea></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+      <label style="font-size:11px"><span style="display:block;color:#64748b">category</span><input data-h-field="category" value="${text(tool.category || '')}" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px"></label>
+      <label style="font-size:11px"><span style="display:block;color:#64748b">visibility</span><select data-h-field="visibility" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px">${visOptions}</select></label>
+      <label style="font-size:11px"><span style="display:block;color:#64748b">write_permission</span><select data-h-field="write_permission_level" style="width:100%;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px">${wpOptions}</select></label>
+    </div>
+  </div>`;
+}
+
+function inferInitialAiTools(candidate) {
+  if (!candidate) return [];
+  // 如果 candidate 有 raw_payload 并能解析，提取 tools
+  if (candidate.raw_payload) {
+    try {
+      const parsed = JSON.parse(candidate.raw_payload);
+      const tools = Array.isArray(parsed?.tools) ? parsed.tools : [];
+      if (tools.length) return tools;
+    } catch {}
+  }
+  // 否则根据 name 给一个最小默认 Tool
+  return [{
+    name: `${(candidate.name || 'tool').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_main`,
+    display_name: candidate.name || '新建 Tool',
+    description: candidate.ai_summary || '（请补充业务说明）',
+    category: candidate.business_domain || '未分类',
+    visibility: 'internal',
+    write_permission_level: 'read_only'
+  }];
+}
+
+function addToolBuildRow(candidateId) {
+  const draft = state.toolBuildDrafts[candidateId];
+  if (!draft) return;
+  draft.human_tools.push({
+    name: `tool_${draft.human_tools.length + 1}`,
+    display_name: '新 Tool',
+    description: '',
+    category: '未分类',
+    visibility: 'internal',
+    write_permission_level: 'read_only'
+  });
+  rerenderHumanToolsList(candidateId);
+}
+
+function removeToolBuildRow(idx) {
+  const overlay = $('toolBuildDialogOverlay');
+  if (!overlay) return;
+  const candidateId = overlay.dataset.candidateId || Object.keys(state.toolBuildDrafts)[0];
+  const draft = state.toolBuildDrafts[candidateId];
+  if (!draft) return;
+  draft.human_tools.splice(idx, 1);
+  rerenderHumanToolsList(candidateId);
+}
+
+function rerenderHumanToolsList(candidateId) {
+  const overlay = $('toolBuildDialogOverlay');
+  if (!overlay) return;
+  overlay.dataset.candidateId = candidateId;
+  const list = $('humanToolList');
+  if (!list) return;
+  const rules = state.toolEditRules || { visibility_options: ['public', 'internal'], write_permission_options: ['read_only', 'controlled_write', 'unrestricted'] };
+  list.innerHTML = state.toolBuildDrafts[candidateId].human_tools.map((t, i) => renderHumanToolEditor(t, i, rules)).join('');
+}
+
+async function submitToolBuild(candidateId) {
+  // 收集 human_tools 字段
+  const overlay = $('toolBuildDialogOverlay');
+  if (!overlay) return;
+  overlay.dataset.candidateId = candidateId;
+  const cards = overlay.querySelectorAll('[data-tool-index]');
+  const humanTools = Array.from(cards).map(card => {
+    const obj = {};
+    card.querySelectorAll('[data-h-field]').forEach(el => {
+      obj[el.dataset.hField] = el.value;
+    });
+    return obj;
+  });
+  const businessRules = $('businessRulesInput')?.value || '';
+  const draft = state.toolBuildDrafts[candidateId] || {};
+
+  const btn = $('toolBuildSubmitBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api(`/api/platform/governance/candidates/${candidateId}/build-tool`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ai_tools: draft.ai_tools || [],
+        human_tools: humanTools,
+        business_rules: businessRules
+      })
+    });
+    // 显示边界警告
+    const warnArea = $('boundaryWarningArea');
+    if (warnArea) {
+      if (res.boundary_conflict) {
+        warnArea.innerHTML = `<div style="padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;margin-bottom:10px">
+          <strong style="color:#92400e">⚠️ Tool 边界冲突检测到 ${res.boundary_warnings.length} 条警告：</strong>
+          <ul style="margin:6px 0 0;padding-left:20px;font-size:12px;color:#92400e">
+            ${res.boundary_warnings.map(w => `<li>${text(w.message)}</li>`).join('')}
+          </ul>
+        </div>`;
+      } else {
+        warnArea.innerHTML = '<div style="padding:8px;background:#dcfce7;border:1px solid #86efac;border-radius:8px;color:#166534;font-size:12px">✓ 已保存，边界检查通过。</div>';
+      }
+    }
+    showToast(res.boundary_conflict ? '已保存，但有边界警告需要确认' : 'Tool 打造结果已保存', 'success');
+    await loadAll();
+    renderAll();
+    if (btn) btn.disabled = false;
+  } catch (error) {
+    showToast(error.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+window.openRetroDialog = openRetroDialog;
+window.submitRetro = submitRetro;
+window.closeRetroDialog = closeRetroDialog;
+window.openToolBuildDialog = openToolBuildDialog;
+window.closeToolBuildDialog = closeToolBuildDialog;
+window.submitToolBuild = submitToolBuild;
+window.addToolBuildRow = addToolBuildRow;
+window.removeToolBuildRow = removeToolBuildRow;
 
 // 沙箱综合测试（逐 Tool + 部署检查 + 安全审计）
 async function runSandboxTest() {
