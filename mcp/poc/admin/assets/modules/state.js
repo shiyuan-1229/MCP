@@ -1,4 +1,4 @@
-﻿function readStoredJson(key, fallback) {
+function readStoredJson(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
@@ -33,6 +33,19 @@ export const state = {
   customerDashboard: null,
   customerTrends: null,
   accessGuide: null,
+  // 客户侧：AI 需求生成 MCP
+  localIntakeSources: readStoredJson('mcp_local_intake_sources', []),
+  localOpenapiSpecs: readStoredJson('mcp_local_openapi_specs', []),
+  localAssets: readStoredJson('mcp_local_assets', []),
+  builderRequests: readStoredJson('mcp_builder_requests', []),
+  customerBuilderHistory: readStoredJson('mcp_customer_builder_history', []),
+  customerBuilderMessages: [],
+  customerBuilderDraft: localStorage.getItem('mcp_customer_builder_draft') || '',
+  customerBuilderResult: null,
+  customerBuilderDetailTab: 'tools',
+  customerBuilderCurrentSessionId: '',
+  customerBuilderSelectedHistoryId: null,
+  customerBuilderHistoryOpen: false,
   // 阶段三：生成流程可视化
   openapiSpecs: [],
   selectedOpenapiSpecId: '',
@@ -130,6 +143,7 @@ export const navItems = [
   { id: 'settings', label: '设置', icon: '⚙️', desc: '客户管理、项目管理、计费配置、知识库与 API 凭证', roles: ['admin'] }
 ];
 export const customerNavItems = [
+  { id: 'mcp-builder', label: '\u0041\u0049 \u9700\u6c42\u751f\u6210 MCP', roles: ['customer'] },
   { id: 'my-assets', label: '\u6211\u7684 MCP \u8d44\u4ea7', roles: ['customer'] },
   { id: 'my-usage', label: '\u8c03\u7528\u7edf\u8ba1', roles: ['customer'] },
   { id: 'my-billing', label: '\u8d26\u5355\u7ba1\u7406', roles: ['customer'] },

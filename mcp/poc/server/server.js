@@ -1,4 +1,4 @@
-﻿// MCP Forge admin server
+// MCP Forge admin server
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1335,7 +1335,7 @@ app.post("/auth/login", (req, res) => {
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
   const user = db.prepare("SELECT * FROM platform_users WHERE username = ?").get(username);
   if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: "鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒" });
+    return res.status(401).json({ error: "\u7528\u6237\u540d\u6216\u5bc6\u7801\u9519\u8bef" });
   }
   const token = makeId("tok");
   const expires = new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace("T", " ").replace("Z", "");

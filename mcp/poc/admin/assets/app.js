@@ -1,4 +1,4 @@
-﻿import { request } from './modules/api.js';
+import { request } from './modules/api.js';
 import { state, navItems, customerNavItems, isCustomerView, getNavItems } from './modules/state.js';
 import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
 import { renderAll } from './modules/renderers.js';
@@ -23,6 +23,234 @@ function getDefaultPageForRole(role = 'customer', requestedPage = '') {
   if (!allowedItems.length) return 'my-assets';
   if (requestedPage && allowedItems.some(item => item.id === requestedPage)) return requestedPage;
   return allowedItems[0].id;
+}
+
+function mergeById(primary = [], secondary = []) {
+  const map = new Map();
+  [...list(primary), ...list(secondary)].forEach(item => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return [...map.values()];
+}
+
+function persistLocalCollection(key, items) {
+  try {
+    localStorage.setItem(key, JSON.stringify(list(items)));
+  } catch {}
+}
+
+function refreshLocalAdminCollections() {
+  const serverSources = list(state.sources).filter(item => !item?.is_local_builder_source);
+  const serverSpecs = list(state.openapiSpecs).filter(item => !item?.is_local_builder_spec);
+  const serverAssets = list(state.assets).filter(item => !item?.is_local_builder_asset);
+  state.sources = mergeById(serverSources, state.localIntakeSources);
+  state.openapiSpecs = mergeById(serverSpecs, state.localOpenapiSpecs);
+  state.assets = mergeById(serverAssets, state.localAssets);
+}
+
+function upsertLocalIntakeSource(source) {
+  state.localIntakeSources = mergeById(list(state.localIntakeSources).filter(item => item.id !== source.id), [source]);
+  persistLocalCollection('mcp_local_intake_sources', state.localIntakeSources);
+  refreshLocalAdminCollections();
+  return source;
+}
+
+function upsertLocalOpenapiSpec(spec) {
+  state.localOpenapiSpecs = mergeById(list(state.localOpenapiSpecs).filter(item => item.id !== spec.id), [spec]);
+  persistLocalCollection('mcp_local_openapi_specs', state.localOpenapiSpecs);
+  refreshLocalAdminCollections();
+  return spec;
+}
+
+function upsertLocalAsset(asset) {
+  state.localAssets = mergeById(list(state.localAssets).filter(item => item.id !== asset.id), [asset]);
+  persistLocalCollection('mcp_local_assets', state.localAssets);
+  refreshLocalAdminCollections();
+  return asset;
+}
+
+function findProjectContextForBuilderRequest(request = {}) {
+  const referenceIds = list(request.result?.references).map(item => item.id);
+  const matchedAsset = list(state.assets).find(asset => referenceIds.includes(asset.id));
+  if (matchedAsset) {
+    const matchedProject = list(state.projects).find(project => project.id === matchedAsset.project_id);
+    return {
+      project_id: matchedAsset.project_id || matchedProject?.id || '',
+      project_name: matchedAsset.project_name || matchedProject?.name || '客户定制需求',
+      customer_name: matchedProject?.customer_name || request.customer_name || '客户'
+    };
+  }
+
+  const byCustomer = list(state.projects).find(project =>
+    project.customer_id === request.customer_id ||
+    project.customer_name === request.customer_name ||
+    String(project.customer_name || '').includes(String(request.customer_name || ''))
+  );
+  if (byCustomer) {
+    return {
+      project_id: byCustomer.id,
+      project_name: byCustomer.name || '客户定制需求',
+      customer_name: byCustomer.customer_name || request.customer_name || '客户'
+    };
+  }
+
+  return {
+    project_id: '',
+    project_name: '客户定制需求',
+    customer_name: request.customer_name || '客户'
+  };
+}
+
+function buildLocalIntakeSourceFromRequest(request = {}) {
+  const context = findProjectContextForBuilderRequest(request);
+  return {
+    id: `src_builder_${request.id}`,
+    project_id: context.project_id,
+    project_name: context.project_name,
+    customer_name: context.customer_name,
+    name: `${request.result?.name || '目标 MCP 草案'} 需求单`,
+    type: '需求描述',
+    auth_mode: '自然语言输入',
+    status: 'submitted',
+    recognition_status: 'draft',
+    builder_request_id: request.id,
+    prompt: request.prompt || '',
+    source_name: `${request.result?.name || '目标 MCP 草案'} 需求单`,
+    is_local_builder_source: true,
+    created_at: request.created_at || new Date().toISOString().slice(0, 19).replace('T', ' ')
+  };
+}
+
+function buildLocalOpenapiSpecFromRequest(source = {}, request = {}, sampleContent = '') {
+  const tools = list(request.result?.tools);
+  const paths = {};
+  tools.forEach((tool, index) => {
+    const path = `/builder/${source.id}/${index + 1}`;
+    const method = /创建|提交|执行|催单|核销|提醒/.test(tool.name || '') ? 'post' : 'get';
+    paths[path] = {
+      [method]: {
+        operationId: `builder_${source.id}_${index + 1}`,
+        summary: tool.name || `tool_${index + 1}`,
+        description: tool.note || '',
+        ...(method === 'post' ? {
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    request_id: { type: 'string', description: '客户业务请求标识' },
+                    payload: { type: 'object', description: '业务参数' }
+                  }
+                }
+              }
+            }
+          }
+        } : {
+          parameters: [{ name: 'query', in: 'query', schema: { type: 'string' }, description: '查询关键词或业务标识' }]
+        }),
+        responses: {
+          '200': {
+            description: `${tool.name || 'Tool'} 返回结果`
+          }
+        }
+      }
+    };
+  });
+
+  return {
+    id: `spec_builder_${source.id}`,
+    source_id: source.id,
+    project_id: source.project_id,
+    source_name: source.name,
+    title: `${request.result?.name || '目标 MCP 草案'} OpenAPI 草案`,
+    spec: {
+      openapi: '3.0.0',
+      info: {
+        title: request.result?.name || '目标 MCP 草案',
+        version: '0.1.0',
+        description: [request.result?.summary, request.result?.scenario, sampleContent ? `补充说明：${sampleContent}` : ''].filter(Boolean).join(' | ')
+      },
+      paths
+    },
+    status: 'draft',
+    generated_at: new Date().toISOString(),
+    is_local_builder_spec: true,
+    builder_request_id: request.id
+  };
+}
+
+function buildLocalAssetFromRequest(source = {}, request = {}) {
+  const tools = list(request.result?.tools).map((tool, index) => ({
+    name: `builder_tool_${index + 1}`,
+    display_name: tool.name,
+    description: tool.note,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        payload: { type: 'object', description: '业务输入参数' }
+      }
+    }
+  }));
+  return {
+    id: `mcp_builder_${source.id}`,
+    project_id: source.project_id,
+    project_name: source.project_name,
+    source_id: source.id,
+    source_name: source.name,
+    name: request.result?.name || '目标 MCP 草案',
+    capability: request.result?.scenario || '客户定制需求生成的 MCP 草案',
+    status: 'draft',
+    version: 'v0.1.0',
+    endpoint: `/mcp/builder/${source.id}`,
+    category: '定制',
+    visibility: 'internal',
+    tools,
+    is_local_builder_asset: true,
+    builder_request_id: request.id
+  };
+}
+
+function runLocalBuilderRecognition(source, sampleContent = '') {
+  const request = list(state.builderRequests).find(item => item.id === source.builder_request_id);
+  if (!request) throw new Error('关联的客户需求不存在');
+  const spec = buildLocalOpenapiSpecFromRequest(source, request, sampleContent);
+  upsertLocalOpenapiSpec(spec);
+  upsertLocalIntakeSource({
+    ...source,
+    recognition_status: 'done',
+    status: 'generating',
+    updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ')
+  });
+  return spec;
+}
+
+function updateLocalBuilderRequest(requestId, patch = {}) {
+  state.builderRequests = list(state.builderRequests).map(item =>
+    item.id === requestId ? { ...item, ...patch } : item
+  );
+  persistLocalCollection('mcp_builder_requests', state.builderRequests);
+  return list(state.builderRequests).find(item => item.id === requestId) || null;
+}
+
+function acceptBuilderRequestIntoIntake(requestId) {
+  const request = list(state.builderRequests).find(item => item.id === requestId);
+  if (!request) throw new Error('Builder request not found');
+
+  const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const draftSource = buildLocalIntakeSourceFromRequest(request);
+  const existing = list(state.localIntakeSources).find(item =>
+    item.builder_request_id === requestId || item.id === draftSource.id
+  );
+
+  const source = upsertLocalIntakeSource({
+    ...draftSource,
+    ...existing,
+    updated_at: timestamp
+  });
+
+  updateLocalBuilderRequest(requestId, { updated_at: timestamp });
+  return source;
 }
 
 async function loadAll() {
@@ -80,8 +308,8 @@ async function loadAll() {
     summary,
     customers,
     projects,
-    sources,
-    assets,
+    sources: Array.isArray(sources) ? sources : [],
+    assets: Array.isArray(assets) ? assets : [],
     releases,
     policies,
     events: eventList,
@@ -100,6 +328,7 @@ async function loadAll() {
     retroReasons: Array.isArray(retroReasons?.items) ? retroReasons.items : [],
     reuseSuggestions: Array.isArray(reuseSuggestions?.items) ? reuseSuggestions.items : []
   });
+  refreshLocalAdminCollections();
 }
 
 async function login() {
@@ -1537,6 +1766,20 @@ function openAiRecognizeModal(sourceId) {
         : '<span style="color:#64748b">正在执行静态模板识别...</span>';
 
       try {
+        if (source.is_local_builder_source) {
+          const spec = runLocalBuilderRecognition(source, sampleContent);
+          updateLocalBuilderRequest(source.builder_request_id, {
+            status: 'processing',
+            updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ')
+          });
+          state.selectedOpenapiSpecId = spec.id;
+          state.currentPage = 'recognition';
+          document.body.removeChild(overlay);
+          renderAll();
+          showToast(`已根据客户需求生成 ${Object.keys(spec.spec?.paths || {}).length} 个接口草案。`, 'success');
+          return;
+        }
+
         const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
           method: 'POST',
           body: JSON.stringify({ use_ai: useAI, sample_content: sampleContent, description: sampleContent })
@@ -1663,6 +1906,47 @@ async function confirmOpenapiSpec(specId) {
   if (!specId) return;
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
   try {
+    const localSpec = (state.openapiSpecs || []).find(item => item.id === specId);
+    if (localSpec?.is_local_builder_spec) {
+      const source = (state.sources || []).find(item => item.id === localSpec.source_id);
+      const request = list(state.builderRequests).find(item => item.id === localSpec.builder_request_id);
+      if (!source || !request) {
+        throw new Error('Local builder draft is missing source or request context');
+      }
+
+      const confirmedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const asset = buildLocalAssetFromRequest(source, request);
+
+      upsertLocalOpenapiSpec({
+        ...localSpec,
+        status: 'confirmed',
+        confirmed_at: confirmedAt
+      });
+      upsertLocalAsset({
+        ...asset,
+        updated_at: confirmedAt
+      });
+      upsertLocalIntakeSource({
+        ...source,
+        status: 'confirmed',
+        recognition_status: 'done',
+        updated_at: confirmedAt
+      });
+      updateLocalBuilderRequest(request.id, {
+        status: 'converted',
+        updated_at: confirmedAt,
+        result: {
+          ...request.result,
+          status: '已转入资料接入并生成 MCP 草案'
+        }
+      });
+
+      state.currentPage = 'tooling';
+      renderAll();
+      showToast(`OpenAPI 草案已确认，已生成 ${list(asset.tools).length} 个 MCP Tool。`, 'success');
+      return;
+    }
+
     const result = await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
     await loadAll();
     // 自动跳转到 Tool 映射页
@@ -1738,6 +2022,7 @@ window.triggerRecognition = triggerRecognition;
 window.openAiRecognizeModal = openAiRecognizeModal;
 window.showAiAnalysisResult = showAiAnalysisResult;
 window.closeAiAnalysis = closeAiAnalysis;
+window.acceptBuilderRequestIntoIntake = acceptBuilderRequestIntoIntake;
 window.toggleAssetVisibility = toggleAssetVisibility;
 window.runSandboxTest = runSandboxTest;
 
@@ -1852,6 +2137,13 @@ function bindEvents() {
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !$('login').classList.contains('hidden')) login();
+  });
+
+  $('customerBuilderInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      window.generateCustomerMcp();
+    }
   });
 
   document.querySelectorAll('[data-refresh]').forEach(btn => {

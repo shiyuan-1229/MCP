@@ -950,6 +950,285 @@ function renderKnowledgeDrawer() {
 // ============================================================
 // 客户侧渲染
 // ============================================================
+function persistBuilderRequests() {
+  try { localStorage.setItem('mcp_builder_requests', JSON.stringify(list(state.builderRequests))); } catch {}
+}
+
+function persistCustomerBuilderHistory() {
+  try { localStorage.setItem('mcp_customer_builder_history', JSON.stringify(list(state.customerBuilderHistory))); } catch {}
+}
+
+function sortCustomerBuilderHistory(items) {
+  return list(items).slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+}
+
+const customerBuilderSuggestions = [
+  '我想做一个售后客服 MCP，包含订单查询、退款判断和工单创建。',
+  '我想做一个会员营销 MCP，需要权益提醒和触达策略。',
+  '我想把物流催单、售后工单和会员提醒整合到一个 MCP 里。'
+];
+
+function dedupeTools(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    if (seen.has(item.name)) return false;
+    seen.add(item.name);
+    return true;
+  });
+}
+
+function buildCustomerBuilderResult(prompt, options = {}) {
+  const prompts = list(options.conversationPrompts).length ? list(options.conversationPrompts) : [prompt];
+  const combined = prompts.join(' ');
+  const tools = [];
+  const adjustments = [];
+  const confirmations = [];
+  const references = [];
+
+  if (/订单|order/i.test(combined)) tools.push({ name: '订单查询', mode: '保留', note: '连接订单状态与售后上下文。' });
+  if (/工单|ticket/i.test(combined)) tools.push({ name: '工单创建', mode: '保留', note: '将复杂售后问题流转到人工或系统工单。' });
+  if (/退款|refund/i.test(combined)) {
+    tools.push({ name: '退款判断', mode: '新增', note: '按照售后规则辅助判断退款条件。' });
+    confirmations.push('请先确认退款规则是否按商品类目、时间和客户等级区分。');
+  }
+  if (/物流|催单/i.test(combined)) tools.push({ name: '物流催单', mode: '新增', note: '结合运单信息与异常节点进行主动提醒。' });
+  if (/会员|权益/i.test(combined)) {
+    tools.push({ name: '权益到期提醒', mode: '新增', note: '结合会员标签、权益有效期与触达规则。' });
+    confirmations.push('请确认会员权益数据来源和触达频次限制。');
+  }
+
+  const finalTools = dedupeTools(tools);
+  if (!finalTools.length) {
+    finalTools.push({ name: '需求理解与路由', mode: '新增', note: '先将自然语言需求拆解成可编排能力。' });
+    confirmations.push('请补充最先要执行的业务节点和成功标准。');
+  }
+
+  if (finalTools.some(item => ['订单查询', '工单创建', '退款判断', '物流催单'].includes(item.name))) {
+    references.push({ id: 'asset_after_sales', name: '售后客服能力包', note: '可直接复用售后场景中的查询、工单与逻辑编排能力。' });
+    adjustments.push('已优先保留售后对话中的订单、工单与退款类能力。');
+  }
+  if (finalTools.some(item => item.name === '权益到期提醒')) {
+    references.push({ id: 'asset_member_marketing', name: '会员营销能力包', note: '可参考标签、触达与权益提醒规则。' });
+    adjustments.push('已将新增的会员权益提醒合并进现有 MCP 编排结构。');
+  }
+  if (!adjustments.length) adjustments.push('当前先以目标场景拆解为 Tool 能力集合，后续可再细化边界。');
+
+  const nameParts = [];
+  if (/售后|订单|退款|工单|物流/.test(combined)) nameParts.push('售后客服');
+  if (/会员|权益/.test(combined)) nameParts.push('会员营销');
+  if (!nameParts.length) nameParts.push('定制业务');
+  const name = nameParts.length > 1 ? `${nameParts[0]} MCP / ${nameParts.slice(1).join(' + ')}` : `${nameParts[0]} MCP`; 
+  const scenario = nameParts.length > 1
+    ? '适用于售后与会员运营联动的客服场景。'
+    : nameParts[0] === '售后客服'
+      ? '适用于订单查询、售后工单、退款判断等对话场景。'
+      : nameParts[0] === '会员营销'
+        ? '适用于会员权益提醒与营销触达场景。'
+        : '适用于将自然语言需求转成可编排 MCP 草案。';
+
+  return {
+    name,
+    scenario,
+    status: confirmations.length ? '待确认' : '可生成',
+    summary: `基于 ${prompts.length} 轮需求对话，AI 已完成能力拆解、Tool 匹配与结构重组。`,
+    tools: finalTools,
+    adjustments,
+    confirmations,
+    references,
+    reply: prompts.length > 1
+      ? `已基于上一版继续补充，当前会保留 ${finalTools.map(item => item.name).join('、')} 这些核心能力。`
+      : `已先生成 ${name} 草案，可继续补充更细的业务约束。`,
+    rounds: prompts.length,
+    prompt
+  };
+}
+
+function ensureCustomerBuilderState() {
+  if (!list(state.customerBuilderMessages).length) {
+    state.customerBuilderMessages = [{
+      role: 'assistant',
+      text: '请直接用自然语言描述你想要的 MCP 业务目标，我会帮你拆解能力、匹配 Tool 并重组成目标 MCP 草案。'
+    }];
+  }
+  if (!state.customerBuilderDraft) state.customerBuilderDraft = customerBuilderSuggestions[0];
+  if (!state.customerBuilderResult) state.customerBuilderResult = buildCustomerBuilderResult(state.customerBuilderDraft);
+  if (!state.customerBuilderDetailTab) state.customerBuilderDetailTab = 'tools';
+  if (typeof state.customerBuilderHistoryOpen !== 'boolean') state.customerBuilderHistoryOpen = false;
+}
+
+function upsertCustomerBuilderHistory(status = 'draft') {
+  ensureCustomerBuilderState();
+  const messages = list(state.customerBuilderMessages);
+  const userMessages = messages.filter(item => item.role === 'user');
+  if (!userMessages.length) return null;
+
+  const result = state.customerBuilderResult || buildCustomerBuilderResult(state.customerBuilderDraft, {
+    conversationPrompts: userMessages.map(item => item.text)
+  });
+  const sessionId = state.customerBuilderCurrentSessionId || `builder_session_${Date.now()}`;
+  const entry = {
+    id: sessionId,
+    title: result.name,
+    prompt: userMessages[0]?.text || state.customerBuilderDraft || '',
+    latest_prompt: userMessages[userMessages.length - 1]?.text || state.customerBuilderDraft || '',
+    result,
+    messages,
+    rounds: userMessages.length,
+    status,
+    updated_at: new Date().toISOString()
+  };
+
+  state.customerBuilderCurrentSessionId = sessionId;
+  state.customerBuilderHistory = sortCustomerBuilderHistory([
+    entry,
+    ...list(state.customerBuilderHistory).filter(item => item.id !== sessionId)
+  ]);
+  state.customerBuilderSelectedHistoryId = sessionId;
+  persistCustomerBuilderHistory();
+  return entry;
+}
+
+function renderCustomerBuilder() {
+  ensureCustomerBuilderState();
+
+  const messageNode = $('customerBuilderMessages');
+  if (messageNode) {
+    messageNode.innerHTML = list(state.customerBuilderMessages).map(item => `
+      <div class="customer-builder-message ${item.role === 'user' ? 'user' : 'assistant'}">
+        <span class="customer-builder-role">${item.role === 'user' ? '你' : 'AI'}</span>
+        <div class="customer-builder-bubble">${text(item.text)}</div>
+      </div>
+    `).join('');
+    messageNode.scrollTop = messageNode.scrollHeight;
+  }
+
+  const historyEntries = sortCustomerBuilderHistory(state.customerBuilderHistory);
+  const selectedHistoryId = state.customerBuilderSelectedHistoryId || '';
+  const activeHistoryEntry = historyEntries.find(entry => entry.id === selectedHistoryId) || null;
+  if (!activeHistoryEntry && state.customerBuilderSelectedHistoryId) state.customerBuilderSelectedHistoryId = null;
+
+  const liveResult = state.customerBuilderResult || buildCustomerBuilderResult(state.customerBuilderDraft);
+  const result = activeHistoryEntry?.result || liveResult;
+  const toolCount = list(result.tools).length;
+  const referenceCount = list(result.references).length;
+  const confirmationCount = list(result.confirmations).length;
+  const inlineConfirmations = confirmationCount > 0 && confirmationCount <= 2 ? list(result.confirmations) : [];
+  const detailTabs = [
+    { id: 'tools', label: `Tool 组成 (${toolCount})` },
+    { id: 'rationale', label: `调整与复用依据 (${list(result.adjustments).length + referenceCount})` },
+    ...(confirmationCount > 2 ? [{ id: 'confirmations', label: `待确认项 (${confirmationCount})` }] : [])
+  ];
+
+  if (!detailTabs.some(item => item.id === state.customerBuilderDetailTab)) state.customerBuilderDetailTab = detailTabs[0]?.id || 'tools';
+
+  renderMetricSummary('customerBuilderSummary', [
+    { label: '已识别意图', value: result.scenario ? 1 : 0, meta: '当前需求已拆成 1 个目标业务场景' },
+    { label: '建议 Tool 数', value: toolCount, meta: '右侧已生成可编排 Tool 草案' },
+    { label: '待确认项', value: confirmationCount, meta: '生成前建议先确认关键边界' },
+    { label: '复用参考', value: referenceCount, meta: '优先参考现有资产与历史能力' }
+  ]);
+
+  const historyToggleNode = $('customerBuilderHistoryToggle');
+  if (historyToggleNode) {
+    const historyLabel = historyEntries.length ? `对话历史 (${historyEntries.length})` : '对话历史';
+    historyToggleNode.textContent = historyLabel;
+    historyToggleNode.classList.toggle('active', !!state.customerBuilderHistoryOpen);
+  }
+
+  const historyPopoverNode = $('customerBuilderHistoryPopover');
+  if (historyPopoverNode) historyPopoverNode.classList.toggle('hidden', !state.customerBuilderHistoryOpen);
+
+  const historyNode = $('customerBuilderHistory');
+  if (historyNode) {
+    historyNode.innerHTML = historyEntries.length ? historyEntries.map(entry => `
+      <div class="customer-builder-history-item ${selectedHistoryId === entry.id ? 'active' : ''}" onclick="previewCustomerBuilderHistory('${escapeJs(entry.id)}')">
+        <div class="customer-builder-history-top"><strong>${text(entry.title || '历史会话')}</strong>${selectedHistoryId === entry.id ? '<span class="badge info">当前查看</span>' : `<span class="badge">${text(displayStatus(entry.status || 'draft'))}</span>`}</div>
+        <p>${text(entry.prompt || '-')}</p>
+        <small>${text(`共 ${entry.rounds || 1} 轮对话 · ${displayStatus(entry.status || 'draft')}`)}</small>
+      </div>`).join('') : '<div class="muted-line">这里只展示已保存或已提交的整段会话，当前聊天中的每一句补充不会单独记入历史。</div>';
+  }
+
+  const suggestionNode = $('customerBuilderSuggestionChips');
+  if (suggestionNode) suggestionNode.innerHTML = customerBuilderSuggestions.map(prompt => `<button type="button" class="customer-builder-chip" onclick="applyBuilderPrompt('${escapeJs(prompt)}', true)">${text(prompt)}</button>`).join('');
+
+  const input = $('customerBuilderInput');
+  if (input) input.value = state.customerBuilderDraft || '';
+
+  const summaryNode = $('customerBuilderResultSummary');
+  if (summaryNode) {
+    summaryNode.innerHTML = `
+      <div class="customer-builder-overview-card">
+        <div class="customer-builder-overview-top">
+          <div class="customer-builder-overview-title">
+            <span class="cap-chip">目标 MCP</span>
+            <h4>${text(result.name)}</h4>
+            <p>${text(result.scenario)}</p>
+          </div>
+          <span class="badge warning">${text(result.status)}</span>
+        </div>
+        <p class="customer-builder-overview-summary">${text(result.summary)}</p>
+        <div class="customer-builder-overview-kpis">
+          <div class="customer-builder-overview-kpi"><span>Tool 组成</span><strong>${toolCount}</strong><small>已拆解出的核心能力</small></div>
+          <div class="customer-builder-overview-kpi"><span>复用能力</span><strong>${referenceCount}</strong><small>可直接参考的现有资产</small></div>
+          <div class="customer-builder-overview-kpi"><span>待确认</span><strong>${confirmationCount}</strong><small>需要先确认的业务边界</small></div>
+        </div>
+        <div class="customer-builder-overview-notes">
+          <div class="customer-builder-overview-note"><span>${activeHistoryEntry ? '历史会话' : '当前会话'}</span><strong>${text(activeHistoryEntry ? (activeHistoryEntry.rounds || 1) : list(state.customerBuilderMessages).filter(item => item.role === 'user').length || 1)}</strong></div>
+          <div class="customer-builder-overview-note"><span>${activeHistoryEntry ? '当前查看' : '当前需求'}</span><p>${text(activeHistoryEntry?.latest_prompt || result.prompt || state.customerBuilderDraft || '-')}</p></div>
+        </div>
+      </div>`;
+  }
+
+  const inlineConfirmationNode = $('customerBuilderInlineConfirmations');
+  if (inlineConfirmationNode) {
+    inlineConfirmationNode.innerHTML = inlineConfirmations.length ? `
+      <div class="customer-builder-inline-alert">
+        <strong>提交前建议先确认</strong>
+        <div class="customer-builder-inline-list">${inlineConfirmations.map(item => `<div class="customer-builder-inline-item">${text(item)}</div>`).join('')}</div>
+      </div>` : '';
+  }
+
+  const tabsNode = $('customerBuilderDetailTabs');
+  if (tabsNode) tabsNode.innerHTML = detailTabs.map(item => `<button type="button" class="customer-builder-detail-tab ${state.customerBuilderDetailTab === item.id ? 'active' : ''}" onclick="switchCustomerBuilderDetailTab('${item.id}')">${text(item.label)}</button>`).join('');
+
+  const detailBodyNode = $('customerBuilderDetailBody');
+  if (detailBodyNode) {
+    if (state.customerBuilderDetailTab === 'tools') {
+      detailBodyNode.innerHTML = toolCount ? `
+        <div class="customer-builder-tool-list">${list(result.tools).map(tool => `
+          <div class="customer-builder-tool-row">
+            <div class="customer-builder-tool-row-top">
+              <h4>${text(tool.name)}</h4>
+              <span class="customer-builder-mode ${tool.mode === '新增' ? 'is-new' : tool.mode === '调整' ? 'is-adjust' : 'is-keep'}">${text(tool.mode)}</span>
+            </div>
+            <p>${text(tool.note)}</p>
+          </div>`).join('')}
+        </div>` : emptyState('暂无 Tool 草案');
+    } else if (state.customerBuilderDetailTab === 'rationale') {
+      detailBodyNode.innerHTML = `
+        <div class="customer-builder-detail-group">
+          <div class="customer-builder-detail-heading">调整依据</div>
+          <div class="customer-builder-detail-list">${list(result.adjustments).map(item => `<div class="customer-builder-detail-item">${text(item)}</div>`).join('') || emptyState('暂无调整说明')}</div>
+        </div>
+        <div class="customer-builder-detail-group">
+          <div class="customer-builder-detail-heading">复用参考</div>
+          <div class="customer-builder-reference-list">${list(result.references).length ? list(result.references).map(item => `
+            <div class="customer-builder-reference-row">
+              <div class="customer-builder-reference-top">
+                <h4>${text(item.name)}</h4>
+                <span class="badge info">复用参考</span>
+              </div>
+              <p>${text(item.note || '-')}</p>
+              <small>ID: ${text(item.id || '-')}</small>
+            </div>`).join('') : emptyState('暂无可复用资产')}</div>
+        </div>`;
+    } else {
+      detailBodyNode.innerHTML = list(result.confirmations).length ? `
+        <div class="customer-builder-confirmation-list">${list(result.confirmations).map(item => `<div class="customer-builder-confirmation-item">${text(item)}</div>`).join('')}</div>` : emptyState('暂无待确认项');
+    }
+  }
+}
+
 function renderCustomerReleaseTimeline() {
   const dashboard = state.customerDashboard || {};
   const cards = [];
@@ -1108,6 +1387,104 @@ window.closeAccessGuide = function closeAccessGuide() {
   renderAll();
 };
 
+window.applyBuilderPrompt = function applyBuilderPrompt(prompt = '', autoSend = false) {
+  state.customerBuilderDraft = prompt;
+  if (autoSend) {
+    window.generateCustomerMcp(state.customerBuilderDraft);
+    return;
+  }
+  renderAll();
+};
+
+window.generateCustomerMcp = function generateCustomerMcp(prompt = '') {
+  ensureCustomerBuilderState();
+  const draftValue = $('customerBuilderInput')?.value || '';
+  const value = String(prompt || draftValue || state.customerBuilderDraft || '').trim();
+  if (!value) {
+    showToast('请先输入你的业务需求。', 'warning');
+    return;
+  }
+  state.customerBuilderDraft = value;
+  state.customerBuilderSelectedHistoryId = null;
+  state.customerBuilderMessages = [...list(state.customerBuilderMessages), { role: 'user', text: value }];
+  const conversationPrompts = list(state.customerBuilderMessages).filter(item => item.role === 'user').map(item => item.text);
+  state.customerBuilderResult = buildCustomerBuilderResult(value, { conversationPrompts });
+  state.customerBuilderMessages = [...list(state.customerBuilderMessages), { role: 'assistant', text: state.customerBuilderResult.reply }];
+  renderAll();
+};
+
+window.clearCustomerBuilder = function clearCustomerBuilder() {
+  state.customerBuilderMessages = [];
+  state.customerBuilderResult = null;
+  state.customerBuilderDraft = customerBuilderSuggestions[0];
+  state.customerBuilderDetailTab = 'tools';
+  state.customerBuilderSelectedHistoryId = null;
+  state.customerBuilderCurrentSessionId = '';
+  renderAll();
+};
+
+window.saveBuilderDraft = function saveBuilderDraft() {
+  const entry = upsertCustomerBuilderHistory('draft');
+  try {
+    localStorage.setItem('mcp_customer_builder_draft', state.customerBuilderDraft || '');
+  } catch {}
+  showToast(entry ? '已将当前会话保存为草稿。' : '暂无可保存的会话。', entry ? 'success' : 'warning');
+  renderAll();
+};
+
+window.handoffBuilderRequest = function handoffBuilderRequest() {
+  window.submitBuilderRequest('accepted');
+  showToast('已将需求草案标记为待人工确认。', 'success');
+};
+
+window.submitBuilderRequest = function submitBuilderRequest(historyStatus = 'submitted') {
+  ensureCustomerBuilderState();
+  const result = state.customerBuilderResult || buildCustomerBuilderResult(state.customerBuilderDraft);
+  const historyEntry = upsertCustomerBuilderHistory(historyStatus);
+  const request = {
+    id: `builder_${Date.now()}`,
+    prompt: state.customerBuilderDraft,
+    result,
+    status: 'submitted',
+    created_at: new Date().toISOString(),
+    customer_name: state.user?.display_name || state.user?.username || '客户'
+  };
+  state.builderRequests = [request, ...list(state.builderRequests)];
+  persistBuilderRequests();
+  if (historyEntry) state.customerBuilderSelectedHistoryId = historyEntry.id;
+  showToast('需求已提交给 MCP 承接流程。', 'success');
+  renderAll();
+};
+
+window.adminUpdateBuilderRequestStatus = async function adminUpdateBuilderRequestStatus(id, status) {
+  const request = list(state.builderRequests).find(item => item.id === id);
+  if (!request) {
+    showToast('需求记录不存在。', 'error');
+    return;
+  }
+  state.builderRequests = list(state.builderRequests).map(item => item.id === id ? { ...item, status, updated_at: new Date().toISOString() } : item);
+  persistBuilderRequests();
+  showToast('需求状态已更新。', 'success');
+  renderAll();
+};
+
+window.switchCustomerBuilderDetailTab = function switchCustomerBuilderDetailTab(tabId) {
+  state.customerBuilderDetailTab = tabId;
+  renderAll();
+};
+
+window.toggleCustomerBuilderHistory = function toggleCustomerBuilderHistory(forceOpen) {
+  ensureCustomerBuilderState();
+  state.customerBuilderHistoryOpen = typeof forceOpen === 'boolean' ? forceOpen : !state.customerBuilderHistoryOpen;
+  renderAll();
+};
+
+window.previewCustomerBuilderHistory = function previewCustomerBuilderHistory(historyId) {
+  state.customerBuilderSelectedHistoryId = historyId || null;
+  state.customerBuilderHistoryOpen = false;
+  renderAll();
+};
+
 window.switchCustomerPage = function switchCustomerPage(pageId) {
   switchPage(pageId);
 };
@@ -1245,6 +1622,7 @@ export function renderAll() {
   renderApiKeys();
   renderKnowledge();
   renderBilling();
+  renderCustomerBuilder();
   renderCustomerDashboard();
   renderCustomerUsage();
   renderCustomerBilling();

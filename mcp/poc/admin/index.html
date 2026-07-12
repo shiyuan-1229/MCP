@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -302,7 +302,63 @@
         </div>
       </section>
 
-            <section id="my-assets" class="page" data-title="我的 MCP 资产" data-eyebrow="已交付资产的运行总览">
+            
+<section id="mcp-builder" class="page" data-title="AI 需求生成 MCP" data-eyebrow="顾客用自然语言描述目标，AI 连续对话后自动重组能力并生成目标 MCP">
+  <div id="customerBuilderSummary" class="metric-grid"></div>
+  <div class="content-grid customer-builder-layout" style="margin-top:20px">
+    <article class="panel customer-builder-chat-panel">
+      <div class="panel-head customer-builder-chat-head">
+        <div>
+          <h3>AI 需求对话</h3>
+          <small class="muted-line">连续描述你的业务目标，AI 会补全参数、拆解能力并持续更新右侧结果总览</small>
+        </div>
+        <button id="customerBuilderHistoryToggle" type="button" class="ghost-btn small customer-builder-history-toggle" onclick="toggleCustomerBuilderHistory()">对话历史</button>
+      </div>
+      <div id="customerBuilderHistoryPopover" class="customer-builder-history-wrap customer-builder-history-popover hidden">
+        <div class="customer-builder-history-head"><strong>历史会话</strong><span>这里只展示已保存或已提交的整段会话</span></div>
+        <div id="customerBuilderHistory" class="customer-builder-history-list"></div>
+      </div>
+      <div class="customer-builder-chat">
+        <div id="customerBuilderMessages" class="customer-builder-messages"></div>
+        <div class="customer-builder-suggestion-wrap">
+          <span class="muted-line">示例提示</span>
+          <div id="customerBuilderSuggestionChips" class="customer-builder-chip-row"></div>
+        </div>
+        <div class="customer-builder-composer">
+          <textarea id="customerBuilderInput" placeholder="例如：我想做一个售后客服 MCP，能查询订单、处理退款，并兼容企业微信和网页客服。"></textarea>
+          <div class="customer-builder-composer-hint"><strong>连续对话已开启</strong><span>补充需求后可继续生成；Enter 发送，Shift+Enter 换行</span></div>
+          <div class="customer-builder-action-row">
+            <button type="button" class="ghost-btn" onclick="clearCustomerBuilder()">清空</button>
+            <button type="button" class="primary-btn" onclick="generateCustomerMcp()">生成结果</button>
+          </div>
+        </div>
+      </div>
+    </article>
+    <div class="customer-builder-result-shell">
+      <article class="panel customer-builder-result-panel">
+        <div class="panel-head"><h3>目标 MCP 总览</h3><small class="muted-line">按结果总览方式呈现能力方案、Tool 组合、参数补全与交付建议</small></div>
+        <div id="customerBuilderResultSummary" class="customer-builder-overview"></div>
+        <div id="customerBuilderInlineConfirmations"></div>
+        <div class="customer-builder-result-main">
+          <div class="customer-builder-result-nav">
+            <div class="customer-builder-result-label">结果总览</div>
+            <div id="customerBuilderDetailTabs" class="customer-builder-detail-tabs"></div>
+          </div>
+          <div id="customerBuilderDetailBody" class="customer-builder-detail-body"></div>
+        </div>
+        <div class="customer-builder-result-actions">
+          <div class="customer-builder-footer-copy"><h3>下一步</h3><p class="muted-line">确认后可暂存草稿、转交管理员继续编排，或直接提交生成目标 MCP</p></div>
+          <div class="customer-builder-footer-actions">
+            <button type="button" class="ghost-btn" onclick="saveBuilderDraft()">暂存草稿</button>
+            <button type="button" class="ghost-btn" onclick="handoffBuilderRequest()">转交管理员</button>
+            <button type="button" class="primary-btn" onclick="submitBuilderRequest()">提交生成</button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+<section id="my-assets" class="page" data-title="我的 MCP 资产" data-eyebrow="查看已交付资产、运行焦点与版本动态">
         <div id="customerDashboardCards" class="metric-grid"></div>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>我的 MCP 资产</h3></div><div id="customerAssetCards" class="card-list"></div></article>
@@ -332,7 +388,7 @@
       </section>
 
             <section id="my-deliverables" class="page" data-title="交付物下载" data-eyebrow="配置包、报告、日志与复盘">
-        <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article></article>
+        <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>交付建议</h3></div><div id="customerDeliverableHighlights" class="card-list"></div></article>
           <article class="panel"><div class="panel-head"><h3>交付物下载</h3></div><div class="table-wrap"><table><thead><tr><th>文件</th><th>所属项目</th><th>类型</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
@@ -340,7 +396,7 @@
       </section>
 
             <section id="my-access" class="page" data-title="接入配置" data-eyebrow="地址、证书、鉴权方式与运行说明">
-        <article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><div id="customerAccessSummary" class="metric-grid"></div></article></article>
+        <article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><div id="customerAccessSummary" class="metric-grid"></div></article>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>使用前须知</h3></div><div id="customerAccessGuideList" class="card-list"></div></article>
           <article class="panel"><div class="panel-head"><h3>接入配置</h3></div><div id="customerAccessList" class="card-list"></div></article>
