@@ -1,5 +1,6 @@
 ﻿// MCP Forge admin server
 import express from "express";
+import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
@@ -387,7 +388,7 @@ function scopedAssets(req) {
   const cid = customerScope(req);
   const projectIds = scopedProjects(req).map(p => p.id);
   if (!projectIds.length) return [];
-  const sql = `SELECT a.*, p.name AS project_name, p.customer_id FROM platform_mcp_assets a JOIN platform_projects p ON p.id = a.project_id WHERE a.project_id IN (${projectIds.map(() => "?").join(",")})`;
+  const sql = `SELECT a.*, p.name AS project_name, p.customer_id, c.name AS customer_name FROM platform_mcp_assets a JOIN platform_projects p ON p.id = a.project_id JOIN platform_customers c ON c.id = p.customer_id WHERE a.project_id IN (${projectIds.map(() => "?").join(",")})`;
   return db.prepare(sql).all(...projectIds);
 }
 
@@ -1361,9 +1362,60 @@ app.put("/api/platform/projects/:id", requireAuth, requireAdmin, (req, res) => {
 app.get("/api/platform/data-sources", requireAuth, (req, res) => {
   const ids = scopedProjects(req).map(p => p.id);
   if (!ids.length) return res.json([]);
-  res.json(db.prepare(`SELECT s.*, p.name AS project_name FROM platform_data_sources s
-    JOIN platform_projects p ON p.id = s.project_id WHERE s.project_id IN (${ids.map(() => "?").join(",")})
-    ORDER BY s.status DESC, s.id`).all(...ids));
+  res.json(db.prepare(`SELECT s.*, p.name AS project_name, p.customer_id, c.name AS customer_name FROM platform_data_sources s
+    JOIN platform_projects p ON p.id = s.project_id
+    JOIN platform_customers c ON c.id = p.customer_id
+    WHERE s.project_id IN (${ids.map(() => "?").join(",")})
+    ORDER BY c.id, s.status DESC, s.id`).all(...ids));
+});
+
+// 企业端/管理员上传业务文件 → 自动创建数据源
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+});
+
+app.post("/api/platform/data-sources/upload", requireAuth, upload.array('files', 10), async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: "no files uploaded" });
+
+  const project_id = req.body?.project_id;
+  if (!project_id) return res.status(400).json({ error: "project_id required" });
+  const project = db.prepare("SELECT id FROM platform_projects WHERE id = ?").get(project_id);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const created = [];
+  for (const file of files) {
+    const id = makeId("ds");
+    const name = file.originalname.replace(/\.[^.]+$/, '');
+    const ext = file.originalname.split('.').pop()?.toLowerCase();
+    const type = ['json', 'yaml', 'yml'].includes(ext) ? 'REST API' : ['sql'].includes(ext) ? 'Database' : 'Knowledge Base';
+
+    // 提取文件内容（如果是文本文件）
+    let content = '';
+    const isText = ['json', 'yaml', 'yml', 'sql', 'csv', 'md', 'txt'].includes(ext);
+    if (isText) {
+      content = file.buffer.toString('utf-8').slice(0, 50000);
+    }
+
+    db.prepare("INSERT INTO platform_data_sources (id, project_id, name, type, auth_mode, status) VALUES (?,?,?,?,?,?)").run(
+      id, project_id, name, type, 'File Upload', 'draft'
+    );
+
+    // 缓存文件内容供 AI 识别
+    const analysisId = makeId("ai");
+    db.prepare(`INSERT OR REPLACE INTO ai_analysis_results
+      (id, source_id, project_id, analysis_json, model, usage_json, raw_content, created_at)
+      VALUES (?,?,?,?,?,?,?, datetime('now'))`).run(
+      analysisId, id, project_id,
+      JSON.stringify({ type: 'file_upload', filename: file.originalname, size: file.size, content_type: ext }),
+      'file-upload', JSON.stringify({}), content
+    );
+
+    created.push({ id, name, type, size: file.size });
+  }
+
+  res.status(201).json({ created: created.length, files: created });
 });
 
 // 数据库直连：测试连接
@@ -1537,13 +1589,13 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
 
   // 真实 AI 识别流程
   try {
-    // 如果前端未提供样本内容，尝试从种子数据或数据库导入缓存中获取
+    // 如果前端未提供样本内容，尝试从种子数据、数据库导入缓存或文件上传缓存中获取
     let effectiveSample = sampleContent;
     if (!effectiveSample) {
-      // 先查 ai_analysis_results 中 db-connector 存的 raw_content
-      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector' ORDER BY created_at DESC LIMIT 1").get(source.id);
-      if (dbCache?.raw_content) {
-        effectiveSample = dbCache.raw_content;
+      // 查 ai_analysis_results 中的缓存内容（db-connector 或 file-upload）
+      const cache = db.prepare("SELECT raw_content, model FROM ai_analysis_results WHERE source_id = ? AND raw_content != '' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      if (cache?.raw_content) {
+        effectiveSample = cache.raw_content;
       } else {
         // 再查种子数据
         const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
@@ -1638,6 +1690,75 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
   }
 });
 
+// 按企业批量识别（只识别 draft/pending 状态的）
+app.post("/api/platform/data-sources/batch-recognize", requireAuth, requireAdmin, async (req, res) => {
+  const { customer_id } = req.body || {};
+  if (!customer_id) return res.status(400).json({ error: "customer_id required" });
+
+  const sources = db.prepare(`SELECT s.*, p.name AS project_name FROM platform_data_sources s
+    JOIN platform_projects p ON p.id = s.project_id
+    JOIN platform_customers c ON c.id = p.customer_id
+    WHERE c.id = ? AND s.recognition_status != 'done'`).all(customer_id);
+
+  if (!sources.length) return res.json({ total: 0, success: 0, failed: 0, message: '该企业下没有待识别的资料' });
+
+  const results = [];
+  for (const source of sources) {
+    try {
+      // 获取样本内容
+      let effectiveSample = '';
+      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      if (dbCache?.raw_content) {
+        effectiveSample = dbCache.raw_content;
+      } else {
+        const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
+        if (lvchengSrc) effectiveSample = lvchengSrc.sampleContent;
+      }
+
+      const pipelineResult = await runFullPipeline({
+        name: source.name,
+        type: source.type,
+        auth_mode: source.auth_mode,
+        description: effectiveSample ? effectiveSample.slice(0, 500) : `业务资料类型: ${source.type}`,
+        sampleContent: effectiveSample || ''
+      });
+
+      db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(
+        source.type === "Knowledge Base" ? "indexed" : "connected", source.id
+      );
+      db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(source.id);
+      db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ?").run(source.id);
+
+      const specId = makeId("spec");
+      db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
+        specId, source.id, source.project_id, `${source.name} OpenAPI 草案（AI 生成）`, JSON.stringify(pipelineResult.openapiSpec), "draft"
+      );
+
+      const analysisId = makeId("ai");
+      db.prepare(`INSERT OR REPLACE INTO ai_analysis_results
+        (id, source_id, project_id, analysis_json, openapi_spec_id, tools_json, categories_json, model, usage_json, raw_content, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))`).run(
+        analysisId, source.id, source.project_id,
+        JSON.stringify(pipelineResult.analysis), specId,
+        JSON.stringify(pipelineResult.tools), JSON.stringify(pipelineResult.categories),
+        pipelineResult.model, JSON.stringify(pipelineResult.usage || {}),
+        pipelineResult.rawContent || ''
+      );
+
+      results.push({ source_id: source.id, source_name: source.name, success: true, spec_id: specId, tools: pipelineResult.tools.length });
+    } catch (err) {
+      results.push({ source_id: source.id, source_name: source.name, success: false, error: err.message });
+    }
+  }
+
+  res.json({
+    total: sources.length,
+    success: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    results
+  });
+});
+
 // 获取 AI 分析详情
 app.get("/api/platform/data-sources/:id/ai-analysis", requireAuth, (req, res) => {
   const row = db.prepare("SELECT * FROM ai_analysis_results WHERE source_id = ? ORDER BY created_at DESC LIMIT 1").get(req.params.id);
@@ -1655,6 +1776,118 @@ app.get("/api/platform/data-sources/:id/ai-analysis", requireAuth, (req, res) =>
     raw_content: row.raw_content,
     created_at: row.created_at
   });
+});
+
+// 查看数据源的原始文件内容
+app.get("/api/platform/data-sources/:id/content", requireAuth, (req, res) => {
+  const source = db.prepare("SELECT * FROM platform_data_sources WHERE id = ?").get(req.params.id);
+  if (!source) return res.status(404).json({ error: "not found" });
+  const cache = db.prepare("SELECT raw_content, model, analysis_json, created_at FROM ai_analysis_results WHERE source_id = ? ORDER BY created_at DESC LIMIT 1").get(req.params.id);
+  if (!cache || !cache.raw_content) return res.json({ content: '', message: '该资料没有缓存的文件内容' });
+  let meta = {};
+  try { meta = JSON.parse(cache.analysis_json); } catch {}
+  res.json({
+    source_name: source.name,
+    source_type: source.type,
+    source: cache.model,
+    content: cache.raw_content,
+    meta,
+    cached_at: cache.created_at
+  });
+});
+
+// 批量选中识别（带封装要求）
+app.post("/api/platform/data-sources/batch-recognize-selected", requireAuth, requireAdmin, async (req, res) => {
+  const { source_ids, custom_instructions } = req.body || {};
+  if (!Array.isArray(source_ids) || !source_ids.length) return res.status(400).json({ error: "source_ids required" });
+
+  const results = [];
+  for (const sid of source_ids) {
+    const source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(sid);
+    if (!source) { results.push({ source_id: sid, success: false, error: 'not found' }); continue; }
+
+    try {
+      let effectiveSample = '';
+      const cache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND raw_content != '' ORDER BY created_at DESC LIMIT 1").get(sid);
+      if (cache?.raw_content) effectiveSample = cache.raw_content;
+      else {
+        const lvchengSrc = getLvchengSeedSources().find(s => s.id === sid);
+        if (lvchengSrc) effectiveSample = lvchengSrc.sampleContent;
+      }
+
+      const pipelineResult = await runFullPipeline({
+        name: source.name, type: source.type, auth_mode: source.auth_mode,
+        description: effectiveSample ? effectiveSample.slice(0, 500) : `类型: ${source.type}`,
+        sampleContent: effectiveSample || '', customInstructions: custom_instructions || ''
+      });
+
+      db.prepare("UPDATE platform_data_sources SET recognition_status = 'done', status = ? WHERE id = ?").run(source.type === "Knowledge Base" ? "indexed" : "connected", sid);
+      db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(sid);
+      db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ?").run(sid);
+
+      const specId = makeId("spec");
+      db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
+        specId, sid, source.project_id, `${source.name} OpenAPI 草案（AI 生成）`, JSON.stringify(pipelineResult.openapiSpec), "draft"
+      );
+      const analysisId = makeId("ai");
+      db.prepare(`INSERT OR REPLACE INTO ai_analysis_results (id, source_id, project_id, analysis_json, openapi_spec_id, tools_json, categories_json, model, usage_json, raw_content, created_at) VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))`).run(
+        analysisId, sid, source.project_id, JSON.stringify(pipelineResult.analysis), specId, JSON.stringify(pipelineResult.tools), JSON.stringify(pipelineResult.categories), pipelineResult.model, JSON.stringify(pipelineResult.usage || {}), pipelineResult.rawContent || ''
+      );
+
+      results.push({ source_id: sid, source_name: source.name, success: true, spec_id: specId, tools: pipelineResult.tools.length });
+    } catch (err) {
+      results.push({ source_id: sid, source_name: source.name, success: false, error: err.message });
+    }
+  }
+
+  res.json({ total: results.length, success: results.filter(r => r.success).length, failed: results.filter(r => !r.success).length, results });
+});
+
+// AI 重组 Tool 封装新 MCP
+app.post("/api/platform/mcp-assets/:id/recompose", requireAuth, requireAdmin, async (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const { tool_names, mcp_name, mcp_description, ai_instruction } = req.body || {};
+  if (!Array.isArray(tool_names) || !tool_names.length) return res.status(400).json({ error: "tool_names required" });
+
+  const allTools = decode(asset.tools);
+  const selectedTools = allTools.filter(t => typeof t === 'object' && tool_names.includes(t.name));
+
+  // 创建新 MCP 资产
+  const newAssetId = makeId("mcp");
+  const newMcpName = mcp_name || `${asset.name}（重组）`;
+  const capability = mcp_description || `基于 ${selectedTools.length} 个 Tool 重组`;
+
+  db.prepare("INSERT INTO platform_mcp_assets (id, project_id, name, capability, status, version, endpoint, category, tools, visibility) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    newAssetId, asset.project_id, newMcpName + ' [NEW]', capability, 'tooling', 'v1.0.0',
+    `/mcp/recomposed-${Date.now().toString(36)}`, 'AI重组', JSON.stringify(selectedTools), 'internal'
+  );
+
+  res.status(201).json({ asset_id: newAssetId, name: newMcpName, tool_count: selectedTools.length });
+});
+
+// 批量删除 Tool
+app.post("/api/platform/mcp-assets/:id/tools/batch-delete", requireAuth, requireAdmin, (req, res) => {
+  const { tool_names } = req.body || {};
+  if (!Array.isArray(tool_names)) return res.status(400).json({ error: "tool_names required" });
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const tools = decode(asset.tools);
+  const filtered = tools.filter(t => {
+    const name = typeof t === 'object' ? t.name : t;
+    return !tool_names.includes(name);
+  });
+  db.prepare("UPDATE platform_mcp_assets SET tools = ? WHERE id = ?").run(JSON.stringify(filtered), req.params.id);
+  res.json({ ok: true, remaining: filtered.length });
+});
+
+// 批量删除 MCP 资产
+app.post("/api/platform/mcp-assets/batch-delete", requireAuth, requireAdmin, (req, res) => {
+  const { asset_ids } = req.body || {};
+  if (!Array.isArray(asset_ids)) return res.status(400).json({ error: "asset_ids required" });
+  const stmt = db.prepare("DELETE FROM platform_mcp_assets WHERE id = ?");
+  asset_ids.forEach(id => stmt.run(id));
+  res.json({ ok: true, deleted: asset_ids.length });
 });
 
 // AI 引擎配置查询
@@ -2032,6 +2265,22 @@ app.get("/api/platform/knowledge-bases/:id/recall-logs", requireAuth, (req, res)
 });
 
 app.get("/api/platform/mcp-assets", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({ ...a, tools: decode(a.tools) }))));
+
+// 编辑 MCP 资产属性
+app.put("/api/platform/mcp-assets/:id", requireAuth, requireAdmin, (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const { name, capability, status, visibility, version } = req.body || {};
+  const updates = [];
+  const params = [];
+  if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  if (capability !== undefined) { updates.push("capability = ?"); params.push(capability); }
+  if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+  if (visibility !== undefined) { updates.push("visibility = ?"); params.push(visibility); }
+  if (version !== undefined) { updates.push("version = ?"); params.push(version); }
+  if (updates.length) { params.push(req.params.id); db.prepare(`UPDATE platform_mcp_assets SET ${updates.join(", ")} WHERE id = ?`).run(...params); }
+  res.json(db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id));
+});
 
 // 切换 MCP 资产可见性 (public/internal)
 app.put("/api/platform/mcp-assets/:id/visibility", requireAuth, requireAdmin, (req, res) => {
@@ -2450,6 +2699,128 @@ app.post("/admin/simulate-call", requireAuth, (req, res) => {
   );
 
   res.json(mcpResponse);
+});
+
+// ============== 智能体联调 — AI 驱动的 Tool 调用测试 ==============
+
+app.post("/api/platform/mcp-assets/:id/agent-chat", requireAuth, requireAdmin, async (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const { message, history } = req.body || {};
+  if (!message?.trim()) return res.status(400).json({ error: "message required" });
+
+  const tools = decode(asset.tools);
+  const toolDefs = tools.filter(t => typeof t === 'object').map(t => ({
+    name: t.name,
+    display_name: t.display_name || t.name,
+    description: t.description || '',
+    parameters: t.inputSchema?.properties || {},
+    required: t.inputSchema?.required || []
+  }));
+
+  if (!toolDefs.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
+
+  // 构建 system prompt
+  const systemPrompt = `你是 MCP 资产「${asset.name}」的智能体。你可以调用以下工具来回答用户问题：
+
+${toolDefs.map((t, i) => `${i + 1}. **${t.display_name}**（${t.name}）：${t.description}
+   参数：${Object.keys(t.parameters).length ? Object.entries(t.parameters).map(([k, v]) => `${k}(${v.type})`).join(', ') : '无'}`).join('\n\n')}
+
+规则：
+- 根据用户问题判断需要调用哪个工具
+- 如果需要调用工具，输出 JSON：{"action":"call_tool","tool":"工具名","args":{"参数名":"值"}}
+- 工具执行后你会收到结果，然后基于结果用中文自然回复用户
+- 如果用户的请求不明确，直接询问需要什么信息`;
+
+  // 构建消息历史
+  const inputMessages = [...(history || []), { role: 'user', content: message }];
+  const inputText = inputMessages.map(m => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`).join('\n\n');
+
+  try {
+    const aiBase = process.env.AI_API_BASE || 'https://api.ccswitch.com/v1';
+    const aiKey = process.env.AI_API_KEY || '';
+    const aiModel = process.env.AI_MODEL || 'gpt-5.4-mini';
+    if (!aiKey) return res.status(400).json({ error: "AI 引擎未配置 API Key" });
+
+    const resp = await fetch(`${aiBase}/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: aiModel,
+        input: inputText,
+        instructions: systemPrompt,
+        max_output_tokens: 2000
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      return res.status(500).json({ error: `AI 返回 ${resp.status}: ${errText.slice(0, 200)}` });
+    }
+
+    const data = await resp.json();
+    let aiContent = data.output_text || '';
+    if (!aiContent && Array.isArray(data.output)) {
+      const msgItem = data.output.find(o => o.type === 'message');
+      if (msgItem?.content) aiContent = msgItem.content.map(c => c.text || '').join('');
+    }
+
+    // 检查 AI 是否要求调用工具
+    let toolCall = null;
+    const jsonMatch = aiContent.match(/\{[^{}]*"action"\s*:\s*"call_tool"[^{}]*\}/);
+    if (jsonMatch) {
+      try { toolCall = JSON.parse(jsonMatch[0]); } catch {}
+    }
+
+    // 如果 AI 要求调用工具，模拟执行
+    if (toolCall?.tool) {
+      const tool = toolDefs.find(t => t.name === toolCall.tool);
+      if (tool) {
+        // 模拟执行工具
+        const mockResult = {
+          tool: toolCall.tool,
+          display_name: tool.display_name,
+          status: 'success',
+          args: toolCall.args || {},
+          result: `[模拟执行] ${tool.display_name} 调用成功。参数：${JSON.stringify(toolCall.args || {})}。返回示例数据：{ "data": "这是沙箱环境模拟返回的数据", "executed_at": "${new Date().toISOString()}" }`
+        };
+
+        // 再让 AI 基于结果自然回复
+        const followupResp = await fetch(`${aiBase}/responses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+          body: JSON.stringify({
+            model: aiModel,
+            input: `${inputText}\n\n助手：${aiContent}\n\n[工具执行结果]：${JSON.stringify(mockResult.result)}\n\n请基于工具执行结果，用中文自然地回复用户。`,
+            max_output_tokens: 1000
+          }),
+          signal: AbortSignal.timeout(30000)
+        });
+
+        if (followupResp.ok) {
+          const followupData = await followupResp.json();
+          let finalReply = followupData.output_text || '';
+          if (!finalReply && Array.isArray(followupData.output)) {
+            const msgItem = followupData.output.find(o => o.type === 'message');
+            if (msgItem?.content) finalReply = msgItem.content.map(c => c.text || '').join('');
+          }
+          return res.json({
+            reply: finalReply || '执行完成',
+            tool_called: toolCall.tool,
+            tool_display_name: tool.display_name,
+            mock_result: mockResult,
+            usage: (data.usage?.total_tokens || 0) + (followupData.usage?.total_tokens || 0)
+          });
+        }
+      }
+    }
+
+    // AI 没有调用工具，直接回复
+    res.json({ reply: aiContent, tool_called: null, usage: data.usage?.total_tokens || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============== 沙箱综合测试（逐 Tool 调用 + 部署检查 + 安全审计） ==============

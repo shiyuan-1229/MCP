@@ -219,39 +219,94 @@ function renderIntake() {
   if (aiBadge) {
     const cfg = state.aiConfig || {};
     if (cfg.configured) {
-      aiBadge.textContent = `AI 引擎已就绪 · ${cfg.model || ''}`;
+      aiBadge.textContent = `AI 已就绪 · ${cfg.model || ''}`;
       aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#dcfce7;color:#16a34a;font-weight:600';
     } else {
-      aiBadge.textContent = 'AI 引擎未配置';
+      aiBadge.textContent = 'AI 未配置';
       aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#fef9c3;color:#a16207;font-weight:600';
     }
   }
 
-  // 表格行
-  renderSimpleRows('sourceRows', items.map(item => {
-    const recStatus = item.recognition_status || 'draft';
-    const statusBadge = badge(item.status || 'draft');
-    const recBadge = recStatus === 'done' ? '<span class="badge success">已识别</span>' : recStatus === 'pending' ? '<span class="badge warning">识别中</span>' : '<span class="badge info">待识别</span>';
-    const isDbConn = item.auth_mode === 'Database Connection';
-    const actionBtn = recStatus === 'done'
-      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button><button type="button" class="ghost-btn small" onclick="downloadSourceReport('${item.id}')">下载识别报告</button>${isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${item.id}')" title="重新读取数据库表结构">🔄 刷新DDL</button>` : ''}<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')" title="使用真实 AI 大模型重新识别">重新识别</button></div>`
-      : `<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">开始识别</button>`;
-    const outputInfo = recStatus === 'done'
-      ? '<span class="badge success">OpenAPI 草案已生成</span>'
-      : '<span class="muted-line">-</span>';
-    return `<tr><td><strong>${text(item.name || '未命名资料')}</strong>${isDbConn ? ' <span style="font-size:10px;color:#2563eb">🗄️直连</span>' : ''}</td><td>${text(item.project_name || item.project_id || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
-  }), '暂无业务资料。点击右上角「导入业务资料」开始接入。', 8);
+  // 填充企业筛选器
+  const filter = $('intakeCustomerFilter');
+  if (filter) {
+    const currentVal = filter.value;
+    const customerIds = [...new Set(items.map(i => i.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = items.find(i => i.customer_id === cid)?.customer_name || cid;
+      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+
+  const selectedCustomer = filter?.value || '';
+  const filtered = selectedCustomer ? items.filter(i => i.customer_id === selectedCustomer) : items;
+
+  // 按企业分组
+  const grouped = {};
+  filtered.forEach(item => {
+    const cid = item.customer_id || item.project_id || 'unknown';
+    const cname = item.customer_name || item.project_name || item.project_id || '未分类';
+    if (!grouped[cid]) grouped[cid] = { name: cname, id: cid, items: [] };
+    grouped[cid].items.push(item);
+  });
+
+  const tbody = $('sourceRows');
+  if (!tbody) return;
+  let html = '';
+  const customerIds = Object.keys(grouped);
+
+  customerIds.forEach(cid => {
+    const grp = grouped[cid];
+    const pendingItems = grp.items.filter(i => (i.recognition_status || 'draft') !== 'done');
+    // 企业分组标题行
+    html += `<tr style="background:var(--surface-2)"><td colspan="9" style="padding:10px 12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <strong style="font-size:14px">🏢 ${escapeHtml(grp.name)}</strong>
+          <span class="muted-line" style="font-size:12px">${grp.items.length} 份资料 · ${pendingItems.length} 待识别</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="ghost-btn small" onclick="uploadFilesForCustomer('${cid}', '${escapeHtml(grp.name)}')">📁 接收文件</button>
+        </div>
+      </div>
+    </td></tr>`;
+
+    // 数据源行（带勾选框）
+    grp.items.forEach(item => {
+      const recStatus = item.recognition_status || 'draft';
+      const statusBadge = badge(item.status || 'draft');
+      const recBadge = recStatus === 'done' ? '<span class="badge success">已识别</span>' : recStatus === 'pending' ? '<span class="badge warning">识别中</span>' : '<span class="badge info">待识别</span>';
+      const isDbConn = item.auth_mode === 'Database Connection';
+      const isUpload = item.auth_mode === 'File Upload';
+      const tag = isDbConn ? ' <span style="font-size:10px;color:#2563eb">🗄️直连</span>' : isUpload ? ' <span style="font-size:10px;color:#7c3aed">📎上传</span>' : '';
+      const canSelect = recStatus !== 'done';
+      const checkbox = canSelect ? `<input type="checkbox" class="src-check" value="${item.id}" onchange="updateBatchBar()" style="cursor:pointer">` : '<span style="padding-left:4px;color:#ccc">—</span>';
+      const actionBtn = recStatus === 'done'
+        ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceContent('${item.id}')">📄 查看文件</button><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button>${isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${item.id}')">🔄 刷新</button>` : ''}<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">重新识别</button></div>`
+        : `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceContent('${item.id}')">📄 查看文件</button><button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">开始识别</button></div>`;
+      const outputInfo = recStatus === 'done' ? '<span class="badge success">草案已生成</span>' : '<span class="muted-line">-</span>';
+      html += `<tr><td style="padding-left:8px;text-align:center">${checkbox}</td><td style="padding-left:20px"><strong>${text(item.name || '未命名资料')}</strong>${tag}</td><td>${text(item.project_name || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
+    });
+  });
+
+  if (!customerIds.length) {
+    html = `<tr><td colspan="9">${emptyState('暂无业务资料')}</td></tr>`;
+  }
+  tbody.innerHTML = html;
+
+  // 更新批量操作栏
+  updateBatchBar();
 
   // 识别进度看板
   const total = items.length;
   const recognized = items.filter(item => (item.recognition_status || 'draft') === 'done').length;
-  const pending = items.filter(item => (item.recognition_status || 'draft') === 'pending').length;
   const draftCount = items.filter(item => (item.recognition_status || 'draft') === 'draft').length;
   renderMetricSummary('intakeProgressBoard', [
-    { label: '资料总数', value: total, meta: '已接入' },
+    { label: '企业数', value: customerIds.length, meta: '已接入资料' },
+    { label: '资料总数', value: total, meta: `已识别 ${recognized}` },
     { label: '已识别', value: recognized, meta: '等待确认后进入 Tool 映射' },
-    { label: '识别中', value: pending, meta: 'AI 正在识别业务资料中的接口定义' },
-    { label: '待识别', value: draftCount, meta: '等待触发识别' }
+    { label: '待识别', value: draftCount, meta: '可勾选批量识别' }
   ]);
 }
 
@@ -259,19 +314,62 @@ function renderIntake() {
 // 3. 接口识别 — AI 识别 + OpenAPI + 确认 + 下载
 // ============================================================
 function renderRecognition() {
-  const specs = list(state.openapiSpecs);
+  const allSpecs = list(state.openapiSpecs);
 
   // 步骤条
   const stepBar = $('recognitionStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(2);
 
-  // 草案列表卡片
-  renderCardList('openapiSpecList', specs.map(item => {
-    const isActive = state.selectedOpenapiSpecId === item.id;
-    const endpoints = item.spec ? extractEndpointCount(item.spec) : 0;
-    const isAISpec = (item.title || '').includes('AI');
-    return `<div class="info-card" style="cursor:pointer;border:${isActive ? '2px solid var(--primary)' : '1px solid var(--line)'}" onclick="selectOpenapiSpec('${item.id}')"><h4>${text(item.source_name || item.title || 'OpenAPI 草案')}${isAISpec ? ' <span class="badge info" style="font-size:9px">AI</span>' : ''}</h4><p class="muted-line">${text(item.title || '-')}</p><p>${badge(item.status || 'draft')} \u00b7 ${endpoints} 个端点</p></div>`;
-  }), '暂无 OpenAPI 草案。请先在「资料接入」页触发接口识别。');
+  // 企业筛选器
+  const filter = $('recognitionCustomerFilter');
+  const sources = list(state.sources);
+  if (filter) {
+    const currentVal = filter.value;
+    const sourceMap = {};
+    sources.forEach(s => { sourceMap[s.id] = s; });
+    const customerIds = [...new Set(allSpecs.map(sp => sourceMap[sp.source_id]?.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = sources.find(s => s.customer_id === cid)?.customer_name || cid;
+      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+
+  const selectedCustomer = filter?.value || '';
+  const specs = selectedCustomer
+    ? allSpecs.filter(sp => sources.find(s => s.id === sp.source_id)?.customer_id === selectedCustomer)
+    : allSpecs;
+
+  // 草案列表 — 按企业分组
+  const specList = $('openapiSpecList');
+  if (specList) {
+    const findCustName = (sourceId) => sources.find(s => s.id === sourceId)?.customer_name || sources.find(s => s.id === sourceId)?.project_name || '其他';
+
+    const grouped = {};
+    specs.forEach(item => {
+      const cname = findCustName(item.source_id);
+      if (!grouped[cname]) grouped[cname] = [];
+      grouped[cname].push(item);
+    });
+
+    let html = '';
+    const customerNames = Object.keys(grouped);
+    if (!customerNames.length) {
+      html = emptyState('暂无 OpenAPI 草案。请先在「资料接入」页触发接口识别。');
+    } else {
+      customerNames.forEach(cname => {
+        html += `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:4px;padding:4px 8px;background:var(--surface-2);border-radius:4px">🏢 ${escapeHtml(cname)}</div>`;
+        html += grouped[cname].map(item => {
+          const isActive = state.selectedOpenapiSpecId === item.id;
+          const endpoints = item.spec ? extractEndpointCount(item.spec) : 0;
+          const isAISpec = (item.title || '').includes('AI');
+          return `<div class="info-card" style="cursor:pointer;margin-left:12px;border:${isActive ? '2px solid var(--primary)' : '1px solid var(--line)'}" onclick="selectOpenapiSpec('${item.id}')"><h4>${text(item.source_name || item.title || 'OpenAPI 草案')}${isAISpec ? ' <span class="badge info" style="font-size:9px">AI</span>' : ''}</h4><p class="muted-line">${text(item.title || '-')}</p><p>${badge(item.status || 'draft')} · ${endpoints} 个端点</p></div>`;
+        }).join('');
+        html += `</div>`;
+      });
+    }
+    specList.innerHTML = html;
+  }
 
   // 详情区域
   const detail = $('openapiSpecDetail');
@@ -342,8 +440,23 @@ function extractEndpointCount(specObj) {
 // 4. Tool 映射 — OpenAPI -> MCP Tool + 安全规则配置
 // ============================================================
 function renderTooling() {
-  const assets = list(state.assets);
+  const allAssets = list(state.assets);
   const policies = list(state.policies);
+
+  // 企业筛选器
+  const filter = $('toolingCustomerFilter');
+  if (filter) {
+    const currentVal = filter.value;
+    const customerIds = [...new Set(allAssets.map(a => a.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = allAssets.find(a => a.customer_id === cid)?.customer_name || cid;
+      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+
+  const selectedCustomer = filter?.value || '';
+  const assets = selectedCustomer ? allAssets.filter(a => a.customer_id === selectedCustomer) : allAssets;
   const allTools = assets.reduce((sum, asset) => sum + list(asset.tools).length, 0);
   const confirmedSpecs = list(state.openapiSpecs).filter(item => item.status === 'confirmed').length;
 
@@ -358,11 +471,27 @@ function renderTooling() {
     { label: '安全规则', value: policies.length, meta: '认证/限流/脱敏' }
   ]);
 
-  renderCardList('toolMappingList', assets.map(asset => {
+  // Tool 映射清单 — 按企业分组
+  const toolListEl = $('toolMappingList');
+  if (toolListEl) {
+    const grouped = {};
+    assets.forEach(asset => {
+      const cname = asset.customer_name || asset.project_name || '其他';
+      if (!grouped[cname]) grouped[cname] = [];
+      grouped[cname].push(asset);
+    });
+
+    let html = '';
+    const cnames = Object.keys(grouped);
+    if (!cnames.length) {
+      html = emptyState('暂无 Tool 映射结果。请先在接口识别页确认 OpenAPI 草案，系统将自动映射为 MCP Tool。');
+    } else {
+      cnames.forEach(cname => {
+        html += `<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;padding:6px 10px;background:var(--surface-2);border-radius:4px">🏢 ${escapeHtml(cname)}</div>`;
+        html += grouped[cname].map(asset => {
     const tools = list(asset.tools);
     const policy = policies.find(p => p.project_id === asset.project_id);
     const maskingRules = parseRuleList(policy?.masking_rules);
-    // 区分 AI 生成的完整 tool 对象和旧的字符串数组
     const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
     const isAIGenerated = aiTools.length > 0;
     const isPublic = asset.visibility === 'public';
@@ -428,7 +557,12 @@ function renderTooling() {
         <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
       </div>
     </div>`;
-  }), '暂无 Tool 映射结果。请先在接口识别页确认 OpenAPI 草案，系统将自动映射为 MCP Tool。');
+        }).join('');
+        html += `</div>`;
+      });
+    }
+    toolListEl.innerHTML = html;
+  }
 }
 
 // ============================================================
@@ -439,19 +573,96 @@ function renderAssets() {
   const stepBar = $('assetsStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(4);
 
-  renderSimpleRows('assetRows', list(state.assets).map(asset => {
-    const tools = list(asset.tools);
-    const toolCount = tools.length;
-    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
-    const aiBadge = aiTools.length ? '<span class="badge info" style="font-size:10px;margin-left:4px">AI</span>' : '';
-    const visBadge = asset.visibility === 'public'
-      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
-      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
-    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td><td><button type="button" class="ghost-btn small" onclick="viewAssetTimeline('${asset.id}')">查看时间线</button></td></tr>`;
-  }), '暂无 MCP 资产', 7);
+  const assets = list(state.assets);
+
+  // 企业筛选器
+  const filter = $('assetsCustomerFilter');
+  if (filter) {
+    const currentVal = filter.value;
+    const customerIds = [...new Set(assets.map(a => a.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = assets.find(a => a.customer_id === cid)?.customer_name || cid;
+      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+  const selectedCustomer = filter?.value || '';
+  const filteredAssets = selectedCustomer ? assets.filter(a => a.customer_id === selectedCustomer) : assets;
+
+  // 左侧：Tool 库（汇总所有 Tool，去重）
+  const toolLib = $('assetsToolLibrary');
+  if (toolLib) {
+    const toolMap = {};
+    filteredAssets.forEach(asset => {
+      list(asset.tools).forEach(t => {
+        if (typeof t === 'object' && t.name) {
+          if (!toolMap[t.name]) toolMap[t.name] = { ...t, assetName: asset.name, assetId: asset.id };
+        }
+      });
+    });
+    const tools = Object.values(toolMap);
+    if (!tools.length) {
+      toolLib.innerHTML = emptyState('暂无 Tool');
+    } else {
+      toolLib.innerHTML = tools.map(tool => {
+        const visChip = tool.visibility === 'public'
+          ? '<span class="badge success" style="font-size:9px">🌐</span>'
+          : '<span class="badge warning" style="font-size:9px">🔒</span>';
+        return `<div class="info-card" style="padding:10px;display:flex;gap:8px;align-items:start">
+          <input type="checkbox" class="tool-lib-check" value="${escapeHtml(tool.name)}" style="margin-top:3px;cursor:pointer">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <strong style="font-size:12px">${text(tool.display_name || tool.name)}</strong>
+              <code style="font-size:10px;color:var(--primary)">${text(tool.name)}</code>
+              ${visChip}
+            </div>
+            <p style="margin:2px 0 0;font-size:11px;color:#64748b">${text(tool.description || '')}</p>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // 右侧：MCP 资产列表
+  const mcpList = $('assetsMcpList');
+  if (mcpList) {
+    if (!filteredAssets.length) {
+      mcpList.innerHTML = emptyState('暂无 MCP 资产');
+    } else {
+      mcpList.innerHTML = filteredAssets.map(asset => {
+        const tools = list(asset.tools);
+        const isNew = (asset.name || '').includes('[NEW]');
+        const visBadge = asset.visibility === 'public' ? '🌐 公开' : '🔒 内部';
+        return `<div class="info-card" style="padding:12px;${isNew ? 'border:2px solid #7c3aed' : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <input type="checkbox" class="mcp-check" value="${asset.id}" style="cursor:pointer">
+              <strong style="font-size:14px">${displayAssetName(asset.name)}</strong>
+              ${isNew ? '<span class="badge info" style="font-size:9px">NEW</span>' : ''}
+              ${badge(asset.status || 'draft')}
+              <span class="badge ${asset.visibility === 'public' ? 'success' : 'warning'}" style="font-size:9px">${visBadge}</span>
+            </div>
+          </div>
+          <p class="muted-line" style="margin:0 0 6px;font-size:12px">${text(asset.capability || '-')}</p>
+          <div style="padding:8px;background:var(--surface-2);border-radius:6px;margin-bottom:6px">
+            <span class="muted-line" style="font-size:11px;font-weight:600">Tools (${tools.length})：</span>
+            ${tools.map(t => {
+              const tn = typeof t === 'object' ? t.name : t;
+              const td = typeof t === 'object' ? (t.display_name || t.description || '') : '';
+              return `<span class="badge info" style="font-size:10px;margin:2px" title="${escapeHtml(td)}">${escapeHtml(tn)}</span>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="muted-line" style="font-size:11px">v${text(asset.version || '0.1.0')}</span>
+            <button type="button" class="ghost-btn small" onclick="editAsset('${asset.id}')">编辑</button>
+            <button type="button" class="ghost-btn small" style="color:#dc2626" onclick="deleteSingleAsset('${asset.id}')">删除</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
 
   // 8步生成时间线
-  renderAssetTimelineList();
 }
 
 // 8步生成时间线渲染

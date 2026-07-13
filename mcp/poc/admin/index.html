@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>MCP Forge - 业务资料 -> MCP 资产生成工厂</title>
-  <link rel="stylesheet" href="/admin/assets/styles.css">
+  <link rel="stylesheet" href="/admin/assets/styles.css?v=42">
 </head>
 <body>
   <div id="login" class="login-shell">
@@ -69,10 +72,15 @@
         </div>
       </section>
 
-      <section id="intake" class="page" data-title="资料接入" data-eyebrow="上传接口文档/DDL/Excel/PDF 等业务资料，触发 AI 识别">
+      <section id="intake" class="page" data-title="资料接入" data-eyebrow="按企业管理业务资料 · 接收企业上传 · 勾选批量识别">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><span class="muted-line" id="intakeStepHint">第 1 步 / 共 6 步</span><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
+          <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><select id="intakeCustomerFilter" onchange="filterIntakeByCustomer()" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px"><option value="">全部企业</option></select><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
+          <div id="batchActionBar" style="display:none;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span id="batchSelectCount" style="font-size:12px;color:#1e40af"></span>
+            <button type="button" class="primary-btn small" onclick="batchRecognizeSelected()">⚡ 批量识别选中项</button>
+            <span class="muted-line" style="font-size:11px">识别完成后可在「能力预览」中勾选并提封装要求</span>
+          </div>
           <div class="table-wrap">
             <table class="intake-table">
               <thead><tr><th>资料名称</th><th>所属项目</th><th>类型</th><th>认证方式</th><th>接入状态</th><th>识别进度</th><th>产出物</th><th>操作</th></tr></thead>
@@ -94,11 +102,11 @@
           <div class="content-grid two-col">
             <div>
               <h4 style="margin:0 0 8px">识别接口（OpenAPI 端点）</h4>
-              <div id="aiEndpointsList" class="card-list"></div>
+              <div id="aiEndpointsList" class="card-list" style="max-height:400px;overflow-y:auto"></div>
             </div>
             <div>
               <h4 style="margin:0 0 8px">分类 Tools（MCP 工具）</h4>
-              <div id="aiToolsList" class="card-list"></div>
+              <div id="aiToolsList" class="card-list" style="max-height:400px;overflow-y:auto"></div>
             </div>
           </div>
         </div>
@@ -127,7 +135,7 @@
             <button type="button" class="ghost-btn small" onclick="toggleAllCaps(false)">全不选</button>
             <span style="font-size:12px;color:#64748b" id="capSelectCount"></span>
           </div>
-          <div id="capList" style="max-height:400px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px"></div>
+          <div id="capList" style="max-height:350px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px"></div>
           <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px">
             <strong style="display:block;margin-bottom:6px">📦 封装要求（可选）</strong>
             <span style="font-size:12px;color:#64748b;display:block;margin-bottom:8px">勾选上方你想要的能力，然后在这里告诉 AI 你希望怎么封装。留空则按默认封装全部勾选的能力。</span>
@@ -157,10 +165,13 @@
 
       <section id="recognition" class="page" data-title="接口识别" data-eyebrow="AI 将业务资料识别为 OpenAPI 3.0 接口草案，可确认并下载">
         <div id="recognitionStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
+          <select id="recognitionCustomerFilter" onchange="filterRecognitionByCustomer()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><option value="">全部企业</option></select>
+        </div>
         <div class="content-grid two-col" style="margin-bottom:14px">
           <article class="panel">
             <div class="panel-head"><h3>OpenAPI 草案列表</h3><small class="muted-line">选择草案查看详情</small></div>
-            <div id="openapiSpecList" class="card-list"></div>
+            <div id="openapiSpecList" class="card-list" style="max-height:500px;overflow-y:auto"></div>
           </article>
           <article class="panel">
             <div class="panel-head"><h3>接口草案详情</h3><div id="openapiDetailActions" style="display:flex;gap:8px"></div></div>
@@ -171,26 +182,52 @@
 
       <section id="tooling" class="page" data-title="Tool 映射" data-eyebrow="OpenAPI 端点映射为 MCP Tool + 安全规则配置">
         <div id="toolingStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
+        <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
+          <select id="toolingCustomerFilter" onchange="filterToolingByCustomer()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><option value="">全部企业</option></select>
+        </div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>Tool 映射看板</h3><small class="muted-line">接口端点 → MCP Tool → 安全规则</small></div>
           <div class="metric-grid" id="toolingSummary" style="padding:14px"></div>
         </div>
         <article class="panel">
           <div class="panel-head"><h3>Tool 映射清单</h3><small class="muted-line">每个 MCP 资产的 Tool 来源、参数和安全配置</small></div>
-          <div id="toolMappingList" class="card-list"></div>
+          <div id="toolMappingList" class="card-list" style="max-height:600px;overflow-y:auto"></div>
         </article>
       </section>
 
-      <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="已封装资产列表、版本、状态 + 8 步生成时间线">
+      <section id="assets" class="page" data-title="MCP 资产" data-eyebrow="企业 Tool 库 + MCP 资产管理 + AI 重组封装">
         <div id="assetsStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>MCP 资产目录</h3><small class="muted-line">点击「查看时间线」可查看每个资产的 8 步生成轨迹</small></div><div class="table-wrap"><table><thead><tr><th>MCP 资产</th><th>生成状态</th><th>当前版本</th><th>来源资料</th><th>所属项目</th><th>可见性</th><th>操作</th></tr></thead><tbody id="assetRows"></tbody></table></div></article>
-        <article class="panel" style="margin-top:20px">
-          <div class="panel-head"><h3>8 步生成时间线</h3><small class="muted-line">每个 MCP 资产从资料接入到生产发布的完整轨迹</small></div>
-          <div id="timelineList" class="timeline-list"></div>
-        </article>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <select id="assetsCustomerFilter" onchange="filterAssetsByCustomer()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><option value="">全部企业</option></select>
+          <button type="button" class="ghost-btn small" onclick="batchDeleteAssets()">🗑️ 批量删除选中 MCP</button>
+        </div>
+        <!-- AI 重组区 -->
+        <div class="panel" style="margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#f0fdf4)">
+          <div class="panel-head"><h3>🤖 AI 智能重组 MCP</h3><small class="muted-line">从左侧 Tool 库勾选工具，输入需求，AI 自动封装为新的 MCP</small></div>
+          <div style="padding:14px">
+            <textarea id="recomposeInstruction" rows="2" placeholder="输入你的需求，如：把会员查询和积分查询合并成一个会员中心 MCP；创建一个只包含订单分析的 MCP..." style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;resize:vertical;margin-bottom:8px"></textarea>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="recomposeMcpName" placeholder="新 MCP 名称（可选）" style="flex:1;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px">
+              <button type="button" class="primary-btn" onclick="aiRecomposeMcp()">⚡ 选中 Tool 封装新 MCP</button>
+              <span id="recomposeStatus" style="font-size:12px"></span>
+            </div>
+          </div>
+        </div>
+        <div class="content-grid two-col">
+          <!-- 左侧：Tool 库 -->
+          <article class="panel">
+            <div class="panel-head"><h3>🧰 Tool 库</h3><small class="muted-line">勾选 Tool 后可重组封装</small></div>
+            <div id="assetsToolLibrary" class="card-list" style="max-height:500px;overflow-y:auto"></div>
+          </article>
+          <!-- 右侧：MCP 资产 -->
+          <article class="panel">
+            <div class="panel-head"><h3>📦 MCP 资产</h3><small class="muted-line">已封装的 MCP 资产（含 Tool、状态、时间）</small></div>
+            <div id="assetsMcpList" class="card-list" style="max-height:500px;overflow-y:auto"></div>
+          </article>
+        </div>
       </section>
 
-      <section id="publish" class="page" data-title="测试发布" data-eyebrow="沙箱试调 · 灰度发布 · 版本管理 · 回滚">
+      <section id="publish" class="page" data-title="测试发布" data-eyebrow="沙箱测试 · 安全检测 · 智能体联调 · 灰度发布">
         <div id="publishStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="content-grid two-col">
           <article class="panel">
@@ -204,13 +241,22 @@
               </table>
             </div>
           </article>
-          <article class="panel"><div class="panel-head"><h3>沙箱联调台</h3><small class="muted-line">多行业 MCP 资产 · JSON-RPC 2.0 协议 · 安全检测</small></div>
-            <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <select id="sandboxAssetSelect" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:240px"></select>
-              <button id="sandboxTestBtn" type="button" class="primary-btn">一键沙箱测试 + 安全检测</button>
+          <article class="panel">
+            <div class="panel-head"><h3>🤖 智能体联调台</h3><small class="muted-line">选择 MCP 资产后通过 AI 智能体进行真实对话测试</small></div>
+            <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <select id="sandboxAssetSelect" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:200px"></select>
+              <button id="sandboxTestBtn" type="button" class="ghost-btn" style="font-size:12px">🛡️ 安全检测</button>
             </div>
-            <div id="sandboxTestResult" style="min-height:40px"></div>
-            <div class="simulate-box"><select id="simulateTool"><option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option></select><button id="simulateBtn" type="button" class="primary-btn">单次调用测试</button><div id="simulateResult" style="background:#f8fafc;border-radius:8px;padding:14px;min-height:60px;font-size:13px;color:#64748b">选择一个 MCP 资产并执行调用，查看 JSON-RPC 2.0 响应</div></div>
+            <div id="sandboxTestResult" style="min-height:30px"></div>
+            <div id="agentChatBox" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:0;margin-top:10px">
+              <div id="agentMessages" style="max-height:300px;overflow-y:auto;padding:12px;font-size:13px;display:flex;flex-direction:column;gap:8px">
+                <div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产后，输入问题测试 AI 是否能正确调用 Tool</div>
+              </div>
+              <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line)">
+                <input id="agentInput" placeholder="输入测试问题，如：查询会员 ID 10001 的积分余额..." style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px" onkeydown="if(event.key==='Enter')sendAgentMessage()">
+                <button type="button" class="primary-btn" onclick="sendAgentMessage()">发送</button>
+              </div>
+            </div>
           </article>
         </div>
       </section>
@@ -455,7 +501,7 @@
   </aside>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script type="module" src="/admin/assets/app.js?v=40"></script>
+  <script type="module" src="/admin/assets/app.js?v=49"></script>
 </body>
 </html>
 
