@@ -731,19 +731,33 @@ function renderAssetTimelineList() {
 // 6. 测试发布 — 沙箱试调 + 版本发布 + 回滚
 // ============================================================
 function renderPublish() {
-  const releases = adminReleases();
+  const allReleases = adminReleases();
   const stepBar = $('publishStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(5);
+
+  // 企业筛选器
+  const filter = $('publishCustomerFilter');
+  if (filter) {
+    const currentVal = filter.value;
+    const allAssets = list(state.assets);
+    const customerIds = [...new Set(allAssets.map(a => a.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = allAssets.find(a => a.customer_id === cid)?.customer_name || cid;
+      return `<option value="${escapeHtml(cid)}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+  const selectedCustomer = filter?.value || '';
+  const scopedAssets = selectedCustomer ? list(state.assets).filter(a => a.customer_id === selectedCustomer) : list(state.assets);
 
   // 动态填充沙箱调用的 tool dropdown，包含 AI 生成的资产
   const simSelect = $('simulateTool');
   if (simSelect) {
     const currentVal = simSelect.value;
-    const aiAssets = list(state.assets).filter(a => {
+    const aiAssets = scopedAssets.filter(a => {
       const tools = list(a.tools);
       return tools.some(t => typeof t === 'object');
     });
-    // 保留原有静态选项 + 追加 AI 资产
     let options = '<option value="work_order_lookup">工单查询（华智制造）</option><option value="quality_inspection">质检分析（华智制造）</option><option value="risk_alert">风险预警（鑫融金服）</option><option value="property_ticket_create">物业报修（安和物业）</option><option value="course_recommendation">课程推荐（知行教育）</option><option value="campus_qa">校园问答（知行教育）</option><option value="sales_top_products">销售 TopN（美佳零售）</option><option value="member_expiring_benefits">会员权益（美佳零售）</option>';
     aiAssets.forEach(asset => {
       const tools = list(asset.tools);
@@ -759,14 +773,19 @@ function renderPublish() {
     if (currentVal) simSelect.value = currentVal;
   }
 
-  // 填充沙箱综合测试的资产选择 dropdown
+  // 填充沙箱综合测试的资产选择 dropdown（按企业筛选）
   const sandboxSelect = $('sandboxAssetSelect');
   if (sandboxSelect) {
     const currentVal = sandboxSelect.value;
-    let options = list(state.assets).map(asset => `<option value="${asset.id}">${displayAssetName(asset.name)}（${asset.project_name || asset.project_id}）</option>`).join('');
+    let options = scopedAssets.map(asset => `<option value="${asset.id}">${displayAssetName(asset.name)}（${asset.project_name || asset.project_id}）</option>`).join('');
     sandboxSelect.innerHTML = options;
-    if (currentVal) sandboxSelect.value = currentVal;
+    if (currentVal && scopedAssets.find(a => a.id === currentVal)) sandboxSelect.value = currentVal;
   }
+
+  // 按企业筛选 release
+  const releases = selectedCustomer
+    ? allReleases.filter(item => scopedAssets.some(a => a.id === item.asset_id))
+    : allReleases;
 
   const controls = $('publishControls');
   if (controls) controls.innerHTML = '<div class="filter-summary"><span>按版本查看测试发布状态</span></div>';
@@ -798,15 +817,41 @@ function renderDeliverables() {
   const stepBar = $('deliveryStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(6);
 
+  // 企业筛选器
+  const filter = $('deliveryCustomerFilter');
+  if (filter) {
+    const currentVal = filter.value;
+    const deliverables = list(state.deliverables);
+    const projects = list(state.projects);
+    const customerIds = [...new Set(deliverables.map(d => {
+      const proj = projects.find(p => p.id === d.project_id);
+      return proj?.customer_id;
+    }).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
+      const cname = projects.find(p => p.customer_id === cid)?.customer_name || cid;
+      return `<option value="${escapeHtml(cid)}">${escapeHtml(cname)}</option>`;
+    }).join('');
+    if (currentVal) filter.value = currentVal;
+  }
+  const selectedCustomer = filter?.value || '';
+  const allDeliverables = list(state.deliverables);
+  const projects = list(state.projects);
+  const deliverables = selectedCustomer
+    ? allDeliverables.filter(d => {
+        const proj = projects.find(p => p.id === d.project_id);
+        return proj?.customer_id === selectedCustomer;
+      })
+    : allDeliverables;
+
   const controls = $('deliverableControls');
   if (controls) controls.innerHTML = '<div class="filter-summary"><span>交付资料按项目和类型归档</span></div>';
   renderMetricSummary('deliverableSummary', [
-    { label: '交付资料总数', value: list(state.deliverables).length },
-    { label: '可下载', value: list(state.deliverables).filter(item => item.status === 'ready').length },
-    { label: '生成中', value: list(state.deliverables).filter(item => item.status === 'generating').length },
-    { label: '待处理', value: list(state.deliverables).filter(item => ['failed', 'expired', 'revoked'].includes(item.status)).length }
+    { label: '交付资料总数', value: deliverables.length },
+    { label: '可下载', value: deliverables.filter(item => item.status === 'ready').length },
+    { label: '生成中', value: deliverables.filter(item => item.status === 'generating').length },
+    { label: '待处理', value: deliverables.filter(item => ['failed', 'expired', 'revoked'].includes(item.status)).length }
   ]);
-  renderSimpleRows('deliverableRows', list(state.deliverables).map(item => {
+  renderSimpleRows('deliverableRows', deliverables.map(item => {
     const canDownload = item.status === 'ready';
     const typeLabel = {
       'config': '配置包',

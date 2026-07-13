@@ -2020,6 +2020,8 @@ function editAsset(assetId) {
 function filterAssetsByCustomer() { renderAll(); }
 function filterRecognitionByCustomer() { renderAll(); }
 function filterToolingByCustomer() { renderAll(); }
+function filterPublishByCustomer() { renderAll(); }
+function filterDeliveryByCustomer() { renderAll(); }
 
 // 按企业批量识别（旧接口保留兼容）
 async function batchRecognize(customerId, customerName, count) {
@@ -2223,6 +2225,8 @@ window.editAsset = editAsset;
 window.filterAssetsByCustomer = filterAssetsByCustomer;
 window.filterRecognitionByCustomer = filterRecognitionByCustomer;
 window.filterToolingByCustomer = filterToolingByCustomer;
+window.filterPublishByCustomer = filterPublishByCustomer;
+window.filterDeliveryByCustomer = filterDeliveryByCustomer;
 window.batchRecognize = batchRecognize;
 window.batchRecognizeSelected = batchRecognizeSelected;
 window.updateBatchBar = updateBatchBar;
@@ -2236,14 +2240,174 @@ window.addTool = addTool;
 window.refreshDbSource = refreshDbSource;
 window.sendAgentMessage = sendAgentMessage;
 window.runSandboxTest = runSandboxTest;
+window.deployToWorkBuddy = deployToWorkBuddy;
+window.onSandboxAssetChange = onSandboxAssetChange;
 
-// 智能体联调
+// 智能体联调 — 通过 WorkBuddy Tool Call 协议
 let _agentHistory = [];
+let _workbuddyDeployed = false;
+
+// WorkBuddy 默认模型（TTKC-AUTO）
+const WORKBUDDY_DEFAULT_MODEL = {
+  url: 'https://necair.ttoto.net',
+  apiKey: 'sk-x_DrW2qi6bFG4QyJfw3WJA',
+  model: 'TTKC-AUTO'
+};
+
+// 部署 MCP 资产到 WorkBuddy
+async function deployToWorkBuddy() {
+  const assetSelect = $('sandboxAssetSelect');
+  const statusEl = $('workbuddyDeployStatus');
+  if (!assetSelect?.value) { showToast('请先选择要部署的 MCP 资产', 'warning'); return; }
+
+  statusEl.innerHTML = '<div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e40af">⏳ 正在部署到 WorkBuddy（加载 Tool 定义 + 连接 TTKC-AUTO 模型）...</div>';
+
+  try {
+    // 获取 Tool 定义
+    const resp = await fetch(`/api/workbuddy/assets/${assetSelect.value}/tools`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    const tools = data.tools || [];
+    if (!tools.length) throw new Error('该资产没有可用的 Tool，无法部署');
+
+    // 显示部署成功状态 + Tool 清单
+    let html = '<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:8px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✅</span><strong style="color:#16a34a;font-size:14px">已部署到 WorkBuddy</strong><span style="font-size:11px;color:#64748b;margin-left:auto">模型：TTKC-AUTO · ' + tools.length + ' 个 Tool 已加载</span></div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    tools.forEach(function(t) {
+      html += '<span style="font-size:11px;background:#fff;border:1px solid var(--line);padding:2px 8px;border-radius:4px">🔧 ' + escapeHtml(t.function.name) + '</span>';
+    });
+    html += '</div></div>';
+    statusEl.innerHTML = html;
+
+    // 启用对话输入
+    var inputEl = $('agentInput');
+    var sendBtn = $('agentSendBtn');
+    if (inputEl) { inputEl.disabled = false; inputEl.placeholder = '输入问题测试，如：查询账户列表...'; }
+    if (sendBtn) sendBtn.disabled = false;
+
+    // 清空对话历史
+    _agentHistory = [];
+    _workbuddyDeployed = true;
+    var msgBox = $('agentMessages');
+    if (msgBox) msgBox.innerHTML = '<div style="text-align:center;color:#16a34a;font-size:12px;padding:16px 0">✅ MCP 资产已部署到 WorkBuddy，现在可以输入问题进行测试</div>';
+
+    showToast('已部署 ' + tools.length + ' 个 Tool 到 WorkBuddy，可以开始测试', 'success');
+  } catch (error) {
+    statusEl.innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">❌ 部署失败：' + escapeHtml(error.message) + '</div>';
+    _workbuddyDeployed = false;
+    showToast(error.message, 'error');
+  }
+}
+
+// 切换资产时重置部署状态
+function onSandboxAssetChange() {
+  _agentHistory = [];
+  _workbuddyDeployed = false;
+  var statusEl = $('workbuddyDeployStatus');
+  if (statusEl) statusEl.innerHTML = '';
+  var inputEl = $('agentInput');
+  var sendBtn = $('agentSendBtn');
+  if (inputEl) { inputEl.disabled = true; inputEl.placeholder = '先部署到 WorkBuddy，再输入问题...'; }
+  if (sendBtn) sendBtn.disabled = true;
+  var mb = $('agentMessages');
+  if (mb) mb.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产 → 点击「部署到 WorkBuddy」→ 输入问题测试</div>';
+}
+
+// 轻量 Markdown 渲染（支持表格、粗体、列表、代码块、标题）
+function renderMarkdown(text) {
+  if (!text) return '';
+  // 先转义 HTML 防止 XSS
+  var html = escapeHtml(text);
+
+  // 代码块 ```
+  html = html.replace(/```[\s\S]*?```/g, function(m) {
+    var code = m.replace(/```\w*\n?/g, '').replace(/```$/g, '');
+    return '<pre style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0">' + code + '</pre>';
+  });
+
+  // 表格
+  var lines = html.split('\n');
+  var output = [];
+  var inTable = false;
+  var tableRows = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // 检测表格分隔行（|---|---|）
+    if (/^\|[\s\-:|]+\|$/i.test(line.trim())) {
+      inTable = true;
+      continue;
+    }
+
+    if (/^\|.*\|/.test(line.trim())) {
+      tableRows.push(line.trim());
+      // 如果下一行不是表格行，输出表格
+      var nextLine = lines[i + 1] || '';
+      if (!/^\|.*\|/.test(nextLine.trim()) || /^\|[\s\-:|]+\|$/i.test(nextLine.trim())) {
+        if (tableRows.length > 0) {
+          var tableHtml = '<table style="width:100%;border-collapse:collapse;margin:6px 0;font-size:12px">';
+          tableRows.forEach(function(row, ri) {
+            var cells = row.split('|').filter(function(c, ci, arr) { return ci > 0 && ci < arr.length - 1; });
+            var tag = ri === 0 ? 'th' : 'td';
+            var bg = ri === 0 ? 'background:#e2e8f0;font-weight:600' : '';
+            tableHtml += '<tr>' + cells.map(function(c) {
+              return '<' + tag + ' style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left;' + bg + '">' + c.trim() + '</' + tag + '>';
+            }).join('') + '</tr>';
+          });
+          tableHtml += '</table>';
+          output.push(tableHtml);
+          tableRows = [];
+        }
+        inTable = false;
+      }
+      continue;
+    }
+
+    // 非表格行
+    if (!inTable) {
+      output.push(line);
+    }
+  }
+
+  html = output.join('\n');
+
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:14px">$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:15px">$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:16px">$1</h3>');
+
+  // 粗体 + 斜体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code style="background:#e2e8f0;padding:1px 5px;border-radius:3px;font-size:12px">$1</code>');
+
+  // 无序列表
+  html = html.replace(/^[\-\*] (.+)$/gm, '<li style="margin-left:18px;list-style:disc">$1</li>');
+
+  // 有序列表
+  html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:18px;list-style:decimal">$1</li>');
+
+  // 段落换行（连续 <li> 不加 <br>，连续空行变成段落间距）
+  html = html.replace(/\n\n+/g, '</p><p style="margin:6px 0">');
+  html = html.replace(/\n/g, '<br>');
+
+  // 清理 <li> 前后的 <br>
+  html = html.replace(/<br>(<li)/g, '$1');
+  html = html.replace(/(<\/li>)<br>/g, '$1');
+
+  return '<div style="font-size:13px">' + html + '</div>';
+}
 
 async function sendAgentMessage() {
   const input = $('agentInput');
   const msgBox = $('agentMessages');
   const assetSelect = $('sandboxAssetSelect');
+  if (!_workbuddyDeployed) { showToast('请先点击「部署到 WorkBuddy」', 'warning'); return; }
   if (!input?.value?.trim()) return;
   if (!assetSelect?.value) { showToast('请先选择要测试的 MCP 资产', 'warning'); return; }
 
@@ -2252,14 +2416,24 @@ async function sendAgentMessage() {
 
   // 显示用户消息
   msgBox.innerHTML += `<div style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(userMsg)}</div>`;
-  msgBox.innerHTML += `<div id="agentTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">⏳ AI 正在分析并调用工具...</div>`;
+  msgBox.innerHTML += `<div id="agentTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">⏳ WorkBuddy (TTKC-AUTO) 正在分析并调用工具...</div>`;
   msgBox.scrollTop = msgBox.scrollHeight;
 
   try {
-    const result = await api(`/api/platform/mcp-assets/${assetSelect.value}/agent-chat`, {
+    // 使用 WorkBuddy chat API（OpenAI function calling 协议）
+    const resp = await fetch('/api/workbuddy/chat', {
       method: 'POST',
-      body: JSON.stringify({ message: userMsg, history: _agentHistory })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset_id: assetSelect.value,
+        message: userMsg,
+        history: _agentHistory.slice(-10),
+        model_config: WORKBUDDY_DEFAULT_MODEL
+      })
     });
+    const result = await resp.json();
+
+    if (result.error) throw new Error(result.error);
 
     // 更新历史
     _agentHistory.push({ role: 'user', content: userMsg }, { role: 'assistant', content: result.reply });
@@ -2268,13 +2442,25 @@ async function sendAgentMessage() {
     const typing = $('agentTyping');
     if (typing) typing.remove();
 
-    // 显示 AI 回复
-    let replyHtml = '';
-    if (result.tool_called) {
-      replyHtml += `<div style="font-size:11px;color:#7c3aed;background:#f5f3ff;padding:2px 8px;border-radius:4px;display:inline-block;margin-bottom:4px">🔧 调用工具：${escapeHtml(result.tool_display_name || result.tool_called)}</div>`;
+    // 显示 Tool 调用过程（折叠式，不占太多空间）
+    if (result.tool_calls?.length) {
+      result.tool_calls.forEach(tc => {
+        var tcCard = document.createElement('div');
+        tcCard.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
+        tcCard.innerHTML = '<details style="cursor:pointer"><summary style="color:#7c3aed;font-weight:600">🔧 ' + escapeHtml(tc.display_name) + ' - 调用成功</summary>'
+          + '<div style="margin-top:6px;padding:6px 8px;background:#fff;border-radius:4px;font-size:11px;color:#64748b;font-family:Consolas,monospace">'
+          + (tc.arguments && Object.keys(tc.arguments).length ? '参数：' + escapeHtml(JSON.stringify(tc.arguments)) + '<br>' : '<无参数><br>')
+          + '<span style="color:#16a34a">结果：</span>' + escapeHtml(JSON.stringify(tc.result))
+          + '</div></details>';
+        msgBox.appendChild(tcCard);
+      });
     }
-    replyHtml += `<div>${escapeHtml(result.reply)}</div>`;
-    msgBox.innerHTML += `<div style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">${replyHtml}</div>`;
+
+    // 显示 AI 回复（Markdown 渲染）
+    var replyDiv = document.createElement('div');
+    replyDiv.style.cssText = 'align-self:flex-start;background:#f1f5f9;padding:10px 14px;border-radius:12px 12px 12px 2px;max-width:85%;line-height:1.7';
+    replyDiv.innerHTML = renderMarkdown(result.reply);
+    msgBox.appendChild(replyDiv);
     msgBox.scrollTop = msgBox.scrollHeight;
   } catch (error) {
     const typing = $('agentTyping');
@@ -2371,7 +2557,7 @@ async function bootApp() {
 function bindEvents() {
   $('loginBtn').addEventListener('click', login);
   $('logoutBtn').addEventListener('click', logout);
-  $('simulateBtn').addEventListener('click', simulate);
+  $('simulateBtn')?.addEventListener('click', simulate);
   $('sandboxTestBtn')?.addEventListener('click', runSandboxTest);
   $('createDataSourceBtn')?.addEventListener('click', createDataSource);
   $('createPolicyBtn').addEventListener('click', createPolicy);

@@ -3338,7 +3338,283 @@ app.get("/admin/login-bg.png", (req, res) => res.sendFile(path.join(ADMIN_DIR, "
 app.get("/admin/brand-icon.png", (req, res) => res.sendFile(path.join(ADMIN_DIR, "brand-icon.png")));
 app.get("/favicon.ico", (req, res) => res.status(204).end());
 
-// 绂佺敤 admin 缂撳瓨
+// ============== WorkBuddy 接入 API（方案 B：HTTP API + Tool 定义）==============
+// 无需登录鉴权，供 WorkBuddy / 测试页面直接调用。生产环境应加 API Key 鉴权。
+
+// 获取所有 MCP 资产 + Tool 清单
+app.get("/api/workbuddy/assets", (req, res) => {
+  const assets = db.prepare("SELECT id, name, capability, version, status, visibility, project_id, tools FROM platform_mcp_assets ORDER BY name").all();
+  const result = assets.map(a => {
+    const tools = decode(a.tools).filter(t => typeof t === 'object');
+    const project = a.project_id ? db.prepare("SELECT id, customer_id FROM platform_projects WHERE id = ?").get(a.project_id) : null;
+    const customer = project?.customer_id ? db.prepare("SELECT id, name FROM platform_customers WHERE id = ?").get(project.customer_id) : null;
+    return {
+      id: a.id,
+      name: a.name,
+      capability: a.capability,
+      version: a.version,
+      status: a.status,
+      visibility: a.visibility,
+      customer_name: customer?.name || '-',
+      tool_count: tools.length,
+      tools: tools.map(t => ({
+        name: t.name,
+        display_name: t.display_name || t.name,
+        description: t.description || '',
+        category: t.category || 'general',
+        visibility: t.visibility || a.visibility || 'internal',
+        parameters: t.inputSchema?.properties || {},
+        required: t.inputSchema?.required || []
+      }))
+    };
+  });
+  res.json(result);
+});
+
+// 获取指定资产的 Tool 定义（OpenAI function calling 格式）
+app.get("/api/workbuddy/assets/:id/tools", (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  // 返回 OpenAI 兼容的 function 定义格式
+  const functions = tools.map(t => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description || t.display_name || t.name,
+      parameters: {
+        type: "object",
+        properties: t.inputSchema?.properties || {},
+        required: t.inputSchema?.required || []
+      }
+    }
+  }));
+  res.json({ asset_id: asset.id, asset_name: asset.name, tools: functions });
+});
+
+// 执行 Tool 调用（POC 阶段为模拟执行）
+app.post("/api/workbuddy/assets/:id/execute", async (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const { tool_name, arguments: args } = req.body || {};
+  if (!tool_name) return res.status(400).json({ error: "tool_name required" });
+
+  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  const tool = tools.find(t => t.name === tool_name);
+  if (!tool) return res.status(404).json({ error: `tool "${tool_name}" not found` });
+
+  // 记录调用事件
+  const eventId = makeId("evt");
+  const traceId = `wb_${Date.now().toString(36)}`;
+  try {
+    db.prepare("INSERT INTO platform_call_events (id, asset_id, asset_name, caller, status, latency_ms, description, trace_id, created_at, request_params, response_data) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+      eventId, asset.id, asset.name, 'WorkBuddy', 'success', Math.floor(Math.random() * 200 + 50),
+      `[WorkBuddy] ${tool.display_name || tool.name} 调用`, traceId,
+      new Date().toISOString().slice(0, 19).replace('T', ' '),
+      JSON.stringify(args || {}), JSON.stringify({ status: 'mock_success' })
+    );
+  } catch {}
+
+  // 模拟执行结果
+  const mockData = generateMockResult(tool, args || {});
+  res.json({
+    tool_name: tool.name,
+    display_name: tool.display_name || tool.name,
+    status: 'success',
+    arguments: args || {},
+    result: mockData,
+    trace_id: traceId,
+    executed_at: new Date().toISOString(),
+    note: "POC 阶段为模拟执行，生产环境将连接真实数据库"
+  });
+});
+
+// 完整的 WorkBuddy Chat 端点（接收 AI 配置 + 用户消息，自动 Tool Call）
+app.post("/api/workbuddy/chat", async (req, res) => {
+  const { asset_id, message, history, model_config } = req.body || {};
+  if (!asset_id) return res.status(400).json({ error: "asset_id required" });
+  if (!message?.trim()) return res.status(400).json({ error: "message required" });
+
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(asset_id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+
+  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  if (!tools.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
+
+  // AI 配置：优先用请求中的 model_config，否则用 .env 配置
+  const aiUrl = model_config?.url || process.env.AI_API_BASE || '';
+  const aiKey = model_config?.apiKey || process.env.AI_API_KEY || '';
+  const aiModel = model_config?.model || process.env.AI_MODEL || 'gpt-5.4-mini';
+  if (!aiKey) return res.status(400).json({ error: "AI 引擎未配置 API Key" });
+
+  // 构建 OpenAI 兼容的 function 定义
+  const functions = tools.map(t => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description || t.display_name || t.name,
+      parameters: {
+        type: "object",
+        properties: t.inputSchema?.properties || {},
+        required: t.inputSchema?.required || []
+      }
+    }
+  }));
+
+  const toolList = tools.map((t, i) => `${i + 1}. **${t.display_name || t.name}**（${t.name}）：${t.description || ''}`).join('\n');
+
+  const systemPrompt = `你是 MCP 资产「${asset.name}」的智能助手。
+能力描述：${asset.capability || '通用业务工具集'}
+
+可用工具：
+${toolList}
+
+回复规则：
+- 回复简洁明了，用中文自然回答，不要废话
+- 如果调用了工具，基于工具返回的数据直接给出结论，不要重复展示原始 JSON
+- 用 Markdown 排版：用 **粗体** 标注关键数据，用列表展示多条记录，用表格展示结构化数据
+- 如果数据为空或无结果，直接说明原因
+- 不要自我介绍，不要罗列所有工具，直接回答用户的问题`;
+
+  // 构建消息列表
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...(history || []).map(m => ({ role: m.role, content: m.content })),
+    { role: "user", content: message }
+  ];
+
+  try {
+    // Step 1: 调用 AI，让它决定是否调用 Tool
+    const chatUrl = aiUrl.endsWith('/') ? `${aiUrl}v1/chat/completions` : `${aiUrl}/v1/chat/completions`;
+    const resp1 = await fetch(chatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: aiModel,
+        messages,
+        tools: functions,
+        tool_choice: "auto",
+        max_tokens: 2000,
+        temperature: 0.3
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (!resp1.ok) {
+      const errText = await resp1.text().catch(() => '');
+      return res.status(500).json({ error: `AI 返回 ${resp1.status}: ${errText.slice(0, 300)}` });
+    }
+
+    const data1 = await resp1.json();
+    const choice1 = data1.choices?.[0]?.message;
+
+    // Step 2: 如果 AI 请求调用 Tool，执行并返回结果给 AI
+    if (choice1?.tool_calls?.length) {
+      const toolCallResults = [];
+      for (const tc of choice1.tool_calls) {
+        const fnName = tc.function?.name;
+        let fnArgs = {};
+        try { fnArgs = JSON.parse(tc.function?.arguments || '{}'); } catch {}
+
+        const tool = tools.find(t => t.name === fnName);
+        if (tool) {
+          // 模拟执行
+          const mockResult = generateMockResult(tool, fnArgs);
+          toolCallResults.push({
+            tool_name: fnName,
+            display_name: tool.display_name || fnName,
+            arguments: fnArgs,
+            result: mockResult
+          });
+        }
+      }
+
+      // Step 3: 将 Tool 执行结果发回 AI，生成最终回复
+      const messages2 = [
+        ...messages,
+        { role: "assistant", content: choice1.content || '', tool_calls: choice1.tool_calls },
+        ...choice1.tool_calls.map(tc => {
+          const tcResult = toolCallResults.find(r => r.tool_name === tc.function?.name);
+          return {
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(tcResult?.result || { error: "tool not found" })
+          };
+        })
+      ];
+
+      const resp2 = await fetch(chatUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+        body: JSON.stringify({
+          model: aiModel,
+          messages: messages2,
+          max_tokens: 1000,
+          temperature: 0.5
+        }),
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (resp2.ok) {
+        const data2 = await resp2.json();
+        return res.json({
+          reply: data2.choices?.[0]?.message?.content || '执行完成',
+          tool_calls: toolCallResults,
+          usage: (data1.usage?.total_tokens || 0) + (data2.usage?.total_tokens || 0)
+        });
+      }
+      // 如果第二步失败，返回 tool call 信息 + 模拟结果
+      return res.json({
+        reply: `已调用工具：${toolCallResults.map(r => r.display_name).join(', ')}。\n\n执行结果：\n${toolCallResults.map(r => JSON.stringify(r.result, null, 2)).join('\n')}`,
+        tool_calls: toolCallResults,
+        usage: data1.usage?.total_tokens || 0
+      });
+    }
+
+    // AI 没有调用工具，直接回复
+    res.json({
+      reply: choice1?.content || '抱歉，我无法处理这个请求。',
+      tool_calls: [],
+      usage: data1.usage?.total_tokens || 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 生成模拟 Tool 执行结果
+function generateMockResult(tool, args) {
+  const toolName = tool.name || '';
+  const displayName = tool.display_name || tool.name;
+  const params = tool.inputSchema?.properties || {};
+
+  // 根据工具特征生成更真实的模拟数据
+  const mockTemplates = {
+    query: { success: true, data: [{ id: "MOCK_001", name: "示例记录", value: Math.floor(Math.random() * 10000), created_at: new Date().toISOString().slice(0, 10) }], total: 1, message: "查询成功" },
+    stats: { success: true, summary: { total: Math.floor(Math.random() * 10000), active: Math.floor(Math.random() * 5000), growth_rate: (Math.random() * 20 - 5).toFixed(1) + "%" }, message: "统计完成" },
+    create: { success: true, id: `NEW_${Date.now().toString(36)}`, message: "创建成功" },
+    update: { success: true, affected_rows: Math.floor(Math.random() * 5 + 1), message: "更新成功" },
+    default: { success: true, tool: toolName, display_name: displayName, executed_at: new Date().toISOString(), args: args, mock_data: "这是沙箱环境模拟返回的数据，生产环境将返回真实业务数据" }
+  };
+
+  // 根据 tool name 关键词匹配模板
+  const lowerName = (toolName + displayName).toLowerCase();
+  if (lowerName.includes('query') || lowerName.includes('查') || lowerName.includes('list') || lowerName.includes('列') || lowerName.includes('get')) {
+    return mockTemplates.query;
+  }
+  if (lowerName.includes('stat') || lowerName.includes('统计') || lowerName.includes('report') || lowerName.includes('报') || lowerName.includes('分析')) {
+    return mockTemplates.stats;
+  }
+  if (lowerName.includes('create') || lowerName.includes('add') || lowerName.includes('创建') || lowerName.includes('新增')) {
+    return mockTemplates.create;
+  }
+  if (lowerName.includes('update') || lowerName.includes('修改') || lowerName.includes('编辑')) {
+    return mockTemplates.update;
+  }
+  return mockTemplates.default;
+}
+
+// 禁用 admin 缓存
 app.use("/admin", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -3348,6 +3624,7 @@ app.use("/admin", (req, res, next) => {
 
 app.use("/admin/assets", express.static(path.join(ADMIN_DIR, "assets")));
 app.get("/admin", (req, res) => res.sendFile(path.join(ADMIN_DIR, "index.html")));
+app.get("/workbuddy", (req, res) => res.sendFile(path.join(ADMIN_DIR, "workbuddy.html")));
 app.get("/", (req, res) => res.redirect("/admin"));
 if (fs.existsSync(CLIENT_DIR)) app.use(express.static(CLIENT_DIR));
 
