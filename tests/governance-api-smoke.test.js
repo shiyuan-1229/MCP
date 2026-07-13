@@ -9,8 +9,12 @@ assert.match(source, /CREATE TABLE IF NOT EXISTS platform_candidate_assets/, 'se
 assert.match(source, /CREATE TABLE IF NOT EXISTS platform_review_tasks/, 'server.js should create platform_review_tasks');
 assert.match(source, /CREATE TABLE IF NOT EXISTS platform_published_assets/, 'server.js should create platform_published_assets');
 assert.match(source, /CREATE TABLE IF NOT EXISTS platform_reuse_suggestions/, 'server.js should create platform_reuse_suggestions');
+assert.match(source, /CREATE TABLE IF NOT EXISTS platform_modification_logs/, 'server.js should create platform_modification_logs for modify decision');
+assert.match(source, /parent_task_id/, 'server.js should support parent_task_id for resubmit chain');
 assert.match(source, /app\.get\("\/api\/platform\/governance\/candidates"/, 'server.js should expose governance candidates API');
 assert.match(source, /app\.post\("\/api\/platform\/governance\/reviews\/:id\/decision"/, 'server.js should expose review decision API');
+assert.match(source, /handleReviewDecision/, 'server.js should call handleReviewDecision for unified decision processing');
+assert.match(source, /decision === 'modify'/, 'server.js should handle modify decision with modification log + resubmit task');
 assert.match(source, /app\.post\("\/api\/platform\/governance\/candidates\/:id\/publish"/, 'server.js should expose candidate publish API');
 
 console.log('governance api smoke check passed');

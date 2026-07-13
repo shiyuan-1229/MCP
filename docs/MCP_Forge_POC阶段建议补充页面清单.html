@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Forge POC 阶段建议补充页面清单</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #edf2f8;
+      --surface: #ffffff;
+      --surface-2: #f5f8fc;
+      --line: #d8e1ec;
+      --ink: #172033;
+      --muted: #617087;
+      --primary: #3558d6;
+      --primary-strong: #2444ad;
+      --success: #0f8f61;
+      --warning: #b46b06;
+      --danger: #c93636;
+      --info: #2563a8;
+      --nav: #111b2d;
+      --nav-2: #18263d;
+      --radius: 12px;
+      --shadow: 0 8px 18px rgba(23, 32, 51, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, rgba(53, 88, 214, 0.08), transparent 28%), var(--bg);
+      color: var(--ink);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    button { font: inherit; cursor: pointer; }
+    .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px 1fr; }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      background: linear-gradient(180deg, var(--nav) 0%, var(--nav-2) 100%);
+      color: #d7e1f2;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .brand { padding: 6px 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+    .brand strong { display: block; color: #fff; font-size: 18px; }
+    .brand span { display: block; margin-top: 6px; color: #93a3bf; font-size: 12px; line-height: 1.6; }
+    .nav-group { display: grid; gap: 6px; }
+    .nav-title { padding: 0 10px; color: #8092b1; font-size: 11px; letter-spacing: 0.04em; }
+    .nav-item {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      align-items: start;
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px;
+      background: transparent;
+      color: #afbdd4;
+      text-align: left;
+    }
+    .nav-item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+    .nav-item.active { background: var(--primary); color: #fff; }
+    .nav-index { color: #8799b8; font-size: 11px; font-weight: 700; padding-top: 2px; }
+    .nav-item.active .nav-index { color: #dce5ff; }
+    .nav-meta strong { display: block; font-size: 13px; line-height: 1.35; }
+    .nav-meta span { display: block; margin-top: 3px; color: #899ab6; font-size: 11px; line-height: 1.45; }
+    .nav-item.active .nav-meta span { color: #d2dcff; }
+    .side-note {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.05);
+    }
+    .side-note strong { color: #fff; font-size: 12px; }
+    .side-note p { margin: 6px 0 0; color: #a5b4cc; font-size: 11px; line-height: 1.6; }
+    .main { min-width: 0; padding: 26px 30px 46px; }
+    .topbar { display: flex; justify-content: space-between; gap: 20px; align-items: start; margin-bottom: 18px; }
+    .eyebrow { margin: 0 0 8px; color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: 0.08em; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 8px; font-size: 28px; line-height: 1.2; }
+    .topbar p { margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .top-actions { display: grid; justify-items: end; gap: 8px; }
+    .status-pill, .chip { display: inline-flex; align-items: center; border-radius: 999px; font-size: 11px; line-height: 1; }
+    .status-pill { padding: 8px 11px; color: var(--primary-strong); background: #e7edff; border: 1px solid #cbd7fb; }
+    .chip { padding: 6px 8px; background: #edf2f8; color: var(--muted); border: 1px solid #dbe4ef; }
+    .chip.primary { background: #e8edff; border-color: #cbd7fb; color: var(--primary-strong); }
+    .chip.success { background: #e9f8f1; border-color: #c7eadb; color: var(--success); }
+    .chip.warning { background: #fff5df; border-color: #efd8a7; color: #946000; }
+    .chip.danger { background: #fff0f0; border-color: #f1c5c5; color: var(--danger); }
+    .chip.info { background: #eaf4ff; border-color: #c8ddf2; color: var(--info); }
+    .stack-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 18px;
+      padding: 20px;
+      color: #f7fbff;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #13213a 0%, #1d3157 56%, #21458a 100%);
+      box-shadow: var(--shadow);
+    }
+    .hero h2 { margin-bottom: 8px; font-size: 21px; }
+    .hero p { margin-bottom: 0; color: #d7e3f7; font-size: 13px; line-height: 1.7; }
+    .hero-main { display: grid; align-content: center; gap: 13px; }
+    .hero-main .eyebrow { margin-bottom: 0; color: #9ab2d7; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { border: 1px solid transparent; border-radius: 8px; padding: 9px 12px; font-size: 12px; font-weight: 750; }
+    .btn.primary { background: var(--primary); color: #fff; }
+    .btn.secondary { background: #fff; color: var(--primary-strong); border-color: #ccd7ee; }
+    .btn.ghost { background: rgba(255,255,255,0.08); color: #e9f0ff; border-color: rgba(255,255,255,0.18); }
+    .hero-summary { display: grid; gap: 10px; }
+    .hero-summary h3 { margin: 0; font-size: 13px; }
+    .priority-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 9px;
+      align-items: center;
+      padding: 9px 0;
+      border-top: 1px solid rgba(255,255,255,0.12);
+    }
+    .priority-row:first-of-type { border-top: 0; }
+    .priority-no { color: #9ab2d7; font-size: 11px; font-weight: 800; }
+    .priority-row strong { display: block; font-size: 12px; }
+    .priority-row span { display: block; margin-top: 2px; color: #b9c9e1; font-size: 11px; }
+    .priority-tag { color: #fff; font-size: 10px; font-weight: 800; }
+    .section-label { display: flex; justify-content: space-between; gap: 14px; align-items: end; margin: 24px 0 12px; }
+    .section-label h2 { margin-bottom: 0; font-size: 17px; }
+    .section-label p { margin: 0; color: var(--muted); font-size: 12px; }
+    .decision-strip {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(3, 1fr);
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid #dbe4ef;
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .decision-intro { padding: 4px 6px; }
+    .decision-intro strong { display: block; font-size: 13px; }
+    .decision-intro p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .decision-step { display: grid; grid-template-columns: 25px 1fr; gap: 8px; align-items: center; padding: 8px 10px; border-left: 1px solid var(--line); }
+    .decision-step b { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #fff; background: var(--primary); font-size: 11px; }
+    .decision-step strong { display: block; font-size: 12px; }
+    .decision-step span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .page-card {
+      display: grid;
+      grid-template-columns: 245px 1fr;
+      gap: 18px;
+      margin-top: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      scroll-margin-top: 16px;
+    }
+    .page-meta { display: grid; align-content: start; gap: 11px; padding-right: 4px; }
+    .page-kicker { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .page-no { color: var(--primary); font-size: 12px; font-weight: 850; letter-spacing: 0.08em; }
+    .page-meta h3 { margin: 0; font-size: 18px; line-height: 1.3; }
+    .page-meta > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .meta-list { display: grid; gap: 8px; margin: 2px 0 0; }
+    .meta-line { display: grid; grid-template-columns: 63px 1fr; gap: 6px; font-size: 11px; line-height: 1.5; }
+    .meta-line b { color: var(--muted); font-weight: 650; }
+    .meta-line span { color: var(--ink); }
+    .wireframe { min-width: 0; padding: 13px; border: 1px dashed #cbd7e6; border-radius: 12px; background: #f8fafd; }
+    .wire-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
+    .wire-head strong { display: block; font-size: 13px; }
+    .wire-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .wire-body { display: grid; gap: 10px; padding-top: 11px; }
+    .mini-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .mini-kpi { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    .mini-kpi span { display: block; color: var(--muted); font-size: 10px; }
+    .mini-kpi strong { display: block; margin-top: 4px; font-size: 17px; }
+    .mini-kpi em { display: block; margin-top: 3px; color: var(--success); font-size: 10px; font-style: normal; }
+    .mini-kpi.warn em { color: var(--warning); }
+    .mock-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 10px; }
+    .mock-panel { padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    .mock-panel h4 { margin: 0 0 8px; font-size: 12px; }
+    .mock-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 10px; }
+    .step { position: relative; padding-top: 20px; color: var(--muted); font-size: 10px; }
+    .step::before { content: ""; position: absolute; top: 5px; left: 0; right: 0; height: 2px; background: #dbe4ef; }
+    .step::after { content: ""; position: absolute; top: 0; left: 0; width: 12px; height: 12px; border: 2px solid #b9c8dc; border-radius: 50%; background: #fff; }
+    .step.done, .step.current { color: var(--ink); font-weight: 700; }
+    .step.done::before { background: var(--success); }
+    .step.done::after { border-color: var(--success); background: var(--success); }
+    .step.current::after { border-color: var(--primary); box-shadow: 0 0 0 3px #e3eaff; }
+    .status-line { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid #edf1f6; font-size: 11px; }
+    .status-line:last-child { border-bottom: 0; }
+    .status-line span { color: var(--muted); }
+    .status-line strong { font-size: 11px; }
+    .mock-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .mock-table th { padding: 7px 6px; color: var(--muted); background: #f5f8fc; text-align: left; font-weight: 650; }
+    .mock-table td { padding: 8px 6px; border-top: 1px solid #edf1f6; vertical-align: middle; }
+    .mock-table td:last-child, .mock-table th:last-child { text-align: right; }
+    .mock-table small { color: var(--muted); }
+    .mock-action { border: 1px solid #cbd7ef; border-radius: 6px; padding: 5px 7px; color: var(--primary-strong); background: #f8faff; font-size: 10px; }
+    .callout { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 11px; border: 1px solid #efd8a7; border-radius: 9px; background: #fff8e8; }
+    .callout strong { display: block; font-size: 11px; color: #855800; }
+    .callout span { display: block; margin-top: 3px; color: #936d2d; font-size: 10px; line-height: 1.45; }
+    .callout .btn { flex: 0 0 auto; padding: 7px 9px; font-size: 10px; }
+    .registry-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .registry-card { padding: 12px; border: 1px solid #cbd7ef; border-radius: 10px; background: linear-gradient(180deg, #fff 0%, #f6f9ff 100%); }
+    .registry-card strong { display: block; font-size: 13px; }
+    .registry-card p { margin: 5px 0 10px; color: var(--muted); font-size: 11px; }
+    .check-list { display: grid; gap: 7px; }
+    .check { display: flex; gap: 7px; align-items: center; color: #3d4d63; font-size: 11px; }
+    .check i { display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; color: #fff; background: var(--success); font-size: 9px; font-style: normal; }
+    .check.pending i { color: var(--warning); background: #fff0c9; }
+    .release-path { display: grid; gap: 8px; }
+    .path-row { display: grid; grid-template-columns: 78px 1fr auto; gap: 8px; align-items: center; font-size: 10px; }
+    .path-row > span:first-child { color: var(--muted); }
+    .path-bar { height: 7px; overflow: hidden; border-radius: 99px; background: #e7edf5; }
+    .path-bar i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+    .path-row small { color: var(--muted); }
+    .footer-note { margin-top: 20px; padding: 13px 15px; border: 1px solid #cbd7ef; border-radius: 11px; background: #edf3ff; color: #415376; font-size: 12px; line-height: 1.6; }
+    .footer-note strong { color: var(--primary-strong); }
+    @media (max-width: 1100px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .side-note { margin-top: 0; }
+      .hero, .page-card { grid-template-columns: 1fr; }
+      .page-meta { padding-right: 0; }
+      .decision-strip { grid-template-columns: 1fr 1fr; }
+      .decision-intro { grid-column: 1 / -1; }
+      .decision-step { border-left: 0; border-top: 1px solid var(--line); }
+    }
+    @media (max-width: 700px) {
+      .main { padding: 18px 14px 32px; }
+      .topbar, .section-label { flex-direction: column; align-items: stretch; }
+      .top-actions { justify-items: start; }
+      .mini-kpis, .mock-grid, .registry-layout, .decision-strip { grid-template-columns: 1fr; }
+      .decision-intro { grid-column: auto; }
+      .decision-step { border-top: 1px solid var(--line); }
+      .wireframe { overflow-x: auto; }
+      .mock-table { min-width: 510px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <section class="brand">
+        <strong>MCP Forge</strong>
+        <span>POC 页面规划稿<br>只展示当前阶段需要补齐的页面。</span>
+      </section>
+
+      <section class="nav-group">
+        <div class="nav-title">现有 POC 链路</div>
+        <button class="nav-item" onclick="document.getElementById('review').scrollIntoView()">
+          <div class="nav-index">01</div>
+          <div class="nav-meta"><strong>资料接入</strong><span>上传来源资料</span></div>
+        </button>
+        <button class="nav-item" onclick="document.getElementById('review').scrollIntoView()">
+          <div class="nav-index">02</div>
+          <div class="nav-meta"><strong>AI 接口识别</strong><span>生成 Tool 候选</span></div>
+        </button>
+        <button class="nav-item" onclick="document.getElementById('review').scrollIntoView()">
+          <div class="nav-index">03</div>
+          <div class="nav-meta"><strong>人工审核工作台</strong><span>处理识别偏差</span></div>
+        </button>
+        <button class="nav-item" onclick="document.getElementById('release').scrollIntoView()">
+          <div class="nav-index">04</div>
+          <div class="nav-meta"><strong>Tool 映射</strong><span>确认工具边界</span></div>
+        </button>
+        <button class="nav-item" onclick="document.getElementById('release').scrollIntoView()">
+          <div class="nav-index">05</div>
+          <div class="nav-meta"><strong>测试发布</strong><span>验收后再发布</span></div>
+        </button>
+      </section>
+
+      <section class="nav-group">
+        <div class="nav-title">本次建议补充</div>
+        <button class="nav-item active" onclick="document.getElementById('deployment').scrollIntoView()">
+          <div class="nav-index">P0</div>
+          <div class="nav-meta"><strong>运行闭环页面</strong><span>部署、授权、诊断</span></div>
+        </button>
+        <button class="nav-item" onclick="document.getElementById('registry').scrollIntoView()">
+          <div class="nav-index">P1</div>
+          <div class="nav-meta"><strong>治理扩展页面</strong><span>注册、计量、分发</span></div>
+        </button>
+      </section>
+
+      <section class="side-note">
+        <strong>POC 的判断标准</strong>
+        <p>能否演示“识别偏差被人工修正，并安全进入可运行状态”。真实部署、真实计费和复杂权限先不做。</p>
+      </section>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">管理员端 / POC 页面规划 / 精简中保真原型</p>
+          <h1>POC 阶段建议补充页面清单</h1>
+          <p>目标不是把后台做大，而是补齐从“审核通过”到“可以被安全使用”的最短演示闭环。</p>
+        </div>
+        <div class="top-actions">
+          <span class="status-pill">当前状态：基础 POC 已有审核链路</span>
+          <div class="stack-chips">
+            <span class="chip danger">先补 3 个 P0 页面</span>
+            <span class="chip warning">2 个 P1 页面可后置</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-main">
+          <p class="eyebrow">建议先做这件事</p>
+          <div>
+            <h2>先补“审核之后”的运行闭环</h2>
+            <p>你现在已经能展示 AI 识别、人工审核和 Tool 映射。下一步最值得补的是：审核通过后，管理员如何配置、启动、发现异常，并知道还能不能发布。</p>
+          </div>
+          <div class="hero-actions">
+            <button class="btn primary" onclick="document.getElementById('deployment').scrollIntoView()">先看 P0 页面</button>
+            <button class="btn ghost" onclick="document.getElementById('rollout').scrollIntoView()">查看补充顺序</button>
+          </div>
+        </div>
+        <div class="hero-summary">
+          <h3>最小可演示链路</h3>
+          <div class="priority-row">
+            <b class="priority-no">01</b>
+            <div><strong>部署运行台</strong><span>把通过的 MCP 变成可运行实例</span></div>
+            <b class="priority-tag">P0</b>
+          </div>
+          <div class="priority-row">
+            <b class="priority-no">02</b>
+            <div><strong>凭证与授权中心</strong><span>告诉管理员缺什么授权</span></div>
+            <b class="priority-tag">P0</b>
+          </div>
+          <div class="priority-row">
+            <b class="priority-no">03</b>
+            <div><strong>调用监控与诊断</strong><span>证明 Tool 真的被正确调用</span></div>
+            <b class="priority-tag">P0</b>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-label">
+        <div><h2>现在应该先补什么</h2><p>每一步都对应一个明确的管理员动作。</p></div>
+        <span class="chip primary">建议范围：5 个页面</span>
+      </div>
+      <section class="decision-strip" id="rollout">
+        <div class="decision-intro">
+          <strong>推荐落地顺序</strong>
+          <p>先把主链路跑通，再补治理型页面。POC 阶段不要同时展开所有功能。</p>
+        </div>
+        <div class="decision-step"><b>1</b><div><strong>部署运行台</strong><span>先让它跑起来</span></div></div>
+        <div class="decision-step"><b>2</b><div><strong>凭证与授权</strong><span>再让它能安全调用</span></div></div>
+        <div class="decision-step"><b>3</b><div><strong>调用监控</strong><span>最后证明它没跑偏</span></div></div>
+      </section>
+
+      <div class="section-label" id="review">
+        <div><h2>建议补充页面</h2><p>以下每块都可以直接作为一个独立页面的原型起点。</p></div>
+        <span class="chip info">页面内只保留必要信息</span>
+      </div>
+
+      <article class="page-card" id="deployment">
+        <div class="page-meta">
+          <div class="page-kicker"><span class="page-no">PAGE 01</span><span class="chip danger">P0 必做</span></div>
+          <h3>部署运行台</h3>
+          <p>解决“审核通过了，但下一步怎么让 MCP 跑起来”的断点。</p>
+          <div class="meta-list">
+            <div class="meta-line"><b>放置位置</b><span>发布管理 / 部署运行</span></div>
+            <div class="meta-line"><b>管理员动作</b><span>选择环境，配置实例，启动测试</span></div>
+            <div class="meta-line"><b>POC 目标</b><span>演示审核通过到测试运行的闭环</span></div>
+          </div>
+          <div class="stack-chips"><span class="chip primary">审核后第一站</span><span class="chip warning">不做真实容器编排</span></div>
+        </div>
+        <div class="wireframe">
+          <div class="wire-head"><div><strong>部署运行台 / 订单售后 MCP</strong><span>实例状态、当前环境和下一步动作放在同一屏</span></div><span class="chip warning">待配置</span></div>
+          <div class="wire-body">
+            <div class="mini-kpis">
+              <div class="mini-kpi"><span>当前版本</span><strong>v0.3</strong><em>审核通过</em></div>
+              <div class="mini-kpi warn"><span>运行环境</span><strong>测试环境</strong><em>还缺 2 项配置</em></div>
+              <div class="mini-kpi"><span>可用 Tool</span><strong>12</strong><em>全部已映射</em></div>
+            </div>
+            <div class="mock-grid">
+              <div class="mock-panel">
+                <h4>部署进度</h4>
+                <p>当前停在“配置环境变量”，完成后才能启动测试实例。</p>
+                <div class="stepper"><div class="step done">审核通过</div><div class="step current">配置环境</div><div class="step">启动测试</div><div class="step">发布</div></div>
+              </div>
+              <div class="mock-panel">
+                <h4>实例状态</h4>
+                <div class="status-line"><span>服务状态</span><strong class="chip warning">未启动</strong></div>
+                <div class="status-line"><span>接口连通</span><strong class="chip">未检查</strong></div>
+                <div class="status-line"><span>下一动作</span><strong class="chip primary">去配置</strong></div>
+              </div>
+            </div>
+            <div class="callout"><div><strong>现在需要做什么</strong><span>补齐 API 地址和测试账号，然后点击“保存并检查”。</span></div><button class="btn primary">去配置环境</button></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="page-card" id="credentials">
+        <div class="page-meta">
+          <div class="page-kicker"><span class="page-no">PAGE 02</span><span class="chip danger">P0 必做</span></div>
+          <h3>凭证与授权中心</h3>
+          <p>解决“Tool 已经正确，但调用时缺少谁的授权”的问题。</p>
+          <div class="meta-list">
+            <div class="meta-line"><b>放置位置</b><span>安全治理 / 凭证授权</span></div>
+            <div class="meta-line"><b>管理员动作</b><span>查看缺口，绑定测试凭证</span></div>
+            <div class="meta-line"><b>POC 目标</b><span>让敏感授权和人工审核形成关联</span></div>
+          </div>
+          <div class="stack-chips"><span class="chip primary">高风险 Tool 必须看</span><span class="chip warning">凭证值只做脱敏展示</span></div>
+        </div>
+        <div class="wireframe">
+          <div class="wire-head"><div><strong>凭证与授权中心 / 订单售后 MCP</strong><span>先看缺口，再决定是否允许测试调用</span></div><span class="chip danger">存在阻断</span></div>
+          <div class="wire-body">
+            <table class="mock-table"><thead><tr><th>授权项</th><th>关联 Tool</th><th>状态</th><th>动作</th></tr></thead><tbody>
+              <tr><td><strong>售后系统 API Key</strong><br><small>测试环境 · ****8F2A</small></td><td>查询订单、提交退款</td><td><span class="chip success">已绑定</span></td><td><button class="mock-action">查看</button></td></tr>
+              <tr><td><strong>退款审批权限</strong><br><small>财务角色</small></td><td>确认退款</td><td><span class="chip danger">未授权</span></td><td><button class="mock-action">去申请</button></td></tr>
+              <tr><td><strong>客户身份字段</strong><br><small>身份证号 · 脱敏策略</small></td><td>查询客户</td><td><span class="chip warning">待确认</span></td><td><button class="mock-action">去审核</button></td></tr>
+            </tbody></table>
+            <div class="callout"><div><strong>当前发布阻断：退款审批权限未授权</strong><span>在授权完成前，确认退款 Tool 只能保持“审核通过，禁止调用”。</span></div><button class="btn secondary">处理阻断</button></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="page-card" id="monitoring">
+        <div class="page-meta">
+          <div class="page-kicker"><span class="page-no">PAGE 03</span><span class="chip danger">P0 必做</span></div>
+          <h3>调用监控与诊断</h3>
+          <p>解决“发布后不知道 AI 调用了哪个 Tool、为什么失败”的问题。</p>
+          <div class="meta-list">
+            <div class="meta-line"><b>放置位置</b><span>运行管理 / 调用监控</span></div>
+            <div class="meta-line"><b>管理员动作</b><span>定位异常，查看调用链和输入</span></div>
+            <div class="meta-line"><b>POC 目标</b><span>证明人工修正后的 Tool 被正确调用</span></div>
+          </div>
+          <div class="stack-chips"><span class="chip primary">演示价值高</span><span class="chip info">先做最近调用</span></div>
+        </div>
+        <div class="wireframe">
+          <div class="wire-head"><div><strong>调用监控 / 订单售后 MCP</strong><span>不做复杂报表，先让异常可以被定位</span></div><span class="chip success">运行中</span></div>
+          <div class="wire-body">
+            <div class="mini-kpis">
+              <div class="mini-kpi"><span>最近 24h 调用</span><strong>126</strong><em>较昨日 +18%</em></div>
+              <div class="mini-kpi"><span>成功率</span><strong>94.4%</strong><em>整体正常</em></div>
+              <div class="mini-kpi warn"><span>异常调用</span><strong>7</strong><em>需要定位</em></div>
+            </div>
+            <div class="mock-panel">
+              <h4>最近异常</h4>
+              <table class="mock-table"><thead><tr><th>时间</th><th>Tool</th><th>问题</th><th>处理</th></tr></thead><tbody>
+                <tr><td>14:32</td><td>refund_submit</td><td><span class="chip danger">401 授权失败</span></td><td><button class="mock-action">诊断</button></td></tr>
+                <tr><td>14:18</td><td>customer_query</td><td><span class="chip warning">字段校验失败</span></td><td><button class="mock-action">诊断</button></td></tr>
+                <tr><td>13:55</td><td>order_detail</td><td><span class="chip info">响应超时</span></td><td><button class="mock-action">诊断</button></td></tr>
+              </tbody></table>
+            </div>
+            <div class="callout"><div><strong>引导动作：先处理 401 授权失败</strong><span>点击诊断后，直接跳转到对应凭证，不要求管理员自己拼线索。</span></div><button class="btn primary">查看异常</button></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="page-card" id="registry">
+        <div class="page-meta">
+          <div class="page-kicker"><span class="page-no">PAGE 04</span><span class="chip warning">P1 后置</span></div>
+          <h3>MCP 注册与分发</h3>
+          <p>解决“测试通过后，MCP 去哪里被发现和接入”的问题。</p>
+          <div class="meta-list">
+            <div class="meta-line"><b>放置位置</b><span>发布管理 / MCP 注册</span></div>
+            <div class="meta-line"><b>管理员动作</b><span>填写摘要，选择分发范围</span></div>
+            <div class="meta-line"><b>POC 目标</b><span>演示从测试实例到可接入目录</span></div>
+          </div>
+          <div class="stack-chips"><span class="chip info">有发布演示时补</span><span class="chip warning">暂不接真实市场</span></div>
+        </div>
+        <div class="wireframe">
+          <div class="wire-head"><div><strong>MCP 注册与分发 / 订单售后 MCP</strong><span>把版本、描述、接入范围和发布条件放在一起</span></div><span class="chip warning">待发布</span></div>
+          <div class="wire-body">
+            <div class="registry-layout">
+              <div class="registry-card"><strong>订单售后 MCP</strong><p>提供订单查询、售后提交和退款状态查询能力。</p><div class="stack-chips"><span class="chip primary">v0.3</span><span class="chip success">测试通过</span></div></div>
+              <div class="mock-panel"><h4>发布前检查</h4><div class="check-list"><div class="check"><i>✓</i>人工审核已完成</div><div class="check"><i>✓</i>Tool 测试已通过</div><div class="check pending"><i>!</i>分发范围待选择</div></div></div>
+            </div>
+            <div class="mock-panel"><h4>分发范围</h4><div class="status-line"><span>内部测试目录</span><strong class="chip success">已开启</strong></div><div class="status-line"><span>业务团队目录</span><strong class="chip warning">待确认</strong></div><div class="status-line"><span>外部公开目录</span><strong class="chip">POC 不启用</strong></div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="page-card" id="billing">
+        <div class="page-meta">
+          <div class="page-kicker"><span class="page-no">PAGE 05</span><span class="chip warning">P1 后置</span></div>
+          <h3>计量与计费规则</h3>
+          <p>解决“调用量如何统计、后续如何做成本管理”的问题。</p>
+          <div class="meta-list">
+            <div class="meta-line"><b>放置位置</b><span>运营管理 / 计量规则</span></div>
+            <div class="meta-line"><b>管理员动作</b><span>选择统计维度，设定规则草稿</span></div>
+            <div class="meta-line"><b>POC 目标</b><span>展示平台具备后续商业化承接能力</span></div>
+          </div>
+          <div class="stack-chips"><span class="chip info">答辩或商业化演示时补</span><span class="chip warning">先做规则展示</span></div>
+        </div>
+        <div class="wireframe">
+          <div class="wire-head"><div><strong>计量与计费规则 / 订单售后 MCP</strong><span>POC 只展示规则草稿和调用统计，不接真实支付</span></div><span class="chip">草稿</span></div>
+          <div class="wire-body">
+            <div class="mini-kpis"><div class="mini-kpi"><span>本月调用量</span><strong>2,480</strong><em>按 Tool 统计</em></div><div class="mini-kpi"><span>预计成本</span><strong>¥ 186</strong><em>演示估算</em></div><div class="mini-kpi warn"><span>计费规则</span><strong>未启用</strong><em>仅保存草稿</em></div></div>
+            <div class="mock-panel"><h4>规则草稿</h4><table class="mock-table"><thead><tr><th>计量对象</th><th>统计方式</th><th>单价</th><th>状态</th></tr></thead><tbody><tr><td>Tool 调用次数</td><td>按成功调用</td><td>¥0.05 / 次</td><td><span class="chip success">草稿完成</span></td></tr><tr><td>失败调用</td><td>不计费</td><td>¥0 / 次</td><td><span class="chip info">已排除</span></td></tr></tbody></table></div>
+            <div class="callout"><div><strong>POC 建议：先保留规则页面，不接真实扣费</strong><span>有调用数据和规则草稿即可支持产品方向验证。</span></div><button class="btn secondary">查看规则</button></div>
+          </div>
+        </div>
+      </article>
+
+      <div class="footer-note"><strong>最终建议：</strong>如果本轮只补一个页面，优先做“部署运行台”；如果能补三个，就按“部署运行台 → 凭证与授权中心 → 调用监控与诊断”完成最小闭环。注册分发和计量计费先作为后续页面，不要阻塞当前 POC。</div>
+    </main>
+  </div>
+</body>
+</html>

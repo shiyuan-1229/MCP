@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Forge 竞品功能差距清单</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef3f8;
+      --surface: #ffffff;
+      --surface-2: #f7f9fc;
+      --line: #d9e2ec;
+      --ink: #182230;
+      --muted: #627287;
+      --nav: #111b2d;
+      --primary: #2456d3;
+      --primary-soft: #e9f0ff;
+      --success: #0f8b62;
+      --warning: #b56f08;
+      --danger: #c53a3a;
+      --shadow: 0 12px 28px rgba(24, 34, 48, 0.08);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(36, 86, 211, 0.08), transparent 28%),
+        linear-gradient(180deg, #f4f7fb 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .page {
+      width: min(1380px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #13213a 0%, #1d3157 56%, #21458a 100%);
+      color: #f7fbff;
+      border-radius: 24px;
+      padding: 26px 28px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 16px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ab2d7;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 980px;
+      color: #d7e3f7;
+      line-height: 1.75;
+      font-size: 14px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .hero-note,
+    .hero-summary {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 18px;
+      padding: 16px 18px;
+    }
+
+    .hero-note strong,
+    .hero-summary strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .hero-note ul,
+    .hero-summary ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #dbe8fb;
+      line-height: 1.7;
+      font-size: 13px;
+    }
+
+    .section {
+      margin-top: 18px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 16px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.2;
+    }
+
+    .section-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .mini-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat {
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stat strong {
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .stat em {
+      color: var(--muted);
+      font-size: 12px;
+      font-style: normal;
+      line-height: 1.6;
+    }
+
+    .lane-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .lane {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+
+    .lane-top {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .lane-top strong {
+      font-size: 15px;
+    }
+
+    .lane-top span {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .lane.p0 .lane-top { background: #fff1f1; }
+    .lane.p1 .lane-top { background: #fff7eb; }
+    .lane.p2 .lane-top { background: #eef5ff; }
+
+    .lane-list {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .lane-item {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 12px 11px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .lane-item strong {
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .lane-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .lane-item code,
+    .detail-table code {
+      font-family: Consolas, "SFMono-Regular", monospace;
+      background: #f1f5fb;
+      border: 1px solid #dde7f2;
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-size: 11px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1.25fr 0.95fr;
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+
+    .card ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.8;
+      font-size: 13px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1120px;
+      background: #fff;
+    }
+
+    th, td {
+      padding: 14px 14px;
+      border-bottom: 1px solid #e8eef5;
+      vertical-align: top;
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    th {
+      background: #f8fbff;
+      color: #445369;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .detail-table strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .b-gap { background: #fff1f1; color: var(--danger); border-color: #f1c7c7; }
+    .b-partial { background: #fff7eb; color: var(--warning); border-color: #eed7aa; }
+    .b-have { background: #edf9f3; color: var(--success); border-color: #bfe7d0; }
+    .b-p0 { background: #ffeaea; color: var(--danger); border-color: #efbaba; }
+    .b-p1 { background: #fff5e2; color: var(--warning); border-color: #ecd39f; }
+    .b-p2 { background: #edf4ff; color: var(--primary); border-color: #c7d8ff; }
+
+    .foot {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: #f8fbff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    @media (max-width: 1080px) {
+      .hero-grid,
+      .lane-grid,
+      .split,
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .page {
+        width: min(100vw - 20px, 1380px);
+        padding-top: 16px;
+      }
+
+      .hero,
+      .section {
+        border-radius: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <p class="eyebrow">MCP Forge / Competitive Gap Review / 2026-07-13</p>
+      <h1>竞品功能差距清单</h1>
+      <p>这份清单基于《MCP Forge 竞品分析-v2》和当前项目实际代码能力整理，目标不是证明我们“什么都没有”，而是把“竞品强调、市场需要、而我们现在还没真正做实”的能力分层列清楚，方便后续排优先级。</p>
+      <div class="hero-grid">
+        <div class="hero-note">
+          <strong>一句话结论</strong>
+          <ul>
+            <li>MCP Forge 目前的优势在于 <code>AI 候选识别 + 人工审核治理 + 企业后台视角</code>。</li>
+            <li>最大的缺口不在“页面有没有”，而在 <code>真实运行时、真实认证、真实部署、真实计量</code>。</li>
+            <li>和竞品相比，你现在更像 <code>企业 MCP 治理与交付中台雏形</code>，还不是完整的 <code>生产级 MCP 运行平台</code>。</li>
+          </ul>
+        </div>
+        <div class="hero-summary">
+          <strong>本次差距判断依据</strong>
+          <ul>
+            <li>竞品文档提到的核心能力：阿里云 MCP、Microsoft MCP Gateway、FastMCP、agentic-community Registry。</li>
+            <li>当前项目交接文档中的已知缺口：真实 handler、真实文件生成、沙箱仅模拟。</li>
+            <li>当前代码中的实际实现方式：API Key 本地生成、simulate-call 模拟返回、治理链路已存在。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>总体盘点</h2>
+          <p>先用最短的方式看清：我们到底差在哪一层。</p>
+        </div>
+        <span class="mini-tag">按“竞品有 / 我们缺 / 优先级”整理</span>
+      </div>
+      <div class="stats">
+        <article class="stat">
+          <span>明显缺失</span>
+          <strong>6</strong>
+          <em>需要补真实后端能力，不是补页面文案</em>
+        </article>
+        <article class="stat">
+          <span>部分具备</span>
+          <strong>4</strong>
+          <em>有后台或数据结构，但还不够生产化</em>
+        </article>
+        <article class="stat">
+          <span>已经具备</span>
+          <strong>3</strong>
+          <em>治理、审核、企业后台视角是现阶段强项</em>
+        </article>
+        <article class="stat">
+          <span>当前最大短板</span>
+          <strong>Runtime</strong>
+          <em>发布后是否真的能跑、能管、能计量</em>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>优先级清单</h2>
+          <p>如果只看接下来该先补什么，先看这 3 组就够了。</p>
+        </div>
+        <span class="mini-tag">P0 先补真实能力，P1 再补平台化，P2 最后补精细运营</span>
+      </div>
+      <div class="lane-grid">
+        <article class="lane p0">
+          <div class="lane-top">
+            <strong>P0 生产可用缺口</strong>
+            <span>先做</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>真实 MCP Server 托管 / 部署 / 生命周期管理</strong>
+              <p>当前发布更像状态流转，不是把服务真正发到一个运行环境。</p>
+            </div>
+            <div class="lane-item">
+              <strong>真实网关执行层</strong>
+              <p>需要真正支持反向代理、路由、认证、会话处理，而不只是网关策略表。</p>
+            </div>
+            <div class="lane-item">
+              <strong>真实认证与凭证托管</strong>
+              <p>包括 API Key、JWT、OAuth2、第三方 Token 托管；目前前端仍有演示态本地生成。</p>
+            </div>
+            <div class="lane-item">
+              <strong>真实工具调用 / handler</strong>
+              <p>现在很多资产还是数据展示或模拟返回，未真正接上后端业务系统。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="lane p1">
+          <div class="lane-top">
+            <strong>P1 平台化缺口</strong>
+            <span>第二批</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>OpenAPI 到可运行 MCP Server 的完整生成链</strong>
+              <p>我们现在擅长治理，但“直接生成可部署 server”还不够强。</p>
+            </div>
+            <div class="lane-item">
+              <strong>MCP Registry / 服务注册发现</strong>
+              <p>缺真正的统一注册中心、服务发现与版本入口。</p>
+            </div>
+            <div class="lane-item">
+              <strong>团队级多租户模型</strong>
+              <p>当前更偏 customer / project 隔离，还不是组织 / 团队 / 环境 / 凭证模型。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="lane p2">
+          <div class="lane-top">
+            <strong>P2 商业化与运营缺口</strong>
+            <span>第三批</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>真实计量计费引擎</strong>
+              <p>现在有账单和页面，但不是按真实调用自动计量、结算、对账。</p>
+            </div>
+            <div class="lane-item">
+              <strong>公开 / 内部 / 项目级 MCP 分发权限</strong>
+              <p>需要把“谁能看到、谁能接入、谁能调用”做成真正的发行模型。</p>
+            </div>
+            <div class="lane-item">
+              <strong>真实交付物生成</strong>
+              <p>下载入口已具备，但文件生成与交付闭环仍偏演示态。</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>详细差距对照</h2>
+          <p>下面这张表适合拿去做产品规划评审。每一项都说明了代表竞品、我们现状、差距判断和建议动作。</p>
+        </div>
+        <span class="mini-tag">重点看“我们现状”和“建议动作”两列</span>
+      </div>
+      <div class="table-wrap">
+        <table class="detail-table">
+          <thead>
+            <tr>
+              <th>能力项</th>
+              <th>代表竞品</th>
+              <th>我们现状</th>
+              <th>差距判断</th>
+              <th>优先级</th>
+              <th>建议动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <strong>真实 MCP Server 托管 / 部署 / 生命周期管理</strong>
+                <div class="muted">部署、更新、删除、环境管理、运行状态</div>
+              </td>
+              <td>阿里云 MCP、Microsoft MCP Gateway</td>
+              <td>当前“发布”主要是记录状态和资产流转，还不是把服务真正发到运行环境。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p0">P0</span></td>
+              <td>补一层真实 runtime 管理能力，把 <code>发布</code> 从“后台状态”升级为“可运行服务”。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实网关执行层</strong>
+                <div class="muted">反向代理、路由、会话亲和、入口控制</div>
+              </td>
+              <td>Microsoft MCP Gateway、agentic-community</td>
+              <td>已有网关策略、限流、脱敏、审计配置页面，但更偏策略记录，不是完整执行层。</td>
+              <td><span class="badge b-partial">部分具备</span></td>
+              <td><span class="badge b-p0">P0</span></td>
+              <td>先做可执行网关，再决定是自研还是接入现成 gateway。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实认证与凭证托管</strong>
+                <div class="muted">API Key、JWT、OAuth2、第三方 Token 托管</div>
+              </td>
+              <td>阿里云 MCP、agentic-community</td>
+              <td>后台有 API Key 管理入口，但前端仍存在本地生成演示逻辑。</td>
+              <td><span class="badge b-partial">部分具备</span></td>
+              <td><span class="badge b-p0">P0</span></td>
+              <td>把凭证签发、存储、吊销、过期、审计迁到后端正式能力。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实运行监控 / 日志 / 告警</strong>
+                <div class="muted">运行状态、错误日志、调用追踪、异常告警</div>
+              </td>
+              <td>阿里云 MCP</td>
+              <td>已有调用事件和日志展示方向，但更多来自模拟链路，不是生产运行数据。</td>
+              <td><span class="badge b-partial">部分具备</span></td>
+              <td><span class="badge b-p0">P0</span></td>
+              <td>先打通真实调用事件，再补 trace、失败原因、告警阈值。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实工具调用 / handler</strong>
+                <div class="muted">资产真正连上业务系统</div>
+              </td>
+              <td>所有真正可用平台都会具备</td>
+              <td>交接文档已明确：当前 MCP 资产未实现真实 handler，沙箱试调也只对少数工具详细模拟。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p0">P0</span></td>
+              <td>按资产类型逐步补 handler，把演示态资产转成可执行资产。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>OpenAPI 到可运行 MCP Server 的完整生成能力</strong>
+                <div class="muted">不是只识别，而是直接产出可部署 server</div>
+              </td>
+              <td>FastMCP、MCPworld</td>
+              <td>我们已有候选识别、Tool 审核、治理闭环，但“生成生产级 server”不够完整。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p1">P1</span></td>
+              <td>把生成器作为能力组件接进来，强化 MCP Forge 的交付链路。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>MCP Registry / 服务注册发现</strong>
+                <div class="muted">统一注册中心、版本管理、服务发现</div>
+              </td>
+              <td>agentic-community Registry</td>
+              <td>有资产表、发布表、治理表，但还不是正式 registry。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p1">P1</span></td>
+              <td>建立注册中心模型，让“已发布资产”变成“可发现服务”。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>团队级多租户模型</strong>
+                <div class="muted">组织 / 团队 / 环境 / 项目 / 凭证</div>
+              </td>
+              <td>agentic-community</td>
+              <td>已有管理员 / 客户视角和 customer / project 隔离，但还不是完整团队模型。</td>
+              <td><span class="badge b-partial">部分具备</span></td>
+              <td><span class="badge b-p1">P1</span></td>
+              <td>从当前客户级隔离升级到组织级资源与权限体系。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实计量计费引擎</strong>
+                <div class="muted">按真实调用计量、套餐、超额、对账</div>
+              </td>
+              <td>云厂商基础计量能力</td>
+              <td>已经有计费页、账单表和账单操作，但不少动作仍是前端本地状态覆盖。</td>
+              <td><span class="badge b-partial">部分具备</span></td>
+              <td><span class="badge b-p2">P2</span></td>
+              <td>把调用统计与账单规则打通，形成真正的计费流水和结算逻辑。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>公开 / 内部 / 项目级 MCP 分发权限</strong>
+                <div class="muted">不同可见性、接入范围、发行策略</div>
+              </td>
+              <td>竞品分析中的企业发行空白</td>
+              <td>当前在审核和 Tool 可见性上有方向，但还没形成真正的分发模型。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p2">P2</span></td>
+              <td>把 <code>public / internal / project-only</code> 做成正式发行与权限控制能力。</td>
+            </tr>
+            <tr>
+              <td>
+                <strong>真实交付物生成</strong>
+                <div class="muted">配置包、测试报告、运行说明、复盘文件</div>
+              </td>
+              <td>企业交付平台常规能力</td>
+              <td>下载入口已存在，但真实文件生成仍在后续待补清单中。</td>
+              <td><span class="badge b-gap">明显缺失</span></td>
+              <td><span class="badge b-p2">P2</span></td>
+              <td>先补自动生成，再补归档、版本关联和交付签收。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>不是短板的部分</h2>
+          <p>这几项不要被误判成“我们也没有”。它们恰恰是 MCP Forge 现阶段和竞品拉开定位的地方。</p>
+        </div>
+        <span class="mini-tag">应该继续强化，而不是推翻重做</span>
+      </div>
+      <div class="split">
+        <article class="card">
+          <h3>我们已经有的优势</h3>
+          <ul>
+            <li><strong>AI 候选识别 + 人工审核链路</strong>：这比单纯 OpenAPI 生成器更接近企业真实交付流程。</li>
+            <li><strong>发布前人工门禁</strong>：已经有 open review tasks、manual screen、acceptance checklist 的阻断逻辑。</li>
+            <li><strong>企业后台视角</strong>：管理员与客户视角并存，这一点明显区别于面向开发者的工具型竞品。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>正确的产品判断</h3>
+          <ul>
+            <li>不要为了追竞品，把审核治理优势做丢。</li>
+            <li>下一阶段应补 <strong>runtime / gateway / auth / billing</strong>，而不是先做更大更花的首页。</li>
+            <li>你的路线更像“企业 MCP 资产交付与运营平台”，不是单纯的 MCP 代码生成器。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>建议路线</h2>
+          <p>如果后面要转成路线图，可以先按下面 4 步推进。</p>
+        </div>
+        <span class="mini-tag">按投入产出比排序</span>
+      </div>
+      <div class="lane-grid">
+        <article class="lane p0">
+          <div class="lane-top">
+            <strong>第 1 步</strong>
+            <span>补运行时</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>把“发布”做成真正可运行</strong>
+              <p>优先打通托管、部署、handler 和最小网关入口。</p>
+            </div>
+          </div>
+        </article>
+        <article class="lane p1">
+          <div class="lane-top">
+            <strong>第 2 步</strong>
+            <span>补安全</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>把认证和凭证托管做实</strong>
+              <p>API Key、JWT、OAuth2、审计日志都转到后端正式能力。</p>
+            </div>
+          </div>
+        </article>
+        <article class="lane p2">
+          <div class="lane-top">
+            <strong>第 3 步和第 4 步</strong>
+            <span>补平台化与商业化</span>
+          </div>
+          <div class="lane-list">
+            <div class="lane-item">
+              <strong>补 Registry、多租户、计量计费、交付闭环</strong>
+              <p>这一步做完，MCP Forge 才会从“治理中台雏形”进入“可卖的服务平台”。</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="foot">
+      本清单是按“当前项目实际可用能力”整理，不是按“页面里出现过哪些按钮”整理。换句话说，这里把前端占位、模拟数据、后台配置态和真正生产能力做了区分。后续如果你要继续，我可以直接把这份 HTML 再扩成一版 <strong>产品路线图 HTML</strong>，或者把每个差距项拆成 <strong>需求卡片</strong>。
+    </div>
+  </main>
+</body>
+</html>

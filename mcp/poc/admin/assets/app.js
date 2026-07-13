@@ -18,6 +18,13 @@ async function api(path, options = {}) {
   return request(state, path, options, handleUnauthorized);
 }
 
+window.syncBuilderRequestToServer = async function syncBuilderRequestToServer(payload = {}) {
+  return api('/api/platform/builder/requests', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+};
+
 function getDefaultPageForRole(role = 'customer', requestedPage = '') {
   const items = role === 'admin' ? navItems : customerNavItems;
   const allowedItems = items.filter(item => item.roles.includes(role || 'customer'));
@@ -234,9 +241,18 @@ function updateLocalBuilderRequest(requestId, patch = {}) {
   return list(state.builderRequests).find(item => item.id === requestId) || null;
 }
 
-function acceptBuilderRequestIntoIntake(requestId) {
+async function acceptBuilderRequestIntoIntake(requestId) {
   const request = list(state.builderRequests).find(item => item.id === requestId);
   if (!request) throw new Error('Builder request not found');
+
+  if (request.customer_id) {
+    const result = await api(`/api/platform/builder/requests/${requestId}/accept`, { method: 'POST' });
+    await loadAll();
+    state.currentPage = 'intake';
+    renderAll();
+    showToast('已将客户需求转入资料接入。', 'success');
+    return result?.source || null;
+  }
 
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const draftSource = buildLocalIntakeSourceFromRequest(request);
@@ -250,19 +266,20 @@ function acceptBuilderRequestIntoIntake(requestId) {
     updated_at: timestamp
   });
 
-  updateLocalBuilderRequest(requestId, { updated_at: timestamp });
+  updateLocalBuilderRequest(requestId, { updated_at: timestamp, status: 'accepted', intake_source_id: source.id });
   return source;
 }
 
 async function loadAll() {
   if (isCustomerView()) {
-    const [dashboard, trends, events, deliverables, access, billing] = await Promise.all([
+    const [dashboard, trends, events, deliverables, access, billing, builderRequests] = await Promise.all([
       api('/api/customer/dashboard'),
       api('/api/customer/usage/trends'),
       api('/api/platform/call-events'),
       api('/api/platform/deliverables'),
       api('/api/platform/access-configs'),
-      api('/api/platform/billing')
+      api('/api/platform/billing'),
+      api('/api/platform/builder/requests').catch(() => [])
     ]);
     const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
     Object.assign(state, {
@@ -273,12 +290,13 @@ async function loadAll() {
       deliverables,
       access,
       billing,
+      builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
       accessGuide: null
     });
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions, builderRequests] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -300,7 +318,8 @@ async function loadAll() {
     api('/api/platform/builder/metrics').catch(() => null),
     api('/api/platform/governance/retro-summary').catch(() => null),
     api('/api/platform/governance/retro-reasons').catch(() => ({ items: [] })),
-    api('/api/platform/governance/reuse-suggestions').catch(() => ({ items: [] }))
+    api('/api/platform/governance/reuse-suggestions').catch(() => ({ items: [] })),
+    api('/api/platform/builder/requests').catch(() => [])
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
@@ -327,7 +346,8 @@ async function loadAll() {
     builderMetrics: builderMetrics || null,
     retroSummary: retroSummary || null,
     retroReasons: Array.isArray(retroReasons?.items) ? retroReasons.items : [],
-    reuseSuggestions: Array.isArray(reuseSuggestions?.items) ? reuseSuggestions.items : []
+    reuseSuggestions: Array.isArray(reuseSuggestions?.items) ? reuseSuggestions.items : [],
+    builderRequests: Array.isArray(builderRequests) ? builderRequests : []
   });
   refreshLocalAdminCollections();
 }
@@ -1627,16 +1647,16 @@ function deletePolicy(id) {
 
 // === 接入配置 CRUD ===
 
-async function testAccessConfig(id) {
+async function testAccessConfig(id, resultId = 'accessTestResult') {
   try {
-    $('accessTestResult').textContent = '测试中...';
+    $(resultId).textContent = '测试中...';
     const data = await api(`/api/platform/access-configs/${id}/test`, { method: 'POST' });
-    $('accessTestResult').textContent = JSON.stringify(data, null, 2);
+    $(resultId).textContent = JSON.stringify(data, null, 2);
     await loadAll();
     renderAll();
     showToast('测试完成', 'success');
   } catch (error) {
-    $('accessTestResult').textContent = error.message;
+    $(resultId).textContent = error.message;
     showToast(error.message, 'error');
   }
 }
@@ -2529,9 +2549,41 @@ async function toggleAssetVisibility(assetId, visibility) {
   });
 }
 
+function navigateToPage(pageId, focus = {}) {
+  if (state.user?.role !== 'admin') return;
+  const allowed = navItems.some(item => item.id === pageId && item.roles.includes('admin'));
+  if (!allowed) return;
+  state.currentPage = pageId;
+  if (pageId === 'authorization') state.authorizationFocusId = focus.accessId || null;
+  if (pageId === 'monitoring') state.monitoringFocusId = focus.eventId || null;
+  renderAll();
+}
+
+function setAuthorizationFilter(key, value) {
+  if (!state.authorizationFilters) state.authorizationFilters = { status: 'all', environment: 'all', projectId: 'all' };
+  if (!Object.prototype.hasOwnProperty.call(state.authorizationFilters, key)) return;
+  state.authorizationFilters[key] = value;
+  renderAll();
+}
+
+function setMonitoringFilter(key, value) {
+  if (!state.monitoringFilters) state.monitoringFilters = { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h' };
+  if (!Object.prototype.hasOwnProperty.call(state.monitoringFilters, key)) return;
+  state.monitoringFilters[key] = value;
+  renderAll();
+}
+
+async function runAuthorizationTest() {
+  const select = $('authorizationTestConfig');
+  if (!select?.value) {
+    showToast('请选择接入项', 'warning');
+    return;
+  }
+  await testAccessConfig(select.value, 'authorizationTestResult');
+}
 // 步骤条点击跳转（被 renderers.js 中 step-item onclick 调用）
 function jumpToPage(pageId) {
-  const allPages = ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery'];
+  const allPages = ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'authorization', 'monitoring'];
   if (!allPages.includes(pageId)) return;
   // 检查权限
   if (state.user?.role !== 'admin') return;
@@ -2875,6 +2927,10 @@ window.jumpToTooling = jumpToTooling;
 window.jumpToAssets = jumpToAssets;
 window.jumpToPublish = jumpToPublish;
 window.jumpToPage = jumpToPage;
+window.navigateToPage = navigateToPage;
+window.setAuthorizationFilter = setAuthorizationFilter;
+window.setMonitoringFilter = setMonitoringFilter;
+window.runAuthorizationTest = runAuthorizationTest;
 
 async function bootApp() {
   if (!state.user) state.user = await api('/auth/me');

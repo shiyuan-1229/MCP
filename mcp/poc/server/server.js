@@ -9,9 +9,9 @@ import Database from "better-sqlite3";
 import { runFullPipeline, analyzeBusinessData, previewCapabilities, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
 import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
 import { createGovernanceRepository } from "./modules/governance/repository.mjs";
-import { buildReviewTasksForCandidate, decideReviewLevel } from "./modules/governance/review-orchestrator.mjs";
+import { buildReviewTasksForCandidate, decideReviewLevel, getStageMetadata, evaluateToolReview, getToolReviewChecklist, checkCandidatePublishReadiness, handleReviewDecision } from "./modules/governance/review-orchestrator.mjs";
 import { suggestReuse, REUSE_CATEGORY_TEXT } from "./modules/governance/reuse-service.mjs";
-import { detectSensitiveHits, buildManualGate, validateManualDecision, validateAcceptanceChecklist, explainPublishBlock, getAcceptanceRequiredFields } from "./modules/governance/manual-checks.mjs";
+import { detectSensitiveHits, buildManualGate, validateManualDecision, validateAcceptanceChecklist, explainPublishBlock, getAcceptanceRequiredFields, validateManualTrigger, buildEscalation, checkStageAdvancement, checkPublishGate, formatPublishGateResult } from "./modules/governance/manual-checks.mjs";
 import { validateRetroReason, RETRO_REASONS, buildRetroHint, summarizeRetro } from "./modules/governance/retro-service.mjs";
 import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUNDARY_RULE_REFERENCE } from "./modules/governance/boundary-detector.mjs";
 import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
@@ -129,7 +129,21 @@ function runMigrations() {
     ddl_file_name TEXT,
     ddl_file_size INTEGER
   )`);
-  db.exec(`CREATE TABLE IF NOT EXISTS platform_mcp_assets (
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_builder_requests (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL,
+    project_id TEXT,
+    created_by_user_id TEXT,
+    title TEXT,
+    prompt TEXT NOT NULL,
+    latest_prompt TEXT,
+    result_json TEXT,
+    rounds INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'submitted',
+    intake_source_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);  db.exec(`CREATE TABLE IF NOT EXISTS platform_mcp_assets (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -312,6 +326,15 @@ function runMigrations() {
   ensureColumn('platform_data_sources', 'parsed_summary', 'TEXT');
   ensureColumn('platform_data_sources', 'ddl_file_name', 'TEXT');
   ensureColumn('platform_data_sources', 'ddl_file_size', 'INTEGER');
+  ensureColumn('platform_builder_requests', 'project_id', 'TEXT');
+  ensureColumn('platform_builder_requests', 'created_by_user_id', 'TEXT');
+  ensureColumn('platform_builder_requests', 'title', 'TEXT');
+  ensureColumn('platform_builder_requests', 'latest_prompt', 'TEXT');
+  ensureColumn('platform_builder_requests', 'result_json', 'TEXT');
+  ensureColumn('platform_builder_requests', 'rounds', 'INTEGER DEFAULT 1');
+  ensureColumn('platform_builder_requests', 'status', "TEXT DEFAULT 'submitted'");
+  ensureColumn('platform_builder_requests', 'intake_source_id', 'TEXT');
+  ensureColumn('platform_builder_requests', 'updated_at', 'TEXT');
   ensureColumn('platform_mcp_assets', 'visibility', "TEXT DEFAULT 'internal'");
 
   // 阶段三：数据源 OpenAPI 描述与生成时间线
@@ -396,11 +419,33 @@ function runMigrations() {
     review_type TEXT NOT NULL,
     review_reason TEXT NOT NULL,
     assignee_role TEXT NOT NULL,
+    review_stage TEXT DEFAULT 'candidate_review',
     status TEXT DEFAULT 'open',
     decision TEXT,
     decision_reason TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     resolved_at TEXT
+  )`);
+
+  // 兼容已有数据库：如果表已存在但缺 review_stage 列，则补列
+  try {
+    db.exec(`ALTER TABLE platform_review_tasks ADD COLUMN review_stage TEXT DEFAULT 'candidate_review'`);
+  } catch (_) { /* 列已存在，忽略 */ }
+
+  // 兼容已有数据库：如果表已存在但缺 parent_task_id 列，则补列（modify 重审链路）
+  try {
+    db.exec(`ALTER TABLE platform_review_tasks ADD COLUMN parent_task_id TEXT`);
+  } catch (_) { /* 列已存在，忽略 */ }
+
+  // 修改日志表（modify 决策时记录 AI 原判断与人工修正对照）
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_modification_logs (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    review_task_id TEXT NOT NULL,
+    modified_fields_json TEXT NOT NULL,
+    modify_reason TEXT,
+    modified_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
   )`);
 
   // 已发布的接口资产（审核通过）
@@ -482,6 +527,30 @@ function scopedAssets(req) {
   return db.prepare(sql).all(...projectIds);
 }
 
+function scopedBuilderRequests(req) {
+  const cid = customerScope(req);
+  const sql = `SELECT r.*, c.name AS customer_name, p.name AS project_name, u.display_name AS created_by_name
+    FROM platform_builder_requests r
+    LEFT JOIN platform_customers c ON c.id = r.customer_id
+    LEFT JOIN platform_projects p ON p.id = r.project_id
+    LEFT JOIN platform_users u ON u.id = r.created_by_user_id` +
+    (cid ? ` WHERE r.customer_id = ?` : ``) +
+    ` ORDER BY COALESCE(r.updated_at, r.created_at) DESC, r.created_at DESC`;
+  const rows = cid ? db.prepare(sql).all(cid) : db.prepare(sql).all();
+  return rows.map(row => ({
+    ...row,
+    result: safeParse(row.result_json) || null
+  }));
+}
+
+function defaultProjectForCustomer(customerId) {
+  if (!customerId) return null;
+  return db.prepare(`SELECT p.*, c.name AS customer_name FROM platform_projects p
+    JOIN platform_customers c ON c.id = p.customer_id
+    WHERE p.customer_id = ?
+    ORDER BY p.deadline, p.id
+    LIMIT 1`).get(customerId) || null;
+}
 function callStats(assetIds) {
   if (!assetIds.length) return { total: 0, success: 0, error: 0 };
   const row = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success FROM platform_call_events WHERE asset_id IN (${assetIds.map(() => "?").join(",")})`).get(...assetIds);
@@ -1423,6 +1492,94 @@ app.put("/api/platform/projects/:id", requireAuth, requireAdmin, (req, res) => {
   res.json(scopedProjectById(req, id));
 });
 
+app.get("/api/platform/builder/requests", requireAuth, (req, res) => {
+  res.json(scopedBuilderRequests(req));
+});
+
+app.post("/api/platform/builder/requests", requireAuth, (req, res) => {
+  const customerId = req.user?.role === 'customer' ? req.user.customer_id : (req.body?.customer_id || null);
+  const { prompt, latest_prompt, result, rounds, project_id } = req.body || {};
+  if (!customerId) return res.status(400).json({ error: "customer_id required" });
+  if (!prompt || !result) return res.status(400).json({ error: "prompt and result required" });
+
+  const customer = db.prepare("SELECT * FROM platform_customers WHERE id = ?").get(customerId);
+  if (!customer) return res.status(404).json({ error: "customer not found" });
+
+  const fallbackProject = project_id
+    ? db.prepare("SELECT * FROM platform_projects WHERE id = ? AND customer_id = ?").get(project_id, customerId)
+    : defaultProjectForCustomer(customerId);
+  const id = makeId("br");
+  const now = new Date().toISOString().replace("T", " ").replace("Z", "");
+  db.prepare(`INSERT INTO platform_builder_requests
+    (id, customer_id, project_id, created_by_user_id, title, prompt, latest_prompt, result_json, rounds, status, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id,
+      customerId,
+      fallbackProject?.id || null,
+      req.user?.id || null,
+      result?.name || '目标 MCP 草案',
+      prompt,
+      latest_prompt || prompt,
+      JSON.stringify(result),
+      Number(rounds || 1),
+      'submitted',
+      now,
+      now
+    );
+
+  const created = scopedBuilderRequests({ user: req.user?.role === 'customer' ? req.user : { ...req.user, customer_id: null } }).find(item => item.id === id)
+    || scopedBuilderRequests({ user: { ...req.user, role: 'admin', customer_id: null } }).find(item => item.id === id);
+  res.status(201).json(created || {
+    id,
+    customer_id: customerId,
+    project_id: fallbackProject?.id || null,
+    customer_name: customer.name,
+    prompt,
+    latest_prompt: latest_prompt || prompt,
+    result,
+    rounds: Number(rounds || 1),
+    status: 'submitted',
+    created_at: now,
+    updated_at: now
+  });
+});
+
+app.post("/api/platform/builder/requests/:id/accept", requireAuth, requireAdmin, (req, res) => {
+  const request = db.prepare("SELECT * FROM platform_builder_requests WHERE id = ?").get(req.params.id);
+  if (!request) return res.status(404).json({ error: "builder request not found" });
+
+  const linkedSource = request.intake_source_id
+    ? db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(request.intake_source_id)
+    : null;
+  const project = request.project_id ? db.prepare("SELECT * FROM platform_projects WHERE id = ?").get(request.project_id) : defaultProjectForCustomer(request.customer_id);
+  if (!project) return res.status(400).json({ error: "customer project not found" });
+
+  const result = safeParse(request.result_json) || {};
+  const sourceName = `${result?.name || request.title || '目标 MCP 草案'} 需求单`;
+  let source = linkedSource;
+
+  if (!source) {
+    const sourceId = makeId('ds');
+    db.prepare(`INSERT INTO platform_data_sources
+      (id, project_id, name, type, auth_mode, status, recognition_status, sample_ddl, parsed_summary)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+        sourceId,
+        project.id,
+        sourceName,
+        'Requirement Brief',
+        'Natural language input',
+        'submitted',
+        'draft',
+        request.latest_prompt || request.prompt || '',
+        JSON.stringify({ source: 'builder-request', rounds: request.rounds || 1, tool_count: Array.isArray(result?.tools) ? result.tools.length : 0 })
+      );
+    source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(sourceId);
+  }
+
+  db.prepare("UPDATE platform_builder_requests SET project_id = ?, intake_source_id = ?, status = 'accepted', updated_at = datetime('now') WHERE id = ?").run(project.id, source.id, request.id);
+  const updatedRequest = scopedBuilderRequests({ user: { role: 'admin', customer_id: null } }).find(item => item.id === request.id);
+  res.json({ request: updatedRequest, source });
+});
 app.get("/api/platform/data-sources", requireAuth, (req, res) => {
   const ids = scopedProjects(req).map(p => p.id);
   if (!ids.length) return res.json([]);
@@ -2668,15 +2825,85 @@ app.get("/api/platform/governance/candidates", requireAuth, (req, res) => {
 });
 
 app.get("/api/platform/governance/reviews", requireAuth, (req, res) => {
-  res.json({ items: governanceRepo.listReviewTasks() });
+  const stage = req.query.stage; // 可选：candidate_review / tool_review / publish_acceptance
+  res.json({ items: governanceRepo.listReviewTasks(stage) });
+});
+
+// 获取三层审核阶段配置元数据
+app.get("/api/platform/governance/review-stages", requireAuth, (req, res) => {
+  res.json({ stages: getStageMetadata() });
+});
+
+// 获取某个候选资产在各阶段的审核状态汇总
+app.get("/api/platform/governance/candidates/:id/stage-summary", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+  res.json({
+    candidate_id: req.params.id,
+    stages: governanceRepo.getReviewStageSummary(req.params.id)
+  });
 });
 
 app.post("/api/platform/governance/reviews/:id/decision", requireAuth, (req, res) => {
-  const { decision, reason } = req.body || {};
+  const { decision, reason, modified_fields, review_notes } = req.body || {};
   if (!decision) return res.status(400).json({ error: "decision is required" });
-  const updated = governanceRepo.recordReviewDecision({ reviewId: req.params.id, decision, reason });
+  const reviewTask = governanceRepo.getReviewTask(req.params.id);
+  if (!reviewTask) return res.status(404).json({ error: "review task not found" });
+
+  // 使用 handleReviewDecision 统一处理决策逻辑
+  const handled = handleReviewDecision(reviewTask, decision, review_notes || reason);
+  const updated = governanceRepo.recordReviewDecision({ reviewId: req.params.id, decision, reason: review_notes || reason });
   if (!updated) return res.status(404).json({ error: "review task not found" });
-  res.json({ ok: true, review_id: req.params.id, decision, reason });
+
+  // 如果 decision = reject，检查是否需要升级
+  let escalationResult = null;
+  if (decision === 'reject' && handled.escalate) {
+    escalationResult = governanceRepo.escalateReviewTask({
+      candidateId: reviewTask.candidate_id,
+      nextStage: handled.escalate.review_stage,
+      nextReviewType: handled.escalate.review_type,
+      nextAssignee: handled.escalate.assignee_role,
+      reason: handled.escalate.review_reason
+    });
+  }
+
+  // 如果 decision = modify，记录修改内容并自动创建重审任务
+  let modificationResult = null;
+  if (decision === 'modify') {
+    const by = req.user?.display_name || req.user?.username || '';
+    // 1) 记录修改日志（AI 原判断与人工修正对照）
+    const modId = governanceRepo.recordModification({
+      reviewId: req.params.id,
+      candidateId: reviewTask.candidate_id,
+      modifiedFields: modified_fields || {},
+      modifyReason: reason || review_notes || '',
+      modifiedBy: by
+    });
+    // 2) 创建重审任务，回到当前阶段
+    const resubmitTask = governanceRepo.createResubmitTask({
+      candidateId: reviewTask.candidate_id,
+      stage: reviewTask.review_stage || 'candidate_review',
+      reviewType: 'resubmit_review',
+      reason: `修改后重审：${reason || review_notes || '原因未填写'}`,
+      assigneeRole: reviewTask.assignee_role || 'developer',
+      parentTaskId: req.params.id
+    });
+    modificationResult = {
+      modification_log_id: modId,
+      resubmit_task: resubmitTask,
+      next_action: 'needs_modification_and_resubmit'
+    };
+  }
+
+  res.json({
+    ok: true,
+    review_id: req.params.id,
+    decision,
+    reason: reason || review_notes,
+    status: handled.status,
+    escalation: escalationResult,
+    modification: modificationResult
+  });
 });
 
 app.get("/api/platform/governance/published-assets", requireAuth, (req, res) => {
@@ -2687,16 +2914,101 @@ app.get("/api/platform/governance/reuse-suggestions", requireAuth, (req, res) =>
   res.json({ items: governanceRepo.listReuseSuggestions() });
 });
 
+// 人工触发审核：管理员为某个 candidate 手动创建审核任务
+app.post("/api/platform/governance/candidates/:id/trigger-review", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  const validation = validateManualTrigger(req.body || {});
+  if (!validation.ok) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const task = governanceRepo.createManualReviewTask({
+    candidateId: candidate.id,
+    stage: validation.normalized.stage,
+    reviewType: validation.normalized.review_type,
+    reason: validation.normalized.reason,
+    assigneeRole: validation.normalized.assignee_role,
+    triggerSource: validation.normalized.trigger_source
+  });
+
+  res.json({ ok: true, task });
+});
+
+// 升级审核：管理员手动触发升级
+app.post("/api/platform/governance/candidates/:id/escalate", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  const { stage, reason, assignee_role } = req.body || {};
+  if (!reason) return res.status(400).json({ error: "reason is required" });
+
+  const task = governanceRepo.escalateReviewTask({
+    candidateId: candidate.id,
+    nextStage: stage || 'candidate_review',
+    nextReviewType: 'escalated_review',
+    nextAssignee: assignee_role || 'senior_reviewer',
+    reason
+  });
+
+  res.json({ ok: true, task });
+});
+
+// 检查阶段推进条件
+app.get("/api/platform/governance/candidates/:id/advancement-check", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  const summary = governanceRepo.getReviewStageSummary(candidate.id);
+  const stage = req.query.stage || 'candidate_review';
+  const check = checkStageAdvancement(summary, stage);
+  res.json({ candidate_id: candidate.id, stage, ...check });
+});
+
+// 检查候选资产发布前门禁状态
+app.get("/api/platform/governance/candidates/:id/publish-gate", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+
+  // 获取 stage summary 传给 checkPublishGate
+  const stageSummary = governanceRepo.getReviewStageSummary(candidate.id);
+  const gateResult = checkPublishGate(candidate, stageSummary);
+  const formattedResult = formatPublishGateResult(gateResult);
+  
+  res.json({
+    candidate_id: candidate.id,
+    can_publish: formattedResult.canPublish,
+    blocked_reason: formattedResult.blockedReason,
+    gate_result: gateResult,
+    failed_conditions: formattedResult.failedConditions,
+    next_steps: formattedResult.canPublish
+      ? ['所有门禁条件满足，可以进入正式发布']
+      : [
+          '请先完成上述阻断条件',
+          '完成后重新检查门禁状态',
+          '所有门禁通过后即可发布'
+        ]
+  });
+});
+
 app.post("/api/platform/governance/candidates/:id/publish", requireAuth, (req, res) => {
   const candidate = governanceRepo.getCandidate(req.params.id);
   if (!candidate) return res.status(404).json({ error: "candidate not found" });
 
-  // 防御性检查 1：若有未完成的审核任务，阻止发布
+  // 防御性检查 1：若有未完成的审核任务，阻止发布（三层所有阶段都要清零）
   const openTasks = governanceRepo.listOpenReviewTasksForCandidate(candidate.id);
   if (openTasks.length > 0) {
+    const byStage = {};
+    for (const t of openTasks) {
+      const s = t.review_stage || 'candidate_review';
+      if (!byStage[s]) byStage[s] = [];
+      byStage[s].push({ id: t.id, review_type: t.review_type, review_reason: t.review_reason });
+    }
     return res.status(409).json({
       error: "candidate has open review tasks",
-      open_tasks: openTasks.map(t => ({ id: t.id, review_type: t.review_type, review_reason: t.review_reason }))
+      open_task_count: openTasks.length,
+      open_tasks_by_stage: byStage
     });
   }
 
@@ -2786,6 +3098,19 @@ app.post("/api/platform/governance/candidates/:id/acceptance", requireAuth, (req
 // 列出发布前验收必填项（前端动态渲染 checklist 用）
 app.get("/api/platform/governance/acceptance-required-fields", requireAuth, (req, res) => {
   res.json({ items: getAcceptanceRequiredFields() });
+});
+
+// Tool 审核检查清单
+app.get("/api/platform/governance/tool-review-checklist", requireAuth, (req, res) => {
+  res.json({ items: getToolReviewChecklist() });
+});
+
+// Tool 审核评估
+app.get("/api/platform/governance/candidates/:id/tool-evaluation", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+  const evaluation = evaluateToolReview(candidate);
+  res.json({ candidate_id: candidate.id, evaluation });
 });
 
 // ============== 企业 MCP 打造工作台：价值指标 ==============

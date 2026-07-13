@@ -59,6 +59,19 @@ function resolveAccessiblePage(id) {
   return items[0]?.id || 'summary';
 }
 
+function getReviewPendingCount() {
+  const reviewState = typeof window !== 'undefined' ? window.__state : null;
+  const reviews = reviewState?.reviews;
+  if (Array.isArray(reviews)) {
+    return reviews.filter(item => item?.status === 'open').length;
+  }
+
+  const metrics = state.builderMetrics || {};
+  const manualScreen = Number(metrics.pending_manual_screen) || 0;
+  const pendingPublishes = Number(metrics.pending_publishes) || 0;
+  return Math.max(0, manualScreen + pendingPublishes);
+}
+
 export function renderNav() {
   const nav = $('nav');
   if (!nav || !state.user) return;
@@ -66,7 +79,11 @@ export function renderNav() {
     .map(item => {
       const icon = item.icon ? `<span class="nav-icon">${item.icon}</span>` : '';
       const desc = item.desc ? ` title="${text(item.desc)}"` : '';
-      return `<button type="button" class="nav-btn ${state.currentPage === item.id ? 'active' : ''}" data-page="${item.id}"${desc}>${icon}<span class="nav-label">${text(item.label)}</span></button>`;
+      const reviewCount = item.id === 'review' ? getReviewPendingCount() : 0;
+      const badge = reviewCount > 0
+        ? `<span class="nav-badge" aria-label="${reviewCount} 条待处理">${reviewCount}</span>`
+        : '';
+      return `<button type="button" class="nav-btn ${state.currentPage === item.id ? 'active' : ''}" data-page="${item.id}"${desc}>${icon}<span class="nav-label">${text(item.label)}</span>${badge}</button>`;
     })
     .join('');
   nav.querySelectorAll('.nav-btn').forEach(btn => {
@@ -209,12 +226,11 @@ function renderSummary() {
 // ============================================================
 function renderIntake() {
   const items = list(state.sources);
+  const builderRequests = list(state.builderRequests);
 
-  // 步骤条
   const stepBar = $('intakeStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(1);
 
-  // AI 引擎状态标识
   const aiBadge = $('aiStatusBadge');
   if (aiBadge) {
     const cfg = state.aiConfig || {};
@@ -227,6 +243,21 @@ function renderIntake() {
     }
   }
 
+  const builderPanel = $('builderRequestPanel');
+  if (builderPanel) builderPanel.style.display = isCustomerView() ? 'none' : '';
+
+  renderSimpleRows('builderRequestRows', builderRequests.map(item => {
+    const tools = list(item.result?.tools);
+    const toolPreview = tools.length
+      ? `${tools.slice(0, 3).map(tool => `<span class="badge info">${text(tool?.name || tool?.display_name || '-')}</span>`).join('')}${tools.length > 3 ? ` <span class="muted-line">+${tools.length - 3}</span>` : ''}`
+      : '<span class="muted-line">No Tools</span>';
+    const requestStatus = item.intake_source_id ? 'accepted' : (item.status || 'submitted');
+    const summary = item.result?.summary || item.latest_prompt || item.prompt || '-';
+    const actions = item.intake_source_id
+      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="triggerRecognition('${item.intake_source_id}')">开始识别</button></div>`
+      : `<button type="button" class="primary-btn small" onclick="acceptBuilderRequestIntoIntake('${item.id}')">转入资料接入</button>`;
+    return `<tr><td><strong>${text(item.customer_name || '-')}</strong><div class="muted-line">${text(item.project_name || '未分配项目')}</div></td><td><div style="max-width:360px"><strong>${text(item.result?.name || '目标 MCP')}</strong><p class="muted-line" style="margin:4px 0 0">${text(summary)}</p></div></td><td><div style="display:flex;flex-wrap:wrap;gap:6px">${toolPreview}</div></td><td>${badge(requestStatus)}</td><td>${text(item.created_at || '-')}</td><td>${actions}</td></tr>`;
+  }), '暂无客户提交的 AI 需求。', 6);
   // 填充企业筛选器
   const filter = $('intakeCustomerFilter');
   if (filter) {
@@ -296,9 +327,8 @@ function renderIntake() {
   tbody.innerHTML = html;
 
   // 更新批量操作栏
-  updateBatchBar();
+  if (typeof window !== 'undefined') window.updateBatchBar?.();
 
-  // 识别进度看板
   const total = items.length;
   const recognized = items.filter(item => (item.recognition_status || 'draft') === 'done').length;
   const draftCount = items.filter(item => (item.recognition_status || 'draft') === 'draft').length;
@@ -532,10 +562,6 @@ function renderTooling() {
                 <code style="font-size:11px;color:var(--primary)">${text(tool.name)}</code>
                 ${visChip}
                 <span style="font-size:10px;color:#a16207;background:#fef3c7;padding:1px 6px;border-radius:3px">AI 推荐</span>
-                <span style="margin-left:auto;display:flex;gap:4px">
-                  <button type="button" class="ghost-btn small" style="font-size:11px;padding:2px 8px" onclick="editTool('${asset.id}','${escapeJs(tool.name)}')">编辑</button>
-                  <button type="button" class="ghost-btn small" style="font-size:11px;padding:2px 8px;color:#dc2626" onclick="deleteTool('${asset.id}','${escapeJs(tool.name)}')">删除</button>
-                </span>
               </div>
               <p style="margin:3px 0 0;font-size:12px;color:#64748b">${text(tool.description || '')}</p>
               ${tool.sensitivity_reason ? `<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ${text(tool.sensitivity_reason)}</p>` : ''}
@@ -552,7 +578,6 @@ function renderTooling() {
         <p class="muted-line" style="margin:4px 0 0">脱敏字段：${maskingRules.length ? text(maskingRules.join(' / ')) : '无'}</p>
       </div>` : '<p class="muted-line" style="margin:8px 0 0">尚未配置安全规则</p>'}
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="ghost-btn small" onclick="addTool('${asset.id}')">+ 新增 Tool</button>
         <button type="button" class="ghost-btn small" onclick="jumpToAssets('${asset.id}')">查看资产详情</button>
         <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
       </div>
@@ -954,6 +979,145 @@ function renderDeliverables() {
 // ============================================================
 // 8. 治理与统计 — 网关策略 + 调用监控 + 审计日志
 // ============================================================
+function eventToolName(event) {
+  return event?.tool_name || event?.tool || event?.method || event?.operation || event?.asset_name || '-';
+}
+
+function classifyCallEvent(event) {
+  const raw = `${event?.status || ''} ${event?.error_code || ''} ${event?.status_code || ''} ${event?.response_summary || ''} ${event?.business_result || ''}`.toLowerCase();
+  if (raw.includes('401')) return '401';
+  if (raw.includes('403')) return '403';
+  if (raw.includes('400') || raw.includes('校验') || raw.includes('validation')) return '400';
+  if (raw.includes('timeout') || raw.includes('超时')) return 'timeout';
+  if (raw.includes('5xx') || raw.includes('500') || raw.includes('502') || raw.includes('503')) return '5xx';
+  return event?.status === 'success' ? 'success' : 'error';
+}
+
+function callTypeBadge(type) {
+  const labels = { '401': '401 授权失败', '403': '403 权限不足', '400': '字段校验失败', timeout: '响应超时', '5xx': '上游服务异常', error: '调用异常', success: '成功' };
+  const classes = { '401': 'danger', '403': 'danger', '400': 'warning', timeout: 'warning', '5xx': 'danger', error: 'danger', success: 'success' };
+  return `<span class="badge ${classes[type] || 'info'}">${labels[type] || type}</span>`;
+}
+
+function maskCallText(value) {
+  return String(value ?? '')
+    .replace(/(api[_-]?key|secret|token|password|authorization|身份证号|账号)(\s*[:=]\s*)(["'][^"']*["']|[^,\s}]+)/gi, '$1$2***')
+    .slice(0, 600);
+}
+function renderAuthorizationPage() {
+  if (isCustomerView()) return;
+  const filters = state.authorizationFilters || { status: 'all', environment: 'all', projectId: 'all' };
+  const allAccess = list(state.access);
+  const filtered = allAccess.filter(item => {
+    const status = item.status || (item.last_health_status === 'error' ? 'error' : 'pending');
+    return (filters.status === 'all' || status === filters.status)
+      && (filters.environment === 'all' || item.environment === filters.environment)
+      && (filters.projectId === 'all' || item.project_id === filters.projectId);
+  });
+  const blocked = allAccess.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error');
+  const enabled = allAccess.filter(item => item.status === 'enabled');
+  const expiring = allAccess.filter(item => item.credential_expires_at && new Date(item.credential_expires_at) < new Date(Date.now() + 30 * 86400000));
+
+  renderMetricSummary('authorizationSummary', [
+    { label: '待处理阻断', value: blocked.length, meta: '先处理红色或黄色接入项' },
+    { label: '已启用凭证', value: enabled.length, meta: '当前可用于调用' },
+    { label: '健康异常', value: allAccess.filter(item => item.last_health_status === 'error').length, meta: '建议查看最近检查' },
+    { label: '30 天内过期', value: expiring.length, meta: expiring.length ? '需要提前更新' : '暂无即将过期' }
+  ]);
+
+  const focus = state.authorizationFocusId ? allAccess.find(item => item.id === state.authorizationFocusId) : null;
+  const priority = focus || blocked[0] || allAccess[0];
+  const focusBanner = $('authorizationFocusBanner');
+  if (focusBanner) {
+    focusBanner.classList.toggle('hidden', !priority);
+    if (priority) {
+      const reason = priority.last_health_status === 'error' ? '最近健康检查失败' : priority.status === 'expired' ? '凭证已过期' : priority.status === 'enabled' ? '当前接入可用，可继续查看调用' : '当前凭证或授权状态需要处理';
+      focusBanner.innerHTML = `<div><strong>${focus ? '来自调用异常的关联接入项' : '现在优先处理'}</strong><span>${text(priority.customer_name || '-')} / ${text(priority.project_name || '-')} · ${text(priority.name || '-')} · ${reason}</span></div><div class="row-actions"><button type="button" class="primary-btn small" onclick="editAccessConfig('${escapeJs(priority.id)}')">去处理</button><button type="button" class="ghost-btn small" onclick="navigateToPage('monitoring')">查看调用异常</button></div>`;
+    }
+  }
+
+  const filterNode = $('authorizationFilters');
+  if (filterNode) {
+    const projectOptions = list(state.projects).map(project => `<option value="${escapeJs(project.id)}" ${filters.projectId === project.id ? 'selected' : ''}>${text(project.name || project.id || '-')}</option>`).join('');
+    filterNode.innerHTML = `<div class="filter-summary"><span>当前显示 ${filtered.length} / ${allAccess.length} 个接入项</span><div class="filter-row"><select onchange="setAuthorizationFilter('status', this.value)"><option value="all">全部状态</option><option value="enabled" ${filters.status === 'enabled' ? 'selected' : ''}>可用</option><option value="error" ${filters.status === 'error' ? 'selected' : ''}>健康异常</option><option value="disabled" ${filters.status === 'disabled' ? 'selected' : ''}>停用</option><option value="revoked" ${filters.status === 'revoked' ? 'selected' : ''}>已撤销</option><option value="expired" ${filters.status === 'expired' ? 'selected' : ''}>已过期</option></select><select onchange="setAuthorizationFilter('environment', this.value)"><option value="all">全部环境</option><option value="sandbox" ${filters.environment === 'sandbox' ? 'selected' : ''}>沙箱</option><option value="production" ${filters.environment === 'production' ? 'selected' : ''}>生产</option></select><select onchange="setAuthorizationFilter('projectId', this.value)"><option value="all">全部项目</option>${projectOptions}</select></div></div>`;
+  }
+
+  renderSimpleRows('authorizationRows', filtered.map(item => {
+    const status = item.status || (item.last_health_status === 'error' ? 'error' : 'pending');
+    const health = item.last_health_status === 'error' ? callTypeBadge('error') : item.last_health_status || '未检查';
+    const keyPreview = item.api_key_preview || (item.api_key ? `${String(item.api_key).slice(0, 6)}***` : '未配置');
+    return `<tr data-access-id="${escapeJs(item.id)}"><td><strong>${text(item.name || '-')}</strong><div class="muted-line">${text(item.type || '接入配置')} · ${text(keyPreview)}</div></td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.project_id || '-')}</div></td><td>${text(item.environment || '-')}</td><td class="cell-truncate" title="${escapeJs(item.scope || item.description || '')}">${text(item.scope || item.description || '未配置')}</td><td>${health}</td><td>${badge(status)}</td><td>${text(item.credential_expires_at || item.expires_at || '永不过期')}</td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="runAuthorizationTest('${escapeJs(item.id)}')">测试</button><button type="button" class="ghost-btn small" onclick="editAccessConfig('${escapeJs(item.id)}')">查看</button></div></td></tr>`;
+  }), '暂无接入项。请先在项目中配置测试环境凭证。', 8);
+
+  const testSelect = $('authorizationTestConfig');
+  const testButton = $('authorizationTestBtn');
+  if (testSelect) {
+    const current = testSelect.value;
+    testSelect.innerHTML = `<option value="">- 请选择接入项 -</option>${allAccess.map(item => `<option value="${escapeJs(item.id)}" ${current === item.id ? 'selected' : ''}>${text(item.customer_name || '-')} / ${text(item.name || '-')}</option>`).join('')}`;
+    testSelect.onchange = () => { if (testButton) testButton.disabled = !testSelect.value; };
+    if (state.authorizationFocusId && allAccess.some(item => item.id === state.authorizationFocusId)) testSelect.value = state.authorizationFocusId;
+    if (testButton) testButton.disabled = !testSelect.value;
+  }
+
+  renderSimpleRows('authorizationHealthRows', list(state.accessHealth).slice(0, 10).map(item => `<tr><td>${text(item.last_health_check_at || '-')}</td><td>${text(item.name || item.id || '-')}</td><td>${item.last_health_status === 'error' ? callTypeBadge('error') : badge(item.last_health_status || 'pending')}</td><td>${text(item.last_health_detail?.latency_ms ?? '-')} ms</td><td>${text(item.last_health_detail?.status_code ?? '-')}</td><td><code>${text(item.last_health_detail?.trace_id || '-')}</code></td></tr>`), '暂无健康检查记录。选择接入项后执行一次验证。', 6);
+  if (state.authorizationFocusId && typeof document !== 'undefined') {
+    const row = document.querySelector(`#authorizationRows tr[data-access-id="${escapeJs(state.authorizationFocusId)}"]`);
+    row?.classList.add('focus-row');
+    row?.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function renderMonitoringPage() {
+  if (isCustomerView()) return;
+  const filters = state.monitoringFilters || { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h' };
+  const events = list(state.events).map(item => {
+    let inputTokens = Number(item.input_tokens) || 0;
+    let outputTokens = Number(item.output_tokens) || 0;
+    if (!inputTokens && !outputTokens) {
+      try { const result = JSON.parse(item.business_result || '{}'); inputTokens = Number(result.input_tokens) || 0; outputTokens = Number(result.output_tokens) || 0; } catch {}
+    }
+    return { ...item, _input: inputTokens, _output: outputTokens, _total: inputTokens + outputTokens, _type: classifyCallEvent(item), _tool: eventToolName(item) };
+  });
+  const cutoff = filters.timeRange === '7d' ? Date.now() - 7 * 86400000 : filters.timeRange === '24h' ? Date.now() - 86400000 : 0;
+  const filtered = events.filter(item => {
+    const created = new Date(item.created_at).getTime();
+    const inRange = !created || !cutoff || created >= cutoff;
+    return inRange && (filters.status === 'all' || item._type === filters.status) && (filters.assetId === 'all' || item.asset_id === filters.assetId) && (filters.toolName === 'all' || item._tool === filters.toolName);
+  });
+  const errors = filtered.filter(item => item._type !== 'success');
+  const successes = filtered.filter(item => item._type === 'success');
+  const avgLatency = filtered.length ? Math.round(filtered.reduce((sum, item) => sum + Number(item.latency_ms || 0), 0) / filtered.length) : 0;
+  renderMetricSummary('monitoringSummary', [
+    { label: '总调用量', value: filtered.length, meta: filters.timeRange === 'all' ? '全部记录' : '最近 ' + (filters.timeRange === '7d' ? '7 天' : '24 小时') },
+    { label: '成功率', value: (filtered.length ? Math.round(successes.length / filtered.length * 100) : 0) + '%', meta: '按调用事件统计' },
+    { label: '异常调用', value: errors.length, meta: errors.length ? '先处理第一条异常' : '当前没有异常' },
+    { label: '平均耗时', value: avgLatency + ' ms', meta: avgLatency > 300 ? '偏慢，建议检查上游' : '当前正常' }
+  ]);
+
+  const filterNode = $('monitoringFilters');
+  if (filterNode) {
+    const assetOptions = [...new Map(list(state.assets).map(asset => [asset.id, asset])).values()].map(asset => `<option value="${escapeJs(asset.id)}" ${filters.assetId === asset.id ? 'selected' : ''}>${text(asset.name || asset.id || '-')}</option>`).join('');
+    const toolOptions = [...new Set(events.map(item => item._tool).filter(Boolean))].map(tool => `<option value="${escapeJs(tool)}" ${filters.toolName === tool ? 'selected' : ''}>${text(tool)}</option>`).join('');
+    filterNode.innerHTML = `<div class="filter-summary"><span>显示 ${filtered.length} 条调用，异常优先</span><div class="filter-row"><select onchange="setMonitoringFilter('status', this.value)"><option value="all">全部类型</option><option value="401" ${filters.status === '401' ? 'selected' : ''}>401 授权失败</option><option value="403" ${filters.status === '403' ? 'selected' : ''}>403 权限不足</option><option value="400" ${filters.status === '400' ? 'selected' : ''}>字段校验失败</option><option value="timeout" ${filters.status === 'timeout' ? 'selected' : ''}>响应超时</option><option value="5xx" ${filters.status === '5xx' ? 'selected' : ''}>上游异常</option><option value="success" ${filters.status === 'success' ? 'selected' : ''}>成功</option></select><select onchange="setMonitoringFilter('assetId', this.value)"><option value="all">全部 MCP</option>${assetOptions}</select><select onchange="setMonitoringFilter('toolName', this.value)"><option value="all">全部 Tool</option>${toolOptions}</select><select onchange="setMonitoringFilter('timeRange', this.value)"><option value="24h" ${filters.timeRange === '24h' ? 'selected' : ''}>最近 24 小时</option><option value="7d" ${filters.timeRange === '7d' ? 'selected' : ''}>最近 7 天</option><option value="all" ${filters.timeRange === 'all' ? 'selected' : ''}>全部记录</option></select></div></div>`;
+  }
+
+  const focus = state.monitoringFocusId ? events.find(item => (item.id || item.trace_id) === state.monitoringFocusId) : null;
+  const focusBanner = $('monitoringFocusBanner');
+  if (focusBanner) {
+    focusBanner.classList.toggle('hidden', !focus);
+    if (focus) focusBanner.innerHTML = `<div><strong>当前聚焦异常</strong><span>${text(focus._tool)} · ${callTypeBadge(focus._type)} · Trace ID ${text(focus.trace_id || '-')}</span></div><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(focus.id || focus.trace_id)}')">打开诊断</button>`;
+  }
+
+  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('authorization',{ accessId: '${escapeJs(item.access_id || '')}' })">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
+  renderSimpleRows('monitoringRows', errors.map(rowHtml), '暂无异常调用。可以先到“测试发布”执行一次沙箱测试。', 9);
+  renderSimpleRows('monitoringSuccessRows', successes.slice(0, 5).map(item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.response_summary || item.business_result || '-')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">详情</button></td></tr>`), '暂无成功调用记录。先完成一次沙箱测试后，这里会显示正常调用。', 7);
+  if (state.monitoringFocusId && typeof document !== 'undefined') {
+    const row = document.querySelector(`#monitoringRows tr[data-event-id="${escapeJs(state.monitoringFocusId)}"]`) || document.querySelector(`#monitoringSuccessRows tr[data-event-id="${escapeJs(state.monitoringFocusId)}"]`);
+    row?.classList.add('focus-row');
+    row?.scrollIntoView({ block: 'nearest' });
+  }
+}
+
 function renderAccess() {
   renderMetricSummary('accessOverview', [
     { label: '已交付接入项', value: list(state.access).length, meta: '客户可用的接入条目' },
@@ -1700,28 +1864,41 @@ window.saveBuilderDraft = function saveBuilderDraft() {
   renderAll();
 };
 
-window.handoffBuilderRequest = function handoffBuilderRequest() {
-  window.submitBuilderRequest('accepted');
-  showToast('已将需求草案标记为待人工确认。', 'success');
+window.handoffBuilderRequest = async function handoffBuilderRequest() {
+  const created = await window.submitBuilderRequest('accepted');
+  if (created) showToast('已转交管理员继续处理。', 'success');
 };
 
-window.submitBuilderRequest = function submitBuilderRequest(historyStatus = 'submitted') {
+window.submitBuilderRequest = async function submitBuilderRequest(historyStatus = 'submitted') {
   ensureCustomerBuilderState();
   const result = state.customerBuilderResult || buildCustomerBuilderResult(state.customerBuilderDraft);
   const historyEntry = upsertCustomerBuilderHistory(historyStatus);
-  const request = {
-    id: `builder_${Date.now()}`,
-    prompt: state.customerBuilderDraft,
+  const userRoundCount = list(state.customerBuilderMessages).filter(item => item.role === 'user').length || 1;
+  const payload = {
+    prompt: historyEntry?.prompt || state.customerBuilderDraft || '',
+    latest_prompt: historyEntry?.latest_prompt || state.customerBuilderDraft || '',
     result,
-    status: 'submitted',
-    created_at: new Date().toISOString(),
-    customer_name: state.user?.display_name || state.user?.username || '客户'
+    rounds: historyEntry?.rounds || userRoundCount
   };
-  state.builderRequests = [request, ...list(state.builderRequests)];
-  persistBuilderRequests();
+
   if (historyEntry) state.customerBuilderSelectedHistoryId = historyEntry.id;
-  showToast('需求已提交给 MCP 承接流程。', 'success');
-  renderAll();
+
+  try {
+    if (typeof window.syncBuilderRequestToServer !== 'function') {
+      throw new Error('提交通道未初始化');
+    }
+    const created = await window.syncBuilderRequestToServer(payload);
+    if (!created?.id) throw new Error('管理员端未收到该需求');
+    state.builderRequests = [created, ...list(state.builderRequests).filter(item => item.id !== created.id)];
+    persistBuilderRequests();
+    showToast('需求已提交，管理员端已收到。', 'success');
+    renderAll();
+    return created;
+  } catch (error) {
+    showToast(error?.message || '提交失败，管理员端未收到该需求。', 'error');
+    renderAll();
+    return null;
+  }
 };
 
 window.adminUpdateBuilderRequestStatus = async function adminUpdateBuilderRequestStatus(id, status) {
@@ -1883,6 +2060,8 @@ export function renderAll() {
   renderAssets();
   renderPublish();
   renderDeliverables();
+  renderAuthorizationPage();
+  renderMonitoringPage();
   renderAccess();
   renderGateway();
   renderPolicyChanges();
@@ -1904,6 +2083,7 @@ export function renderAll() {
   renderKnowledgeDrawer();
   renderAccessGuideOverlay();
   renderBuilderValueBoard();
+  renderReviewWorkbench();
   switchPage(state.currentPage);
 }
 
@@ -1975,3 +2155,270 @@ export function renderBuilderValueBoard() {
     </div>
   `;
 }
+
+// ============================================================
+// 分层审核工作台渲染（引导式）
+// ============================================================
+const REVIEW_STAGE_LABELS = {
+  candidate_review: '候选资产审核',
+  tool_review: 'Tool 审核',
+  publish_acceptance: '发布验收'
+};
+
+const REVIEW_STAGE_GUIDE = {
+  candidate_review: { action: '先审 AI 识别出来的候选是否可信', next: '通过后进入 Tool 审核' },
+  tool_review: { action: '再审 Tool 是否应该这样组织', next: '通过后进入 MCP 封装' },
+  publish_acceptance: { action: '最后验收 MCP 是否真的可以发布', next: '通过后正式上线' }
+};
+
+let currentReviewStage = 'candidate_review';
+
+// 优先级排序：双人审核 > 高风险 > 发布阻断 > 普通
+function sortReviewsByPriority(reviews) {
+  const candidates = window.__state?.candidates || [];
+  const priorityMap = {};
+  for (const c of candidates) priorityMap[c.id] = c;
+
+  return [...reviews].sort((a, b) => {
+    // open 状态优先
+    if (a.status === 'open' && b.status !== 'open') return -1;
+    if (a.status !== 'open' && b.status === 'open') return 1;
+    // 双人审核优先
+    const aDual = a.review_type === 'dual_review' ? 1 : 0;
+    const bDual = b.review_type === 'dual_review' ? 1 : 0;
+    if (aDual !== bDual) return bDual - aDual;
+    // 高风险候选优先
+    const ca = priorityMap[a.candidate_id];
+    const cb = priorityMap[b.candidate_id];
+    const aRisk = ca?.risk_level === 'high' ? 1 : ca?.risk_level === 'medium' ? 0.5 : 0;
+    const bRisk = cb?.risk_level === 'high' ? 1 : cb?.risk_level === 'medium' ? 0.5 : 0;
+    if (aRisk !== bRisk) return bRisk - aRisk;
+    // 发布验收阶段优先
+    if (a.review_stage === 'publish_acceptance' && b.review_stage !== 'publish_acceptance') return -1;
+    if (a.review_stage !== 'publish_acceptance' && b.review_stage === 'publish_acceptance') return 1;
+    return 0;
+  });
+}
+
+export function renderReviewWorkbench() {
+  const allReviews = window.__state?.reviews || [];
+  const reviews = sortReviewsByPriority(
+    allReviews.filter(r => !currentReviewStage || r.review_stage === currentReviewStage)
+  );
+
+  // ===== 区块1：今天要处理什么（引导提示） =====
+  const guideEl = document.getElementById('reviewTodayGuide');
+  if (guideEl) {
+    const openReviews = allReviews.filter(r => r.status === 'open');
+    const dualCount = openReviews.filter(r => r.review_type === 'dual_review').length;
+    const highRiskCandidates = (window.__state?.candidates || []).filter(c => c.risk_level === 'high').length;
+    const stageInfo = REVIEW_STAGE_GUIDE[currentReviewStage];
+
+    if (openReviews.length === 0) {
+      guideEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--success-bg, #e8f5e9);border-radius:8px;border-left:3px solid #4caf50">
+          <span style="font-size:20px">&#10003;</span>
+          <div>
+            <strong style="font-size:13px">当前没有待处理任务</strong>
+            <p class="muted-line" style="margin:2px 0 0;font-size:12px">所有审核任务已完成。${stageInfo ? stageInfo.next : ''}。</p>
+          </div>
+        </div>`;
+    } else {
+      const urgentItems = [];
+      if (dualCount > 0) urgentItems.push(`<strong style="color:var(--danger)">${dualCount} 条双人审核</strong>（涉及高风险变更，需优先处理）`);
+      if (highRiskCandidates > 0) urgentItems.push(`<strong>${highRiskCandidates} 个高风险候选</strong>需要关注`);
+      const urgentHtml = urgentItems.length > 0
+        ? `<div style="margin-top:6px">${urgentItems.join('，')}</div>`
+        : '';
+
+      guideEl.innerHTML = `
+        <div style="padding:14px 16px;background:var(--warning-bg, #fff3e0);border-radius:8px;border-left:3px solid #ff9800">
+          <strong style="font-size:13px">${stageInfo?.action || '审核任务'}</strong>
+          <p class="muted-line" style="margin:4px 0 0;font-size:12px">
+            当前有 <strong>${openReviews.length}</strong> 条待处理任务。${stageInfo?.next || ''}
+          </p>
+          ${urgentHtml}
+        </div>`;
+    }
+  }
+
+  // ===== 区块2：阶段统计 + 队列 =====
+  const stageCounts = {};
+  for (const s of ['candidate_review', 'tool_review', 'publish_acceptance']) {
+    const items = allReviews.filter(r => r.review_stage === s);
+    stageCounts[s] = { total: items.length, open: items.filter(r => r.status === 'open').length };
+  }
+
+  const summaryEl = document.getElementById('reviewStageSummary');
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      ${Object.entries(stageCounts).map(([stage, counts]) => `
+        <div class="metric-card ${currentReviewStage === stage ? 'active' : ''}" style="${currentReviewStage === stage ? 'border-color:var(--accent)' : ''}cursor:pointer" onclick="switchReviewStageTab('${stage}')">
+          <span class="metric-label">${REVIEW_STAGE_LABELS[stage] || stage}</span>
+          <strong>${counts.open}</strong>
+          <span class="muted-line">${counts.open} 待处理 / ${counts.total} 总计</span>
+        </div>
+      `).join('')}
+    `;
+  }
+
+  // 审核任务列表（按优先级排序）
+  const tbody = document.getElementById('reviewTaskRows');
+  if (tbody) {
+    if (!reviews.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px" class="muted-line">当前阶段暂无审核任务</td></tr>';
+    } else {
+      tbody.innerHTML = reviews.map(r => {
+        const candidate = (window.__state?.candidates || []).find(c => c.id === r.candidate_id);
+        const candidateName = candidate?.name || r.candidate_id || '-';
+        const riskBadge = candidate?.risk_level === 'high'
+          ? '<span class="tag" style="background:var(--danger);color:#fff">高风险</span>'
+          : candidate?.risk_level === 'medium'
+            ? '<span class="tag" style="background:var(--warning);color:#fff">中风险</span>'
+            : '';
+        const dualBadge = r.review_type === 'dual_review'
+          ? '<span class="tag" style="background:#6c5ce7;color:#fff">双人</span>'
+          : '';
+        const statusBadge = r.status === 'open'
+          ? '<span class="status-badge pending">待审核</span>'
+          : r.decision === 'approve'
+            ? '<span class="status-badge approved">已通过</span>'
+            : r.decision === 'reject'
+              ? '<span class="status-badge rejected">已拒绝</span>'
+              : '<span class="status-badge">已处理</span>';
+        const actions = r.status === 'open'
+          ? `<button class="primary-btn tiny" onclick="reviewDecision('${r.id}','approve')">通过</button>
+             <button class="ghost-btn tiny" onclick="reviewDecision('${r.id}','modify')">修改</button>
+             <button class="danger-btn tiny" onclick="reviewDecision('${r.id}','reject')">拒绝</button>`
+          : '<span class="muted-line">-</span>';
+        return `<tr>
+          <td>${candidateName} ${riskBadge} ${dualBadge}</td>
+          <td><span class="tag">${REVIEW_STAGE_LABELS[r.review_stage] || r.review_stage || '候选审核'}</span></td>
+          <td>${r.review_type || '-'}</td>
+          <td title="${(r.review_reason || '').replace(/"/g, '&quot;')}">${(r.review_reason || '').slice(0, 60)}${(r.review_reason || '').length > 60 ? '...' : ''}</td>
+          <td>${r.assignee_role || '-'}</td>
+          <td>${statusBadge}</td>
+          <td><div style="display:flex;gap:4px">${actions}</div></td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  // 发布门禁看板
+  renderPublishGateBoard();
+}
+
+function renderPublishGateBoard() {
+  const candidates = window.__state?.candidates || [];
+  const reviews = window.__state?.reviews || [];
+  const board = document.getElementById('publishGateBoard');
+  if (!board) return;
+
+  if (!candidates.length) {
+    board.innerHTML = '<p class="muted-line" style="grid-column:1/-1">暂无候选资产</p>';
+    return;
+  }
+
+  board.innerHTML = candidates.slice(0, 12).map(c => {
+    const tasks = reviews.filter(r => r.candidate_id === c.id);
+    const openCount = tasks.filter(t => t.status === 'open').length;
+    const rejectedCount = tasks.filter(t => t.decision === 'reject').length;
+
+    const gate1Class = openCount === 0 ? 'pass' : 'block';
+    const gate1Text = openCount === 0 ? '通过' : `${openCount} 个待处理`;
+
+    const gate2Class = c.manual_screen_decision === 'reject' ? 'block' : c.manual_screen_decision === 'approve' ? 'pass' : 'pending';
+    const gate2Text = c.manual_screen_decision === 'reject' ? '已驳回' : c.manual_screen_decision === 'approve' ? '已通过' : '待初筛';
+
+    const gate3Class = c.acceptance_passed ? 'pass' : 'pending';
+    const gate3Text = c.acceptance_passed ? '已验收' : '未验收';
+
+    const allPass = openCount === 0 && c.manual_screen_decision !== 'reject' && c.acceptance_passed;
+    const overallClass = allPass ? 'gate-pass' : 'gate-block';
+
+    return `<div class="metric-card ${overallClass}">
+      <span class="metric-label">${c.name || c.id}</span>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">
+        <span class="gate-item gate-${gate1Class}">门1 开放任务：${gate1Text}</span>
+        <span class="gate-item gate-${gate2Class}">门2 人工初筛：${gate2Text}</span>
+        <span class="gate-item gate-${gate3Class}">门3 发布验收：${gate3Text}</span>
+      </div>
+      ${rejectedCount > 0 ? `<span class="muted-line" style="color:var(--danger)">有 ${rejectedCount} 个审核被拒绝</span>` : ''}
+      ${allPass ? '<button class="primary-btn tiny" style="margin-top:6px" onclick="publishCandidate(\'' + c.id + '\')">发布</button>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// 切换审核阶段 Tab
+window.switchReviewStageTab = function(stage) {
+  currentReviewStage = stage;
+  document.querySelectorAll('#reviewStageTabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.stage === stage);
+  });
+  renderReviewWorkbench();
+};
+
+// 审核决策
+window.reviewDecision = async function(reviewId, decision) {
+  const decisionLabels = { approve: '通过', reject: '拒绝', modify: '修改后重审' };
+  const guideText = {
+    approve: '通过后，这条任务将关闭，候选资产进入下一阶段审核。',
+    reject: '拒绝后，系统会根据审核阶段自动升级或退回。',
+    modify: '修改后，任务会标记为"已修改"，需要重新提交审核。'
+  };
+
+  let reason = '';
+  if (decision === 'reject') {
+    reason = prompt('请输入拒绝原因（必填）：\n' + guideText.reject);
+    if (!reason) return;
+  } else if (decision === 'modify') {
+    reason = prompt('请输入修改说明：\n' + guideText.modify);
+    if (!reason) return;
+  } else if (decision === 'approve') {
+    if (!confirm('确认通过？\n' + guideText.approve)) return;
+  }
+
+  try {
+    const resp = await fetch('/api/platform/governance/reviews/' + reviewId + '/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...window.authHeader() },
+      body: JSON.stringify({ decision, reason })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      if (data.escalation) {
+        alert('已处理。系统自动升级到 senior_reviewer。');
+      } else if (data.modification) {
+        alert('修改已记录。系统已自动创建重审任务，当前任务标记为"已修改"。\n下一步：请根据修改说明调整候选内容，然后提交重审。');
+      } else {
+        alert(decisionLabels[decision] + '操作已完成。');
+      }
+      await window.refreshData();
+    } else {
+      alert(data.error || '操作失败');
+    }
+  } catch (e) {
+    alert('网络错误：' + e.message);
+  }
+};
+
+// 发布候选资产
+window.publishCandidate = async function(candidateId) {
+  if (!confirm('确认发布该候选资产？')) return;
+  try {
+    const resp = await fetch('/api/platform/governance/candidates/' + candidateId + '/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...window.authHeader() },
+      body: JSON.stringify({})
+    });
+    const data = await resp.json();
+    if (data.published) {
+      alert('发布成功！');
+      await window.refreshData();
+    } else {
+      alert('发布被阻断：' + (data.error || '未知原因'));
+    }
+  } catch (e) {
+    alert('网络错误：' + e.message);
+  }
+};

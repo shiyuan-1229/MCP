@@ -36,10 +36,13 @@ async function verifyNavItems() {
       { id: 'intake', label: '资料接入' },
       { id: 'recognition', label: '接口识别' },
       { id: 'tooling', label: 'Tool 映射' },
+      { id: 'review', label: '分层审核' },
       { id: 'assets', label: 'MCP 资产' },
       { id: 'publish', label: '测试发布' },
+      { id: 'authorization', label: '凭证与授权' },
+      { id: 'monitoring', label: '调用监控' },
       { id: 'delivery', label: '交付管理' },
-      { id: 'governance', label: '治理与统计' },
+      { id: 'governance', label: '治理统计' },
       { id: 'settings', label: '设置' }
     ]
   );
@@ -48,7 +51,7 @@ async function verifyNavItems() {
 async function verifyPageShells() {
   const html = await readFile(indexFilePath, 'utf8');
 
-  for (const id of ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'governance', 'settings']) {
+  for (const id of ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'authorization', 'monitoring', 'governance', 'review']) {
     assert.match(html, new RegExp(`section id="${id}"`, 'u'));
   }
 
@@ -82,10 +85,19 @@ async function verifyRendererSplit() {
   assert.doesNotMatch(source, /renderFactory\(\);/u);
 }
 
+async function verifyReviewNavBadge() {
+  const source = await readFile(renderersFilePath, 'utf8');
+
+  assert.match(source, /function getReviewPendingCount\(\)/u);
+  assert.match(source, /nav-badge/u);
+  assert.match(source, /item\.id === 'review'/u);
+}
+
 await verifyNavItems();
 await verifyPageShells();
 await verifyKnowledgeJumps();
 await verifyRendererSplit();
+await verifyReviewNavBadge();
 
 console.log('admin navigation checks passed');
 

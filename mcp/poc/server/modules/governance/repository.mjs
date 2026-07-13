@@ -4,6 +4,8 @@
 import { REUSE_CATEGORY_TEXT } from './reuse-service.mjs';
 import { canRecordRetro, summarizeRetro } from './retro-service.mjs';
 import { detectBoundaryConflict } from './boundary-detector.mjs';
+import { REVIEW_STAGES } from './review-stages.mjs';
+import crypto from 'node:crypto';
 
 function safeParseJson(value) {
   if (Array.isArray(value)) return value;
@@ -49,7 +51,10 @@ export function createGovernanceRepository(db) {
     },
 
     // ---- review tasks ----
-    listReviewTasks() {
+    listReviewTasks(stage) {
+      if (stage) {
+        return db.prepare("SELECT * FROM platform_review_tasks WHERE review_stage = ? ORDER BY created_at DESC").all(stage);
+      }
       return db.prepare("SELECT * FROM platform_review_tasks ORDER BY created_at DESC").all();
     },
     getReviewTask(id) {
@@ -58,19 +63,109 @@ export function createGovernanceRepository(db) {
     saveReviewTasks(tasks) {
       if (!tasks.length) return;
       const stmt = db.prepare(`INSERT INTO platform_review_tasks
-        (id, candidate_id, review_type, review_reason, assignee_role, status)
-        VALUES (@id, @candidate_id, @review_type, @review_reason, @assignee_role, 'open')`);
-      const tx = db.transaction(items => items.forEach(item => stmt.run(item)));
+        (id, candidate_id, review_stage, review_type, review_reason, assignee_role, status)
+        VALUES (@id, @candidate_id, @review_stage, @review_type, @review_reason, @assignee_role, 'open')`);
+      const tx = db.transaction(items => items.forEach(item => {
+        stmt.run({
+          ...item,
+          review_stage: item.review_stage || REVIEW_STAGES.CANDIDATE
+        });
+      }));
       tx(tasks);
     },
     recordReviewDecision({ reviewId, decision, reason }) {
+      // modify 决策特殊处理：status 设为 'modified' 而非 'resolved'
+      const status = decision === 'modify' ? 'modified' : 'resolved';
       const result = db.prepare(`UPDATE platform_review_tasks
-        SET status = 'resolved', decision = ?, decision_reason = ?, resolved_at = datetime('now')
-        WHERE id = ?`).run(decision, reason, reviewId);
+        SET status = ?, decision = ?, decision_reason = ?, resolved_at = datetime('now')
+        WHERE id = ?`).run(status, decision, reason, reviewId);
       return result.changes > 0;
     },
-    listOpenReviewTasksForCandidate(candidateId) {
+    // 记录修改内容（modify 决策时调用），保留 AI 原判断与人工修正对照
+    recordModification({ reviewId, candidateId, modifiedFields, modifyReason, modifiedBy }) {
+      const id = `mod_${crypto.randomBytes(5).toString('hex')}`;
+      db.prepare(`INSERT INTO platform_modification_logs
+        (id, candidate_id, review_task_id, modified_fields_json, modify_reason, modified_by)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        id, candidateId, reviewId,
+        JSON.stringify(modifiedFields || {}),
+        modifyReason || '', modifiedBy || ''
+      );
+      return id;
+    },
+    // 修改后重审：回到对应审核阶段创建新的 open 任务
+    createResubmitTask({ candidateId, stage, reviewType, reason, assigneeRole, parentTaskId }) {
+      const id = `rev_${crypto.randomBytes(5).toString('hex')}`;
+      db.prepare(`INSERT INTO platform_review_tasks
+        (id, candidate_id, review_stage, review_type, review_reason, assignee_role, status, parent_task_id)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`).run(
+        id, candidateId, stage,
+        reviewType || 'resubmit_review', reason,
+        assigneeRole || 'developer', parentTaskId || null
+      );
+      return db.prepare("SELECT * FROM platform_review_tasks WHERE id = ?").get(id);
+    },
+    // 手动创建审核任务（人工触发）
+    createManualReviewTask({ candidateId, stage, reviewType, reason, assigneeRole, triggerSource }) {
+      const id = `rev_${crypto.randomBytes(5).toString('hex')}`;
+      db.prepare(`INSERT INTO platform_review_tasks
+        (id, candidate_id, review_stage, review_type, review_reason, assignee_role, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'open')`).run(
+        id, candidateId, stage || REVIEW_STAGES.CANDIDATE,
+        reviewType || 'manual_review', reason,
+        assigneeRole || 'developer'
+      );
+      return db.prepare("SELECT * FROM platform_review_tasks WHERE id = ?").get(id);
+    },
+    // 升级审核：创建一个 escalated_review 任务
+    escalateReviewTask({ candidateId, nextStage, nextReviewType, nextAssignee, reason }) {
+      const id = `rev_${crypto.randomBytes(5).toString('hex')}`;
+      db.prepare(`INSERT INTO platform_review_tasks
+        (id, candidate_id, review_stage, review_type, review_reason, assignee_role, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'open')`).run(
+        id, candidateId, nextStage,
+        nextReviewType || 'escalated_review', reason,
+        nextAssignee || 'senior_reviewer'
+      );
+      return db.prepare("SELECT * FROM platform_review_tasks WHERE id = ?").get(id);
+    },
+    listOpenReviewTasksForCandidate(candidateId, stage) {
+      if (stage) {
+        return db.prepare("SELECT * FROM platform_review_tasks WHERE candidate_id = ? AND review_stage = ? AND status = 'open'").all(candidateId, stage);
+      }
       return db.prepare("SELECT * FROM platform_review_tasks WHERE candidate_id = ? AND status = 'open'").all(candidateId);
+    },
+    // 获取候选资产在各阶段的审核状态汇总
+    getReviewStageSummary(candidateId) {
+      const tasks = db.prepare("SELECT review_stage, status, decision FROM platform_review_tasks WHERE candidate_id = ?").all(candidateId);
+      const stages = {};
+      for (const t of tasks) {
+        if (!stages[t.review_stage]) {
+          stages[t.review_stage] = { total: 0, open: 0, resolved: 0, rejected: 0 };
+        }
+        stages[t.review_stage].total++;
+        if (t.status === 'open') stages[t.review_stage].open++;
+        if (t.status === 'resolved') {
+          stages[t.review_stage].resolved++;
+          if (t.decision === 'reject') stages[t.review_stage].rejected++;
+        }
+      }
+      return stages;
+    },
+
+    // 检查候选资产发布前门禁状态
+    checkCandidatePublishReadiness(candidateId) {
+      const candidate = this.getCandidate(candidateId);
+      if (!candidate) return { canPublish: false, blockedReason: 'candidate not found' };
+      
+      const gateResult = checkPublishGate(candidate);
+      const formattedResult = formatPublishGateResult(gateResult);
+      
+      return {
+        canPublish: formattedResult.canPublish,
+        blockedReason: formattedResult.blockedReason,
+        gateResult: gateResult
+      };
     },
 
     // ---- published assets ----
