@@ -1,6 +1,7 @@
 import { request } from './modules/api.js';
-import { state, navItems, customerNavItems, isCustomerView, getNavItems } from './modules/state.js';
+import { state, navItems, customerNavItems, isCustomerView, getNavItems, displayAssetName } from './modules/state.js';
 import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
+import { renderAll } from './modules/renderers.js';import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
 import { renderAll } from './modules/renderers.js';
 
 function list(value) { return Array.isArray(value) ? value : []; }
@@ -1856,10 +1857,20 @@ function showCapabilityPanel(result) {
   const badge = $('capModelBadge');
   if (badge && result.model) badge.textContent = `模型: ${result.model}`;
 
+  // 来源文件名
+  const sourceId = window._currentPreviewSourceId || '';
+  const source = (state.sources || []).find(s => s.id === sourceId);
+  const sourceName = source?.name || '';
+  const projectName = source?.project_name || source?.customer_name || '';
+
+  const titleEl = $('capPanelTitle');
+  if (titleEl && sourceName) titleEl.textContent = `🔍 能力预览 — ${sourceName}`;
+
   // 总结
   const summaryEl = $('capSummary');
   summaryEl.innerHTML = `
     <div style="font-size:14px;line-height:1.8">
+      ${sourceName ? `<p style="margin:0 0 4px"><strong>📂 来源：</strong>${escapeHtml(sourceName)}${projectName ? `（${escapeHtml(projectName)}）` : ''}</p>` : ''}
       <p style="margin:0 0 6px"><strong>扫描总结：</strong>${escapeHtml(result.summary || 'AI 已完成数据扫描')}</p>
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <span><strong style="color:var(--primary)">${caps.length}</strong> 个能力</span>
@@ -2256,6 +2267,248 @@ async function refreshDbSource(sourceId) {
   });
 }
 
+// AI 重组 MCP — 从 Tool 库勾选工具封装为新 MCP
+async function aiRecomposeMcp() {
+  const checked = Array.from(document.querySelectorAll('.tool-lib-check:checked')).map(cb => cb.value);
+  if (!checked.length) { showToast('请先在左侧 Tool 库勾选要封装的 Tool', 'warning'); return; }
+  const instruction = $('recomposeInstruction')?.value?.trim() || '';
+  const mcpName = $('recomposeMcpName')?.value?.trim() || '';
+  const statusEl = $('recomposeStatus');
+
+  // 找到第一个选中的 tool 所属的资产
+  const assets = list(state.assets);
+  const filter = $('assetsCustomerFilter')?.value || '';
+  const scoped = filter ? assets.filter(a => a.customer_id === filter) : assets;
+  let targetAsset = scoped.find(a => list(a.tools).some(t => typeof t === 'object' && checked.includes(t.name)));
+  if (!targetAsset) { showToast('未找到选中的 Tool 所属资产', 'error'); return; }
+
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '封装中...'; }
+  if (statusEl) statusEl.innerHTML = '<span style="color:#b46b06">⏳ 正在封装...</span>';
+
+  try {
+    const result = await api(`/api/platform/mcp-assets/${targetAsset.id}/recompose`, {
+      method: 'POST',
+      body: JSON.stringify({ tool_names: checked, mcp_name: mcpName, mcp_description: instruction, ai_instruction: instruction })
+    });
+    await loadAll();
+    renderAll();
+    showToast(`新 MCP「${result.name}」已创建，包含 ${result.tool_count} 个 Tool`, 'success');
+    $('recomposeInstruction').value = '';
+    $('recomposeMcpName').value = '';
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ 选中 Tool 封装新 MCP'; }
+    if (statusEl) statusEl.innerHTML = '';
+  }
+}
+
+// 批量删除 MCP 资产
+function batchDeleteAssets() {
+  const checked = Array.from(document.querySelectorAll('.mcp-check:checked')).map(cb => cb.value);
+  if (!checked.length) { showToast('请先勾选要删除的 MCP', 'warning'); return; }
+  confirmDialog(`确认删除选中的 ${checked.length} 个 MCP 资产吗？此操作不可恢复。`, async () => {
+    try {
+      await api('/api/platform/mcp-assets/batch-delete', { method: 'POST', body: JSON.stringify({ asset_ids: checked }) });
+      await loadAll();
+      renderAll();
+      showToast(`已删除 ${checked.length} 个 MCP 资产`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 删除单个资产
+function deleteSingleAsset(assetId) {
+  confirmDialog(`确认删除这个 MCP 资产吗？`, async () => {
+    try {
+      await api('/api/platform/mcp-assets/batch-delete', { method: 'POST', body: JSON.stringify({ asset_ids: [assetId] }) });
+      await loadAll();
+      renderAll();
+      showToast('MCP 资产已删除', 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 编辑 MCP 资产属性
+function editAsset(assetId) {
+  const asset = (state.assets || []).find(a => a.id === assetId);
+  if (!asset) { showToast('资产不存在', 'error'); return; }
+  openModal(`编辑 MCP: ${displayAssetName(asset.name)}`, [
+    { key: 'name', label: '资产名称' },
+    { key: 'capability', label: '能力描述', type: 'textarea', rows: 2 },
+    { key: 'status', label: '状态', type: 'select', options: [
+      { value: 'draft', label: '草稿' },
+      { value: 'tooling', label: 'Tooling' },
+      { value: 'testing', label: '测试中' },
+      { value: 'published', label: '已发布' }
+    ]},
+    { key: 'visibility', label: '可见性', type: 'select', options: [
+      { value: 'internal', label: '🔒 内部' },
+      { value: 'public', label: '🌐 公开' }
+    ]},
+    { key: 'version', label: '版本号' }
+  ], {
+    name: asset.name, capability: asset.capability, status: asset.status,
+    visibility: asset.visibility || 'internal', version: asset.version || 'v1.0.0'
+  }, async data => {
+    try {
+      await api(`/api/platform/mcp-assets/${assetId}`, { method: 'PUT', body: JSON.stringify(data) });
+      await loadAll(); renderAll();
+      showToast(`MCP「${data.name}」已更新`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+function filterAssetsByCustomer() { renderAll(); }
+function filterRecognitionByCustomer() { renderAll(); }
+function filterToolingByCustomer() { renderAll(); }
+function filterPublishByCustomer() { renderAll(); }
+function filterDeliveryByCustomer() { renderAll(); }
+
+// 按企业批量识别（旧接口保留兼容）
+async function batchRecognize(customerId, customerName, count) {
+  confirmDialog(`确认对「${customerName}」下 ${count} 份待识别资料执行批量 AI 识别吗？`, async () => {
+    showToast(`正在批量识别 ${customerName} 的资料...`, 'warning');
+    try {
+      const result = await api('/api/platform/data-sources/batch-recognize', { method: 'POST', body: JSON.stringify({ customer_id: customerId }) });
+      await loadAll(); renderAll();
+      showToast(`批量识别完成：成功 ${result.success}/${result.total}`, result.failed ? 'warning' : 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 勾选模式批量识别
+function updateBatchBar() {
+  const checks = document.querySelectorAll('.src-check');
+  const checked = document.querySelectorAll('.src-check:checked');
+  const bar = $('batchActionBar');
+  const countEl = $('batchSelectCount');
+  if (bar) bar.style.display = checks.length > 0 ? '' : 'none';
+  if (countEl && checks.length) countEl.textContent = `已选 ${checked.length}/${checks.length} 份待识别资料`;
+}
+
+function filterIntakeByCustomer() {
+  renderAll();
+}
+
+async function batchRecognizeSelected() {
+  const checked = Array.from(document.querySelectorAll('.src-check:checked')).map(cb => cb.value);
+  if (!checked.length) { showToast('请先勾选要识别的资料', 'warning'); return; }
+  confirmDialog(`确认对选中的 ${checked.length} 份资料执行批量 AI 识别？`, async () => {
+    showToast(`正在批量识别 ${checked.length} 份资料...`, 'warning');
+    try {
+      const result = await api('/api/platform/data-sources/batch-recognize-selected', {
+        method: 'POST', body: JSON.stringify({ source_ids: checked })
+      });
+      await loadAll(); renderAll();
+      showToast(`批量识别完成：成功 ${result.success}/${result.total}`, result.failed ? 'warning' : 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 查看数据源文件内容
+async function viewSourceContent(sourceId) {
+  openModal('查看文件内容', [], {}, null);
+  const overlay = document.querySelector('.modal-overlay:last-child .modal-box');
+  if (overlay) {
+    overlay.innerHTML = '<h3>📄 文件内容</h3><div style="padding:14px;color:#64748b">加载中...</div>';
+  }
+  try {
+    const data = await api(`/api/platform/data-sources/${sourceId}/content`);
+    if (overlay) {
+      let html = `<h3>📄 ${escapeHtml(data.source_name || '文件内容')}</h3>`;
+      html += `<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap"><span class="badge info">${escapeHtml(data.source_type || '-')}</span><span class="muted-line">来源: ${escapeHtml(data.source || '-')}</span></div>`;
+      if (data.content) {
+        html += `<pre style="background:#1e293b;color:#e2e8f0;padding:14px;border-radius:8px;font-size:12px;max-height:400px;overflow:auto;white-space:pre-wrap">${escapeHtml(data.content.slice(0, 20000))}</pre>`;
+        if (data.content.length > 20000) html += '<p class="muted-line" style="margin-top:6px;font-size:11px">（仅显示前 20000 字符）</p>';
+      } else {
+        html += '<div class="empty-state">该资料没有缓存的文件内容</div>';
+      }
+      html += '<div class="modal-actions"><button type="button" class="ghost-btn" onclick="this.closest(\'.modal-overlay\').remove()">关闭</button></div>';
+      overlay.innerHTML = html;
+    }
+  } catch (error) {
+    if (overlay) overlay.innerHTML = `<h3>📄 文件内容</h3><div style="color:#dc2626;padding:14px">${escapeHtml(error.message)}</div><div class="modal-actions"><button type="button" class="ghost-btn" onclick="this.closest(\'.modal-overlay\').remove()">关闭</button></div>`;
+  }
+}
+
+// 接收企业上传文件（保留原有功能）
+function uploadFilesForCustomer(customerId, customerName) {
+  // 找到该企业下的第一个项目
+  const projects = (state.projects || []).filter(p => p.customer_id === customerId);
+  if (!projects.length) { showToast('该企业下没有项目，请先创建', 'warning'); return; }
+  const projectId = projects[0].id;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:500px">
+      <h3>📁 接收文件 — ${escapeHtml(customerName)}</h3>
+      <p class="muted-line" style="margin-bottom:12px">上传接口文档、DDL、Excel 等业务资料，系统会自动创建数据源</p>
+      <div class="upload-zone" id="batchUploadZone" style="cursor:pointer;text-align:center;padding:30px;border:2px dashed var(--line);border-radius:8px;margin-bottom:10px">
+        <div style="font-size:32px;margin-bottom:6px">📂</div>
+        <p style="margin:0;font-size:13px"><strong>点击或拖拽文件到此处</strong></p>
+        <p style="margin:4px 0 0;font-size:11px;color:#94a3b8">支持 .json .yaml .sql .csv .xlsx .md .txt</p>
+        <input type="file" id="batchFileInput" multiple accept=".json,.yaml,.yml,.sql,.csv,.xlsx,.xls,.md,.txt,.pdf,.docx" hidden>
+      </div>
+      <div id="batchFileList"></div>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" data-action="cancel">取消</button>
+        <button type="button" class="primary-btn" data-action="upload" id="batchUploadBtn" disabled>上传</button>
+      </div>
+    </div>`;
+
+  const fileInput = overlay.querySelector('#batchFileInput');
+  const zone = overlay.querySelector('#batchUploadZone');
+  const fileList = overlay.querySelector('#batchFileList');
+  let selectedFiles = [];
+
+  zone.addEventListener('click', () => fileInput.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor = 'var(--primary)'; });
+  zone.addEventListener('dragleave', () => zone.style.borderColor = 'var(--line)');
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.style.borderColor = 'var(--line)'; handleFiles(e.dataTransfer.files); });
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFiles(fileInput.files); });
+
+  function handleFiles(files) {
+    selectedFiles = Array.from(files);
+    fileList.innerHTML = selectedFiles.map(f => `<div style="padding:6px 0;font-size:12px">📄 ${escapeHtml(f.name)} <span class="muted-line">(${(f.size / 1024).toFixed(1)} KB)</span></div>`).join('');
+    overlay.querySelector('#batchUploadBtn').disabled = !selectedFiles.length;
+  }
+
+  overlay.addEventListener('click', async event => {
+    const action = event.target?.dataset?.action;
+    if (action === 'cancel' || event.target === overlay) { document.body.removeChild(overlay); return; }
+    if (action === 'upload') {
+      const btn = overlay.querySelector('#batchUploadBtn');
+      btn.disabled = true;
+      btn.textContent = '上传中...';
+      const formData = new FormData();
+      formData.append('project_id', projectId);
+      selectedFiles.forEach(f => formData.append('files', f));
+      try {
+        const token = localStorage.getItem('mcp_token') || '';
+        const resp = await fetch('/api/platform/data-sources/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.error || 'Upload failed');
+        document.body.removeChild(overlay);
+        await loadAll();
+        renderAll();
+        showToast(`已上传 ${result.created} 个文件，已创建数据源`, 'success');
+      } catch (error) {
+        btn.disabled = false;
+        btn.textContent = '上传';
+        showToast(error.message, 'error');
+      }
+    }
+  });
+  document.body.appendChild(overlay);
+}
+
 // 切换 MCP 资产可见性
 async function toggleAssetVisibility(assetId, visibility) {
   if (!assetId) return;
@@ -2297,14 +2550,261 @@ window.openAiRecognizeModal = openAiRecognizeModal;
 window.showAiAnalysisResult = showAiAnalysisResult;
 window.closeAiAnalysis = closeAiAnalysis;
 window.acceptBuilderRequestIntoIntake = acceptBuilderRequestIntoIntake;
-window.toggleAssetVisibility = toggleAssetVisibility;
+window.aiRecomposeMcp = aiRecomposeMcp;
+window.batchDeleteAssets = batchDeleteAssets;
+window.deleteSingleAsset = deleteSingleAsset;
+window.editAsset = editAsset;
+window.filterAssetsByCustomer = filterAssetsByCustomer;
+window.filterRecognitionByCustomer = filterRecognitionByCustomer;
+window.filterToolingByCustomer = filterToolingByCustomer;
+window.filterPublishByCustomer = filterPublishByCustomer;
+window.filterDeliveryByCustomer = filterDeliveryByCustomer;
+window.batchRecognize = batchRecognize;
+window.batchRecognizeSelected = batchRecognizeSelected;
+window.updateBatchBar = updateBatchBar;
+window.filterIntakeByCustomer = filterIntakeByCustomer;
+window.viewSourceContent = viewSourceContent;
+window.uploadFilesForCustomer = uploadFilesForCustomer;window.toggleAssetVisibility = toggleAssetVisibility;
 window.editTool = editTool;
 window.deleteTool = deleteTool;
 window.addTool = addTool;
 window.refreshDbSource = refreshDbSource;
+window.sendAgentMessage = sendAgentMessage;
 window.runSandboxTest = runSandboxTest;
+window.deployToWorkBuddy = deployToWorkBuddy;
+window.onSandboxAssetChange = onSandboxAssetChange;
 
-// 沙箱综合测试（逐 Tool + 部署检查 + 安全审计）
+// 智能体联调 — 通过 WorkBuddy Tool Call 协议
+let _agentHistory = [];
+let _workbuddyDeployed = false;
+
+// WorkBuddy 默认模型（TTKC-AUTO）
+const WORKBUDDY_DEFAULT_MODEL = {
+  url: 'https://necair.ttoto.net',
+  apiKey: 'sk-x_DrW2qi6bFG4QyJfw3WJA',
+  model: 'TTKC-AUTO'
+};
+
+// 部署 MCP 资产到 WorkBuddy
+async function deployToWorkBuddy() {
+  const assetSelect = $('sandboxAssetSelect');
+  const statusEl = $('workbuddyDeployStatus');
+  if (!assetSelect?.value) { showToast('请先选择要部署的 MCP 资产', 'warning'); return; }
+
+  statusEl.innerHTML = '<div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e40af">⏳ 正在部署到 WorkBuddy（加载 Tool 定义 + 连接 TTKC-AUTO 模型）...</div>';
+
+  try {
+    // 获取 Tool 定义
+    const resp = await fetch(`/api/workbuddy/assets/${assetSelect.value}/tools`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    const tools = data.tools || [];
+    if (!tools.length) throw new Error('该资产没有可用的 Tool，无法部署');
+
+    // 显示部署成功状态 + Tool 清单
+    let html = '<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:8px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✅</span><strong style="color:#16a34a;font-size:14px">已部署到 WorkBuddy</strong><span style="font-size:11px;color:#64748b;margin-left:auto">模型：TTKC-AUTO · ' + tools.length + ' 个 Tool 已加载</span></div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    tools.forEach(function(t) {
+      html += '<span style="font-size:11px;background:#fff;border:1px solid var(--line);padding:2px 8px;border-radius:4px">🔧 ' + escapeHtml(t.function.name) + '</span>';
+    });
+    html += '</div></div>';
+    statusEl.innerHTML = html;
+
+    // 启用对话输入
+    var inputEl = $('agentInput');
+    var sendBtn = $('agentSendBtn');
+    if (inputEl) { inputEl.disabled = false; inputEl.placeholder = '输入问题测试，如：查询账户列表...'; }
+    if (sendBtn) sendBtn.disabled = false;
+
+    // 清空对话历史
+    _agentHistory = [];
+    _workbuddyDeployed = true;
+    var msgBox = $('agentMessages');
+    if (msgBox) msgBox.innerHTML = '<div style="text-align:center;color:#16a34a;font-size:12px;padding:16px 0">✅ MCP 资产已部署到 WorkBuddy，现在可以输入问题进行测试</div>';
+
+    showToast('已部署 ' + tools.length + ' 个 Tool 到 WorkBuddy，可以开始测试', 'success');
+  } catch (error) {
+    statusEl.innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">❌ 部署失败：' + escapeHtml(error.message) + '</div>';
+    _workbuddyDeployed = false;
+    showToast(error.message, 'error');
+  }
+}
+
+// 切换资产时重置部署状态
+function onSandboxAssetChange() {
+  _agentHistory = [];
+  _workbuddyDeployed = false;
+  var statusEl = $('workbuddyDeployStatus');
+  if (statusEl) statusEl.innerHTML = '';
+  var inputEl = $('agentInput');
+  var sendBtn = $('agentSendBtn');
+  if (inputEl) { inputEl.disabled = true; inputEl.placeholder = '先部署到 WorkBuddy，再输入问题...'; }
+  if (sendBtn) sendBtn.disabled = true;
+  var mb = $('agentMessages');
+  if (mb) mb.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产 → 点击「部署到 WorkBuddy」→ 输入问题测试</div>';
+}
+
+// 轻量 Markdown 渲染（支持表格、粗体、列表、代码块、标题）
+function renderMarkdown(text) {
+  if (!text) return '';
+  // 先转义 HTML 防止 XSS
+  var html = escapeHtml(text);
+
+  // 代码块 ```
+  html = html.replace(/```[\s\S]*?```/g, function(m) {
+    var code = m.replace(/```\w*\n?/g, '').replace(/```$/g, '');
+    return '<pre style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0">' + code + '</pre>';
+  });
+
+  // 表格
+  var lines = html.split('\n');
+  var output = [];
+  var inTable = false;
+  var tableRows = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // 检测表格分隔行（|---|---|）
+    if (/^\|[\s\-:|]+\|$/i.test(line.trim())) {
+      inTable = true;
+      continue;
+    }
+
+    if (/^\|.*\|/.test(line.trim())) {
+      tableRows.push(line.trim());
+      // 如果下一行不是表格行，输出表格
+      var nextLine = lines[i + 1] || '';
+      if (!/^\|.*\|/.test(nextLine.trim()) || /^\|[\s\-:|]+\|$/i.test(nextLine.trim())) {
+        if (tableRows.length > 0) {
+          var tableHtml = '<table style="width:100%;border-collapse:collapse;margin:6px 0;font-size:12px">';
+          tableRows.forEach(function(row, ri) {
+            var cells = row.split('|').filter(function(c, ci, arr) { return ci > 0 && ci < arr.length - 1; });
+            var tag = ri === 0 ? 'th' : 'td';
+            var bg = ri === 0 ? 'background:#e2e8f0;font-weight:600' : '';
+            tableHtml += '<tr>' + cells.map(function(c) {
+              return '<' + tag + ' style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left;' + bg + '">' + c.trim() + '</' + tag + '>';
+            }).join('') + '</tr>';
+          });
+          tableHtml += '</table>';
+          output.push(tableHtml);
+          tableRows = [];
+        }
+        inTable = false;
+      }
+      continue;
+    }
+
+    // 非表格行
+    if (!inTable) {
+      output.push(line);
+    }
+  }
+
+  html = output.join('\n');
+
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:14px">$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:15px">$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:16px">$1</h3>');
+
+  // 粗体 + 斜体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code style="background:#e2e8f0;padding:1px 5px;border-radius:3px;font-size:12px">$1</code>');
+
+  // 无序列表
+  html = html.replace(/^[\-\*] (.+)$/gm, '<li style="margin-left:18px;list-style:disc">$1</li>');
+
+  // 有序列表
+  html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:18px;list-style:decimal">$1</li>');
+
+  // 段落换行（连续 <li> 不加 <br>，连续空行变成段落间距）
+  html = html.replace(/\n\n+/g, '</p><p style="margin:6px 0">');
+  html = html.replace(/\n/g, '<br>');
+
+  // 清理 <li> 前后的 <br>
+  html = html.replace(/<br>(<li)/g, '$1');
+  html = html.replace(/(<\/li>)<br>/g, '$1');
+
+  return '<div style="font-size:13px">' + html + '</div>';
+}
+
+async function sendAgentMessage() {
+  const input = $('agentInput');
+  const msgBox = $('agentMessages');
+  const assetSelect = $('sandboxAssetSelect');
+  if (!_workbuddyDeployed) { showToast('请先点击「部署到 WorkBuddy」', 'warning'); return; }
+  if (!input?.value?.trim()) return;
+  if (!assetSelect?.value) { showToast('请先选择要测试的 MCP 资产', 'warning'); return; }
+
+  const userMsg = input.value.trim();
+  input.value = '';
+
+  // 显示用户消息
+  msgBox.innerHTML += `<div style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(userMsg)}</div>`;
+  msgBox.innerHTML += `<div id="agentTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">⏳ WorkBuddy (TTKC-AUTO) 正在分析并调用工具...</div>`;
+  msgBox.scrollTop = msgBox.scrollHeight;
+
+  try {
+    // 使用 WorkBuddy chat API（OpenAI function calling 协议）
+    const resp = await fetch('/api/workbuddy/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset_id: assetSelect.value,
+        message: userMsg,
+        history: _agentHistory.slice(-10),
+        model_config: WORKBUDDY_DEFAULT_MODEL
+      })
+    });
+    const result = await resp.json();
+
+    if (result.error) throw new Error(result.error);
+
+    // 更新历史
+    _agentHistory.push({ role: 'user', content: userMsg }, { role: 'assistant', content: result.reply });
+
+    // 移除 typing
+    const typing = $('agentTyping');
+    if (typing) typing.remove();
+
+    // 显示 Tool 调用过程（折叠式，不占太多空间）
+    if (result.tool_calls?.length) {
+      result.tool_calls.forEach(tc => {
+        var tcCard = document.createElement('div');
+        tcCard.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
+        tcCard.innerHTML = '<details style="cursor:pointer"><summary style="color:#7c3aed;font-weight:600">🔧 ' + escapeHtml(tc.display_name) + ' - 调用成功</summary>'
+          + '<div style="margin-top:6px;padding:6px 8px;background:#fff;border-radius:4px;font-size:11px;color:#64748b;font-family:Consolas,monospace">'
+          + (tc.arguments && Object.keys(tc.arguments).length ? '参数：' + escapeHtml(JSON.stringify(tc.arguments)) + '<br>' : '<无参数><br>')
+          + '<span style="color:#16a34a">结果：</span>' + escapeHtml(JSON.stringify(tc.result))
+          + '</div></details>';
+        msgBox.appendChild(tcCard);
+      });
+    }
+
+    // 显示 AI 回复（Markdown 渲染）
+    var replyDiv = document.createElement('div');
+    replyDiv.style.cssText = 'align-self:flex-start;background:#f1f5f9;padding:10px 14px;border-radius:12px 12px 12px 2px;max-width:85%;line-height:1.7';
+    replyDiv.innerHTML = renderMarkdown(result.reply);
+    msgBox.appendChild(replyDiv);
+    msgBox.scrollTop = msgBox.scrollHeight;
+  } catch (error) {
+    const typing = $('agentTyping');
+    if (typing) typing.remove();
+    msgBox.innerHTML += `<div style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">❌ ${escapeHtml(error.message)}</div>`;
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+}
+
+// 切换 MCP 资产时清空对话
+window.resetAgentChat = function() { _agentHistory = []; const mb = $('agentMessages'); if (mb) mb.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产后，输入问题测试 AI 是否能正确调用 Tool</div>'; };
+
+// 沙箱综合测试
 async function runSandboxTest() {
   const select = $('sandboxAssetSelect');
   const resultEl = $('sandboxTestResult');
@@ -2387,7 +2887,7 @@ async function bootApp() {
 function bindEvents() {
   $('loginBtn').addEventListener('click', login);
   $('logoutBtn').addEventListener('click', logout);
-  $('simulateBtn').addEventListener('click', simulate);
+  $('simulateBtn')?.addEventListener('click', simulate);
   $('sandboxTestBtn')?.addEventListener('click', runSandboxTest);
   $('createDataSourceBtn')?.addEventListener('click', createDataSource);
   $('createPolicyBtn').addEventListener('click', createPolicy);

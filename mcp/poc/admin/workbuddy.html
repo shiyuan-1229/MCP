@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>WorkBuddy 接入测试 · MCP Forge</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-2: #334155;
+      --border: #475569;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --purple: #8b5cf6;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { font-size: 20px; display: flex; align-items: center; gap: 10px; }
+    .header .badge { font-size: 11px; background: var(--purple); color: #fff; padding: 2px 10px; border-radius: 12px; }
+    .header .links { display: flex; gap: 16px; }
+    .header .links a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+    .header .links a:hover { color: var(--primary); }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-body { padding: 16px 18px; }
+
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .field select, .field input, .field textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .field select:focus, .field input:focus, .field textarea:focus { border-color: var(--primary); }
+    .field textarea { resize: vertical; min-height: 60px; font-family: 'Consolas', monospace; }
+
+    .config-row { display: flex; gap: 8px; }
+    .config-row .field { flex: 1; }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .2s;
+      font-weight: 500;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .status-dot.disconnected { background: var(--error); }
+
+    .tool-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+    .tool-card:hover { border-color: var(--primary); }
+    .tool-card.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.2); }
+    .tool-card .tool-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .tool-card .tool-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+    .tool-card .tool-params { font-size: 11px; color: var(--purple); margin-top: 4px; font-family: 'Consolas', monospace; }
+
+    .tool-list { max-height: 320px; overflow-y: auto; }
+    .tool-list::-webkit-scrollbar { width: 4px; }
+    .tool-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .chat-area { display: flex; flex-direction: column; min-height: calc(100vh - 140px); }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.6; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 2px; }
+    .msg.assistant { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 2px; }
+    .msg.tool-call {
+      align-self: center;
+      background: rgba(139,92,246,.15);
+      border: 1px solid var(--purple);
+      border-radius: 8px;
+      font-size: 12px;
+      max-width: 90%;
+      width: 100%;
+    }
+    .msg.tool-call .tc-header { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 6px; }
+    .msg.tool-call .tc-args { font-family: 'Consolas', monospace; font-size: 11px; color: var(--text-muted); background: var(--bg); padding: 6px 8px; border-radius: 4px; margin: 4px 0; }
+    .msg.tool-call .tc-result { font-family: 'Consolas', monospace; font-size: 11px; color: var(--success); background: var(--bg); padding: 6px 8px; border-radius: 4px; margin-top: 4px; }
+    .msg.error { align-self: center; background: rgba(239,68,68,.15); border: 1px solid var(--error); color: var(--error); }
+
+    .typing { align-self: flex-start; padding: 10px 14px; }
+    .typing span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); margin: 0 2px; animation: bounce 1.4s infinite; }
+    .typing span:nth-child(2) { animation-delay: .2s; }
+    .typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+    .chat-input {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .chat-input textarea {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      resize: none;
+      min-height: 40px;
+      max-height: 120px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .chat-input textarea:focus { border-color: var(--primary); }
+
+    .info-banner {
+      background: rgba(59,130,246,.1);
+      border: 1px solid rgba(59,130,246,.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .info-banner strong { color: var(--text); }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
+
+    .section-title { font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: .5px; }
+
+    .model-info { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+    .model-info code { background: var(--bg); padding: 1px 6px; border-radius: 3px; color: var(--primary); }
+
+    .json-view { font-family: 'Consolas', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+
+    .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 4px; }
+    .tag.public { background: rgba(34,197,94,.2); color: var(--success); }
+    .tag.internal { background: rgba(245,158,11,.2); color: var(--warning); }
+    .tag.category { background: rgba(139,92,246,.2); color: var(--purple); }
+
+    .method-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .method-badge.b { background: var(--primary); color: #fff; }
+    .method-badge.a { background: var(--surface-2); color: var(--text-muted); }
+
+    .comparison { font-size: 11px; }
+    .comparison table { width: 100%; border-collapse: collapse; }
+    .comparison th, .comparison td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    .comparison th { color: var(--text-muted); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🔌 WorkBuddy 接入测试 <span class="badge">方案 B：HTTP API + Tool 定义</span></h1>
+    <div class="links">
+      <a href="/admin">← 返回管理后台</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- 左侧配置面板 -->
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-head">
+          <span><span class="status-dot disconnected" id="connDot"></span>连接配置</span>
+        </div>
+        <div class="panel-body">
+          <div class="info-banner">
+            <strong>方案 B（HTTP API + Tool 定义）</strong><br>
+            WorkBuddy 通过 OpenAI 兼容的 Tool Call 协议调用 MCP Forge 的 Tool 定义，平台模拟执行并返回结果。
+            适合 POC 验证阶段，无需额外部署 MCP Server。
+          </div>
+
+          <div class="field">
+            <label>AI 模型（来自 ~/.workbuddy/models.json）</label>
+            <select id="modelSelect" onchange="onModelChange()">
+              <option value="">-- 选择模型 --</option>
+            </select>
+          </div>
+
+          <div class="config-row">
+            <div class="field">
+              <label>API URL</label>
+              <input id="apiUrl" type="text" placeholder="https://necair.ttoto.net">
+            </div>
+          </div>
+
+          <div class="config-row">
+            <div class="field">
+              <label>Model ID</label>
+              <input id="modelId" type="text" placeholder="TTKC-AUTO">
+            </div>
+            <div class="field">
+              <label>API Key</label>
+              <input id="apiKey" type="password" placeholder="sk-...">
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="width:100%" onclick="testConnection()">
+            测试连接
+          </button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span>MCP 资产</span>
+          <span id="assetCount" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+        <div class="panel-body">
+          <div class="field">
+            <select id="assetSelect" onchange="onAssetChange()">
+              <option value="">-- 选择资产 --</option>
+            </select>
+          </div>
+          <div id="assetInfo" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5">
+            <div id="assetName" style="font-weight:600;color:var(--text)"></div>
+            <div id="assetCapability"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span>Tool 定义</span>
+          <span id="toolCount" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+        <div class="panel-body">
+          <div id="toolList" class="tool-list">
+            <div class="empty-state">选择资产后显示 Tool 清单</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span>方案对比</span>
+        </div>
+        <div class="panel-body comparison">
+          <table>
+            <tr><th></th><th><span class="method-badge b">B</span> HTTP API</th><th><span class="method-badge a">A</span> MCP SSE</th></tr>
+            <tr><td>部署复杂度</td><td>低</td><td>高</td></tr>
+            <tr><td>Tool 执行</td><td>模拟</td><td>真实</td></tr>
+            <tr><td>适合阶段</td><td>POC/演示</td><td>生产</td></tr>
+            <tr><td>开发量</td><td>小</td><td>大</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧对话区 -->
+    <div class="panel chat-area">
+      <div class="panel-head">
+        <span>💬 对话测试</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="chatStatus" style="font-size:11px;color:var(--text-muted)">就绪</span>
+          <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="clearChat()">清空</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="empty-state">
+          选择 AI 模型和 MCP 资产后，输入问题测试 WorkBuddy 接入<br><br>
+          流程：用户提问 → AI 判断调用哪个 Tool → MCP Forge 执行 → AI 基于结果自然回复
+        </div>
+      </div>
+      <div class="chat-input">
+        <textarea id="chatInput" placeholder="输入问题，例如：查询今天的门店销售日报..." rows="1" onkeydown="onInputKey(event)" oninput="autoGrow(this)"></textarea>
+        <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()" disabled>发送</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============ WorkBuddy 模型配置（来自 ~/.workbuddy/models.json）============
+    const WORKBUDDY_MODELS = [
+      { id: "TTKC-AUTO", name: "TTKC:AUTO", vendor: "TTKC", url: "https://necair.ttoto.net", apiKey: "sk-x_DrW2qi6bFG4QyJfw3WJA", supportsToolCall: true, supportsReasoning: true, maxInputTokens: 204800, maxOutputTokens: 32768 },
+      { id: "glm-latest", name: "TTKC:GLMLT", vendor: "TTKC", url: "https://necair.ttoto.net", apiKey: "sk-x_DrW2qi6bFG4QyJfw3WJA", supportsToolCall: true, supportsReasoning: true, maxInputTokens: 1000000, maxOutputTokens: 128000 },
+      { id: "MiniMax-Latest", name: "TTKC:MMLT", vendor: "TTKC", url: "https://necair.ttoto.net", apiKey: "sk-x_DrW2qi6bFG4QyJfw3WJA", supportsToolCall: true, supportsReasoning: true, maxInputTokens: 1000000, maxOutputTokens: 128000 },
+      { id: "MiniMax-M2.7-highspeed", name: "TTKC:MM27HS", vendor: "TTKC", url: "https://necair.ttoto.net", apiKey: "sk-x_DrW2qi6bFG4QyJfw3WJA", supportsToolCall: true, supportsImages: true, supportsReasoning: true, maxInputTokens: 131072, maxOutputTokens: 65536 },
+      { id: "glm-4.6V", name: "TTKC:G46V", vendor: "TTKC", url: "https://necair.ttoto.net", apiKey: "sk-x_DrW2qi6bFG4QyJfw3WJA", supportsToolCall: true, supportsImages: true, supportsReasoning: true, maxInputTokens: 131072, maxOutputTokens: 16384 }
+    ];
+
+    let chatHistory = [];
+    let currentAsset = null;
+    let currentTools = [];
+    let isSending = false;
+
+    // ============ 初始化 ============
+    function init() {
+      // 填充模型下拉框
+      const sel = document.getElementById('modelSelect');
+      WORKBUDDY_MODELS.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = `${m.name} (${m.id})`;
+        sel.appendChild(opt);
+      });
+
+      // 加载 MCP 资产列表
+      loadAssets();
+    }
+
+    // ============ 加载 MCP 资产 ============
+    async function loadAssets() {
+      try {
+        const resp = await fetch('/api/workbuddy/assets');
+        const assets = await resp.json();
+        const sel = document.getElementById('assetSelect');
+        assets.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = `${a.name} (${a.tool_count} Tools)`;
+          sel.appendChild(opt);
+        });
+        document.getElementById('assetCount').textContent = `${assets.length} 个资产`;
+      } catch (err) {
+        console.error('加载资产失败:', err);
+      }
+    }
+
+    // ============ 模型选择 ============
+    function onModelChange() {
+      const id = document.getElementById('modelSelect').value;
+      const model = WORKBUDDY_MODELS.find(m => m.id === id);
+      if (model) {
+        document.getElementById('apiUrl').value = model.url;
+        document.getElementById('modelId').value = model.id;
+        document.getElementById('apiKey').value = model.apiKey;
+      }
+      checkReady();
+    }
+
+    // ============ 资产选择 ============
+    async function onAssetChange() {
+      const id = document.getElementById('assetSelect').value;
+      if (!id) { currentAsset = null; currentTools = []; return; }
+
+      try {
+        const resp = await fetch(`/api/workbuddy/assets/${id}/tools`);
+        const data = await resp.json();
+        currentAsset = { id: data.asset_id, name: data.asset_name };
+        currentTools = data.tools;
+
+        // 渲染 Tool 列表
+        const list = document.getElementById('toolList');
+        list.innerHTML = '';
+        document.getElementById('toolCount').textContent = `${currentTools.length} 个`;
+
+        currentTools.forEach(t => {
+          const fn = t.function;
+          const params = Object.entries(fn.parameters?.properties || {}).map(([k,v]) => `${k}(${v.type||'any'})`).join(', ');
+          const required = (fn.parameters?.required || []).join(', ');
+          const card = document.createElement('div');
+          card.className = 'tool-card';
+          card.innerHTML = `
+            <div class="tool-name">🔧 ${escapeHtml(fn.name)}</div>
+            <div class="tool-desc">${escapeHtml(fn.description || '')}</div>
+            ${params ? `<div class="tool-params">参数: ${escapeHtml(params)}${required ? ' <span style="color:var(--error)">必填: '+escapeHtml(required)+'</span>' : ''}</div>` : ''}
+          `;
+          list.appendChild(card);
+        });
+
+        // 更新资产信息
+        const assetResp = await fetch('/api/workbuddy/assets');
+        const assets = await assetResp.json();
+        const asset = assets.find(a => a.id === id);
+        if (asset) {
+          document.getElementById('assetInfo').style.display = 'block';
+          document.getElementById('assetName').textContent = asset.name;
+          document.getElementById('assetCapability').textContent = asset.capability || '';
+        }
+      } catch (err) {
+        console.error('加载工具失败:', err);
+      }
+      checkReady();
+    }
+
+    // ============ 测试连接 ============
+    async function testConnection() {
+      const url = document.getElementById('apiUrl').value;
+      const key = document.getElementById('apiKey').value;
+      const model = document.getElementById('modelId').value;
+      if (!url || !key || !model) { alert('请填写完整配置'); return; }
+
+      document.getElementById('chatStatus').textContent = '测试中...';
+      try {
+        const chatUrl = url.endsWith('/') ? `${url}v1/chat/completions` : `${url}/v1/chat/completions`;
+        const resp = await fetch(chatUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 10
+          })
+        });
+        if (resp.ok) {
+          document.getElementById('connDot').className = 'status-dot connected';
+          document.getElementById('chatStatus').textContent = '已连接';
+          addMessage('assistant', '✅ AI 模型连接成功！可以开始对话测试了。');
+        } else {
+          document.getElementById('connDot').className = 'status-dot disconnected';
+          const errText = await resp.text().catch(() => '');
+          document.getElementById('chatStatus').textContent = `连接失败: ${resp.status}`;
+          addMessage('error', `连接失败 (HTTP ${resp.status}): ${errText.slice(0, 200)}`);
+        }
+      } catch (err) {
+        document.getElementById('connDot').className = 'status-dot disconnected';
+        document.getElementById('chatStatus').textContent = `连接失败`;
+        addMessage('error', `连接错误: ${err.message}`);
+      }
+      checkReady();
+    }
+
+    // ============ 检查是否就绪 ============
+    function checkReady() {
+      const ready = document.getElementById('modelSelect').value && document.getElementById('assetSelect').value;
+      document.getElementById('sendBtn').disabled = !ready || isSending;
+    }
+
+    // ============ 发送消息 ============
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text || isSending) return;
+
+      const modelId = document.getElementById('modelSelect').value;
+      const model = WORKBUDDY_MODELS.find(m => m.id === modelId);
+      if (!model || !currentAsset) return;
+
+      addMessage('user', text);
+      chatHistory.push({ role: 'user', content: text });
+      input.value = '';
+      autoGrow(input);
+
+      isSending = true;
+      document.getElementById('sendBtn').disabled = true;
+      document.getElementById('chatStatus').textContent = '思考中...';
+      showTyping();
+
+      try {
+        // 调用 /api/workbuddy/chat 端点
+        const resp = await fetch('/api/workbuddy/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset_id: currentAsset.id,
+            message: text,
+            history: chatHistory.slice(-10),
+            model_config: {
+              url: model.url,
+              apiKey: model.apiKey,
+              model: model.id
+            }
+          })
+        });
+
+        const data = await resp.json();
+        hideTyping();
+
+        if (data.error) {
+          addMessage('error', `❌ ${data.error}`);
+        } else {
+          // 显示 Tool 调用过程
+          if (data.tool_calls?.length) {
+            data.tool_calls.forEach(tc => {
+              const tcHtml = `
+                <div class="tc-header">🔧 调用工具: ${escapeHtml(tc.display_name)}</div>
+                <div class="tc-args">参数: ${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</div>
+                <div class="tc-result">结果: ${escapeHtml(JSON.stringify(tc.result, null, 2))}</div>
+              `;
+              addMessageRaw('tool-call', tcHtml);
+            });
+          }
+          // 显示 AI 回复
+          addMessage('assistant', data.reply);
+          chatHistory.push({ role: 'assistant', content: data.reply });
+          if (data.usage) {
+            document.getElementById('chatStatus').textContent = `Token: ${data.usage}`;
+          } else {
+            document.getElementById('chatStatus').textContent = '就绪';
+          }
+        }
+      } catch (err) {
+        hideTyping();
+        addMessage('error', `❌ ${err.message}`);
+        document.getElementById('chatStatus').textContent = '错误';
+      }
+
+      isSending = false;
+      checkReady();
+    }
+
+    // ============ UI 工具函数 ============
+    function addMessage(role, content) {
+      const msg = document.createElement('div');
+      msg.className = `msg ${role}`;
+      msg.textContent = content;
+      document.getElementById('chatMessages').appendChild(msg);
+      scrollBottom();
+    }
+
+    function addMessageRaw(role, html) {
+      const msg = document.createElement('div');
+      msg.className = `msg ${role}`;
+      msg.innerHTML = html;
+      document.getElementById('chatMessages').appendChild(msg);
+      scrollBottom();
+    }
+
+    function showTyping() {
+      const t = document.createElement('div');
+      t.className = 'typing';
+      t.id = 'typingIndicator';
+      t.innerHTML = '<span></span><span></span><span></span>';
+      document.getElementById('chatMessages').appendChild(t);
+      scrollBottom();
+    }
+
+    function hideTyping() {
+      const t = document.getElementById('typingIndicator');
+      if (t) t.remove();
+    }
+
+    function clearChat() {
+      chatHistory = [];
+      document.getElementById('chatMessages').innerHTML = `
+        <div class="empty-state">对话已清空</div>
+      `;
+      document.getElementById('chatStatus').textContent = '就绪';
+    }
+
+    function scrollBottom() {
+      const el = document.getElementById('chatMessages');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function onInputKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function autoGrow(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // 启动
+    init();
+  </script>
+</body>
+</html>
