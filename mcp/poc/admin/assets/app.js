@@ -1011,6 +1011,7 @@ async function createDataSource() {
           <select id="ds_type" onchange="window.onDsTypeChange()">
             <option value="REST API">REST API（Swagger / OpenAPI）</option>
             <option value="Database">Database（表结构 / SQL）</option>
+            <option value="Database Connection">🗄️ 数据库直连（实时读取表结构）</option>
             <option value="Knowledge Base">Knowledge Base（业务文档 / FAQ）</option>
             <option value="Industry Template">Industry Template（行业样例）</option>
           </select>
@@ -1047,6 +1048,19 @@ async function createDataSource() {
         </div>
       </form>
 
+      <div id="dbConnectionForm" style="display:none;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;margin-bottom:10px">
+        <strong style="display:block;margin-bottom:8px">🗄️ 数据库连接信息</strong>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="font-size:12px">主机地址<input id="dbHost" placeholder="10.20.8.102" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+          <label style="font-size:12px">端口<input id="dbPort" placeholder="3306" value="3306" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+          <label style="font-size:12px">用户名<input id="dbUser" placeholder="dev" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+          <label style="font-size:12px">密码<input id="dbPassword" type="password" placeholder="密码" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+          <label style="font-size:12px;grid-column:span 2">数据库名称<input id="dbDatabase" placeholder="lvchengcdp_member" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+        </div>
+        <button type="button" class="ghost-btn small" id="dbTestBtn" style="margin-top:8px">🔌 测试连接</button>
+        <span id="dbTestResult" style="margin-left:8px;font-size:12px"></span>
+      </div>
+
       <div class="modal-actions">
         <button type="button" class="ghost-btn" data-action="cancel">取消</button>
         <button type="button" class="primary-btn" data-action="save" id="dsSaveBtn">确认导入</button>
@@ -1061,14 +1075,54 @@ async function createDataSource() {
     $('formatTags').innerHTML = guide.formats.map(f => `<span class="format-tag">${f}</span>`).join('');
     $('formatTip').textContent = guide.tip;
 
-    // 更新上传提示
-    const hints = {
-      'REST API': '.json .yaml .yml .pdf .docx',
-      'Database': '.sql .xlsx .xls .csv .pdf',
-      'Knowledge Base': '.pdf .docx .md .txt .csv .xlsx .json',
-      'Industry Template': '.json .md .pdf'
-    };
-    $('uploadHint').textContent = '支持 ' + (hints[type] || '*.*)');
+    const isDbConn = type === 'Database Connection';
+    const uploadZone = overlay.querySelector('#uploadZone');
+    const dbForm = overlay.querySelector('#dbConnectionForm');
+    const dbTestBtn = overlay.querySelector('#dbTestBtn');
+
+    if (isDbConn) {
+      if (uploadZone) uploadZone.style.display = 'none';
+      if (dbForm) dbForm.style.display = '';
+      $('uploadHint').textContent = '通过数据库连接实时读取表结构';
+      $('formatTags').innerHTML = '<span class="format-tag">MySQL 直连</span><span class="format-tag">自动读取 DDL</span>';
+      $('formatTip').textContent = '输入数据库连接信息，系统将自动读取所有表结构和样例数据，供 AI 识别';
+
+      // 绑定测试连接
+      if (dbTestBtn) {
+        dbTestBtn.onclick = async () => {
+          const cfg = {
+            host: $('dbHost')?.value?.trim(),
+            port: $('dbPort')?.value?.trim() || '3306',
+            user: $('dbUser')?.value?.trim(),
+            password: $('dbPassword')?.value || '',
+            database: $('dbDatabase')?.value?.trim()
+          };
+          if (!cfg.host || !cfg.user || !cfg.database) {
+            $('dbTestResult').innerHTML = '<span style="color:#dc2626">请填写完整连接信息</span>';
+            return;
+          }
+          $('dbTestResult').innerHTML = '<span style="color:#64748b">⏳ 测试中...</span>';
+          try {
+            const result = await api('/api/platform/db/test-connection', { method: 'POST', body: JSON.stringify(cfg) });
+            $('dbTestResult').innerHTML = result.ok
+              ? '<span style="color:#16a34a">✅ 连接成功</span>'
+              : `<span style="color:#dc2626">❌ ${escapeHtml(result.message)}</span>`;
+          } catch (e) {
+            $('dbTestResult').innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(e.message)}</span>`;
+          }
+        };
+      }
+    } else {
+      if (uploadZone) uploadZone.style.display = '';
+      if (dbForm) dbForm.style.display = 'none';
+      const hints = {
+        'REST API': '.json .yaml .yml .pdf .docx',
+        'Database': '.sql .xlsx .xls .csv .pdf',
+        'Knowledge Base': '.pdf .docx .md .txt .csv .xlsx .json',
+        'Industry Template': '.json .md .pdf'
+      };
+      $('uploadHint').textContent = '支持 ' + (hints[type] || '*.*)');
+    }
   }
 
   window.onDsTypeChange = updateFormatGuide;
@@ -1121,15 +1175,43 @@ async function createDataSource() {
 
       (async () => {
         try {
-          await api('/api/platform/data-sources', {
-            method: 'POST',
-            body: JSON.stringify({ project_id, name, type, auth_mode })
-          });
-          await loadAll();
-          renderAll();
-          document.body.removeChild(overlay);
-          const typeLabel = $('ds_type').options[$('ds_type').selectedIndex].text.split('（')[0];
-          showToast(`「${name}」已导入（${typeLabel}）。${selectedFile ? '文件已接收，平台正在解析中...' : '请继续完善资料详情。'}`, 'success');
+          if (type === 'Database Connection') {
+            // 数据库直连模式
+            const dbConfig = {
+              project_id,
+              name,
+              host: $('dbHost')?.value?.trim(),
+              port: $('dbPort')?.value?.trim() || '3306',
+              user: $('dbUser')?.value?.trim(),
+              password: $('dbPassword')?.value || '',
+              database: $('dbDatabase')?.value?.trim()
+            };
+            if (!dbConfig.host || !dbConfig.user || !dbConfig.database) {
+              showToast('请填写完整的数据库连接信息', 'warning');
+              btn.disabled = false;
+              btn.textContent = '确认导入';
+              return;
+            }
+            btn.textContent = '正在读取数据库表结构...';
+            const result = await api('/api/platform/db/import', {
+              method: 'POST',
+              body: JSON.stringify(dbConfig)
+            });
+            await loadAll();
+            renderAll();
+            document.body.removeChild(overlay);
+            showToast(`已导入「${name}」：${result.table_count} 张表，共 ${result.total_rows} 行数据`, 'success');
+          } else {
+            await api('/api/platform/data-sources', {
+              method: 'POST',
+              body: JSON.stringify({ project_id, name, type, auth_mode })
+            });
+            await loadAll();
+            renderAll();
+            document.body.removeChild(overlay);
+            const typeLabel = $('ds_type').options[$('ds_type').selectedIndex].text.split('（')[0];
+            showToast(`「${name}」已导入（${typeLabel}）。${selectedFile ? '文件已接收，平台正在解析中...' : '请继续完善资料详情。'}`, 'success');
+          }
         } catch (error) {
           btn.disabled = false;
           btn.textContent = '确认导入';
@@ -1413,30 +1495,20 @@ function openAiRecognizeModal(sourceId) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal-box" style="max-width:640px;max-height:88vh;overflow-y:auto">
+    <div class="modal-box" style="max-width:480px">
       <h3>${modalTitle}</h3>
-      ${isReRecognize ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e">⚠️ 该资料已有识别结果，重新识别将覆盖之前的 OpenAPI 草案和 Tool 定义</div>' : ''}
       <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:14px">
         <strong>${escapeHtml(source.name || '未命名资料')}</strong>
         <span class="badge info" style="margin-left:8px">${escapeHtml(source.type || '-')}</span>
-        <span class="muted-line" style="margin-left:4px">认证: ${escapeHtml(source.auth_mode || '-')}</span>
       </div>
-      <form onsubmit="return false">
-        <label>
-          <span>资料描述 / 样本内容（可选，提供给 AI 分析）</span>
-          <textarea id="aiSampleContent" rows="6" placeholder="粘贴接口文档、DDL 语句、Excel 表头、API 示例等。内容越详细，AI 识别越准确。" style="width:100%;font-family:monospace;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:6px;resize:vertical"></textarea>
-        </label>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-            <input type="checkbox" id="aiUseReal" checked style="cursor:pointer">
-            <span>使用真实 AI 大模型分析（取消则走静态模板识别）</span>
-          </label>
-        </div>
-        <div id="aiStatusHint" style="margin-top:8px;font-size:12px"></div>
-      </form>
+      <div style="margin-bottom:12px;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e40af">
+        <strong>第一步：能力预览</strong><br>
+        AI 快速扫描数据，列出其中包含的业务能力。扫描完成后会在页面下方展开能力列表，你可以在那里勾选、筛选并提封装要求。
+      </div>
+      <div id="aiStatusHint" style="font-size:12px"></div>
       <div class="modal-actions">
         <button type="button" class="ghost-btn" data-action="cancel">取消</button>
-        <button type="button" class="primary-btn" data-action="run" id="aiRunBtn">开始 AI 识别</button>
+        <button type="button" class="primary-btn" data-action="scan" id="aiScanBtn">🔍 开始扫描能力（约 30 秒）</button>
       </div>
     </div>`;
 
@@ -1444,50 +1516,178 @@ function openAiRecognizeModal(sourceId) {
     const action = event.target?.dataset?.action;
     if (action === 'cancel') { document.body.removeChild(overlay); return; }
     if (event.target === overlay) { document.body.removeChild(overlay); return; }
-    if (action === 'run') {
-      const sampleContent = $('aiSampleContent')?.value?.trim() || '';
-      const useAI = $('aiUseReal')?.checked !== false;
-      const btn = $('aiRunBtn');
-      const hint = $('aiStatusHint');
 
+    if (action === 'scan') {
+      const btn = $('aiScanBtn');
+      const hint = $('aiStatusHint');
       btn.disabled = true;
-      btn.textContent = 'AI 分析中...';
-      hint.innerHTML = useAI
-        ? '<span style="color:#b46b06">⏳ 正在调用大模型分析业务数据，生成 OpenAPI 和 Tool 定义...</span>'
-        : '<span style="color:#64748b">正在执行静态模板识别...</span>';
+      btn.textContent = '⏳ AI 正在扫描...';
+      hint.innerHTML = '<span style="color:#b46b06">正在分析数据，请稍候（约 20-40 秒）...</span>';
 
       try {
-        const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
-          method: 'POST',
-          body: JSON.stringify({ use_ai: useAI, sample_content: sampleContent, description: sampleContent })
-        });
-
-        await loadAll();
-        renderAll();
+        const result = await api(`/api/platform/data-sources/${sourceId}/preview`, { method: 'POST', body: JSON.stringify({}) });
         document.body.removeChild(overlay);
-
-        if (result.ai_used) {
-          // 显示 AI 分析结果面板
-          showAiAnalysisResult(result);
-          showToast(`AI 识别完成：识别 ${result.analysis?.endpoints?.length || 0} 个接口，生成 ${result.tools?.length || 0} 个 Tool（模型: ${result.model}）`, 'success');
-        } else if (result.error) {
-          showToast(`AI 失败，已回退静态识别: ${result.error}`, 'warning');
-          state.currentPage = 'recognition';
-          renderAll();
-        } else {
-          showToast('静态识别完成', 'success');
-          state.currentPage = 'recognition';
-          renderAll();
-        }
+        // 在页面上展示能力预览
+        window._currentPreviewSourceId = sourceId;
+        showCapabilityPanel(result);
+        showToast(`扫描完成！发现 ${result.capabilities?.length || 0} 个业务能力`, 'success');
       } catch (error) {
         btn.disabled = false;
-        btn.textContent = '开始 AI 识别';
+        btn.textContent = '🔍 重新扫描';
         hint.innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(error.message)}</span>`;
       }
     }
   });
 
   document.body.appendChild(overlay);
+}
+
+// 能力预览面板（铺在页面上）
+function showCapabilityPanel(result) {
+  const panel = $('capabilityPanel');
+  if (!panel) return;
+  panel.style.display = '';
+
+  const caps = result.capabilities || [];
+  window._currentCapabilities = caps;
+
+  // 模型标识
+  const badge = $('capModelBadge');
+  if (badge && result.model) badge.textContent = `模型: ${result.model}`;
+
+  // 总结
+  const summaryEl = $('capSummary');
+  summaryEl.innerHTML = `
+    <div style="font-size:14px;line-height:1.8">
+      <p style="margin:0 0 6px"><strong>扫描总结：</strong>${escapeHtml(result.summary || 'AI 已完成数据扫描')}</p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <span><strong style="color:var(--primary)">${caps.length}</strong> 个能力</span>
+        <span><strong style="color:var(--primary)">${result.table_count || 0}</strong> 张表</span>
+        <span><strong style="color:var(--primary)">${result.total_fields || 0}</strong> 个字段</span>
+        <span>🌐 公开 <strong style="color:#16a34a">${caps.filter(c => c.visibility === 'public').length}</strong></span>
+        <span>🔒 内部 <strong style="color:#ca8a04">${caps.filter(c => c.visibility !== 'public').length}</strong></span>
+      </div>
+    </div>`;
+
+  // 分类筛选下拉
+  const catFilter = $('capCategoryFilter');
+  if (catFilter) {
+    const categories = [...new Set(caps.map(c => c.category).filter(Boolean))];
+    catFilter.innerHTML = '<option value="">全部分类</option>' + categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  }
+
+  renderCapList(caps);
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderCapList(caps) {
+  const list = $('capList');
+  if (!list) return;
+
+  list.innerHTML = caps.map((cap, i) => {
+    const visColor = cap.visibility === 'public' ? '#16a34a' : '#ca8a04';
+    const visIcon = cap.visibility === 'public' ? '🌐' : '🔒';
+    return `<div class="cap-item" data-idx="${i}" style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:start;${i % 2 ? 'background:var(--surface-2)' : ''}" data-name="${escapeHtml((cap.name || '').toLowerCase())}" data-category="${escapeHtml(cap.category || '')}" data-visibility="${escapeHtml(cap.visibility || '')}">
+      <input type="checkbox" class="cap-check" data-idx="${i}" checked style="margin-top:3px;cursor:pointer">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="badge info" style="font-size:10px">${escapeHtml(cap.category || '未分类')}</span>
+          <strong style="font-size:13px">${escapeHtml(cap.name || '')}</strong>
+          <span style="font-size:10px;color:${visColor}">${visIcon} ${cap.visibility === 'public' ? '公开' : '内部'}</span>
+        </div>
+        <p style="margin:3px 0 0;font-size:12px;color:#64748b">${escapeHtml(cap.description || '')}</p>
+      </div>
+    </div>`;
+  }).join('');
+
+  // 绑定勾选事件
+  list.querySelectorAll('.cap-check').forEach(cb => {
+    cb.addEventListener('change', updateCapSelectCount);
+  });
+  updateCapSelectCount();
+}
+
+function updateCapSelectCount() {
+  const checks = document.querySelectorAll('.cap-check');
+  const checked = document.querySelectorAll('.cap-check:checked');
+  const el = $('capSelectCount');
+  if (el && checks.length) el.textContent = `已选 ${checked.length}/${checks.length}`;
+}
+
+function filterCapabilities() {
+  const keyword = ($('capFilter')?.value || '').toLowerCase().trim();
+  const cat = $('capCategoryFilter')?.value || '';
+  const vis = $('capVisFilter')?.value || '';
+  document.querySelectorAll('.cap-item').forEach(item => {
+    const name = item.dataset.name || '';
+    const category = item.dataset.category || '';
+    const visibility = item.dataset.visibility || '';
+    const matchKeyword = !keyword || name.includes(keyword);
+    const matchCat = !cat || category === cat;
+    const matchVis = !vis || visibility === vis;
+    item.style.display = (matchKeyword && matchCat && matchVis) ? '' : 'none';
+  });
+}
+
+function toggleAllCaps(checked) {
+  document.querySelectorAll('.cap-item:not([style*="display: none"]) .cap-check, .cap-item .cap-check').forEach(cb => {
+    const item = cb.closest('.cap-item');
+    if (item && item.style.display !== 'none') cb.checked = checked;
+  });
+  updateCapSelectCount();
+}
+
+async function packageSelectedCapabilities() {
+  const sourceId = window._currentPreviewSourceId;
+  if (!sourceId) { showToast('未找到数据源', 'error'); return; }
+
+  const checked = document.querySelectorAll('.cap-check:checked');
+  const allChecks = document.querySelectorAll('.cap-check');
+  const selectedCaps = Array.from(checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]).filter(Boolean);
+  const selectedNames = selectedCaps.map(c => c.name);
+  const customInstructions = $('capCustomInstructions')?.value?.trim() || '';
+
+  // 自动构建封装要求
+  let effectiveInstructions = customInstructions;
+  if (selectedCaps.length < allChecks.length) {
+    const deselected = Array.from(allChecks).filter(cb => !cb.checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]?.name).filter(Boolean);
+    effectiveInstructions = (customInstructions ? customInstructions + '\n\n' : '') + `请只封装以下能力：${selectedNames.join('、')}。\n不需要封装的能力：${deselected.join('、')}`;
+  }
+
+  const btn = $('capPackageBtn');
+  const hint = $('capStatusHint');
+  btn.disabled = true;
+  btn.textContent = 'AI 封装中...';
+  hint.innerHTML = '<span style="color:#b46b06">⏳ 正在调用大模型封装 Tool 定义（约 40-60 秒）...</span>';
+
+  try {
+    const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
+      method: 'POST',
+      body: JSON.stringify({ use_ai: true, custom_instructions: effectiveInstructions })
+    });
+
+    await loadAll();
+    renderAll();
+
+    // 隐藏能力预览面板，显示结果面板
+    $('capabilityPanel').style.display = 'none';
+
+    if (result.ai_used) {
+      showAiAnalysisResult(result);
+      showToast(`AI 封装完成：${result.tools?.length || 0} 个 Tool`, 'success');
+    } else if (result.error) {
+      showToast(`AI 失败: ${result.error}`, 'warning');
+    }
+  } catch (error) {
+    btn.disabled = false;
+    btn.textContent = '开始封装选中能力';
+    hint.innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(error.message)}</span>`;
+  }
+}
+
+function closeCapabilityPanel() {
+  const panel = $('capabilityPanel');
+  if (panel) panel.style.display = 'none';
 }
 
 function showAiAnalysisResult(result) {
@@ -1624,6 +1824,96 @@ function jumpToPublish() {
   renderAll();
 }
 
+// 编辑 Tool
+function editTool(assetId, toolName) {
+  const asset = (state.assets || []).find(a => a.id === assetId);
+  if (!asset) return;
+  const tools = list(asset.tools);
+  const tool = tools.find(t => typeof t === 'object' && t.name === toolName);
+  if (!tool) { showToast('Tool 不存在', 'error'); return; }
+
+  openModal(`编辑 Tool: ${tool.display_name || tool.name}`, [
+    { key: 'display_name', label: '显示名称', placeholder: '中文名' },
+    { key: 'name', label: '工具标识', placeholder: 'snake_case 英文名' },
+    { key: 'description', label: '功能描述', type: 'textarea', rows: 2 },
+    { key: 'category', label: '分类' },
+    { key: 'visibility', label: '可见性', type: 'select', options: [
+      { value: 'internal', label: '🔒 内部' },
+      { value: 'public', label: '🌐 公开' }
+    ]},
+    { key: 'sensitivity_reason', label: '敏感原因（可选）', type: 'textarea', rows: 1 }
+  ], {
+    display_name: tool.display_name || '',
+    name: tool.name,
+    description: tool.description || '',
+    category: tool.category || '',
+    visibility: tool.visibility || 'internal',
+    sensitivity_reason: tool.sensitivity_reason || ''
+  }, async data => {
+    try {
+      await api(`/api/platform/mcp-assets/${assetId}/tools/${toolName}`, { method: 'PUT', body: JSON.stringify(data) });
+      await loadAll();
+      renderAll();
+      showToast(`Tool 「${data.display_name || data.name}」已更新`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 删除 Tool
+function deleteTool(assetId, toolName) {
+  confirmDialog(`确认删除 Tool「${toolName}」吗？此操作不可恢复。`, async () => {
+    try {
+      await api(`/api/platform/mcp-assets/${assetId}/tools/${toolName}`, { method: 'DELETE' });
+      await loadAll();
+      renderAll();
+      showToast(`Tool「${toolName}」已删除`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 新增 Tool
+function addTool(assetId) {
+  openModal('新增 Tool', [
+    { key: 'name', label: '工具标识', placeholder: 'snake_case 英文名，如 get_order_list' },
+    { key: 'display_name', label: '显示名称', placeholder: '中文名' },
+    { key: 'description', label: '功能描述', type: 'textarea', rows: 2 },
+    { key: 'category', label: '分类', placeholder: '如 订单管理' },
+    { key: 'visibility', label: '可见性', type: 'select', options: [
+      { value: 'internal', label: '🔒 内部', selected: true },
+      { value: 'public', label: '🌐 公开' }
+    ]}
+  ], { visibility: 'internal' }, async data => {
+    if (!data.name?.trim()) { showToast('请输入工具标识', 'warning'); return; }
+    try {
+      await api(`/api/platform/mcp-assets/${assetId}/tools`, { method: 'POST', body: JSON.stringify(data) });
+      await loadAll();
+      renderAll();
+      showToast(`Tool「${data.display_name || data.name}」已添加`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
+// 刷新数据库直连数据源
+async function refreshDbSource(sourceId) {
+  const source = (state.sources || []).find(s => s.id === sourceId);
+  if (!source) return;
+  openModal('刷新数据库连接', [
+    { key: 'host', label: '主机地址' },
+    { key: 'port', label: '端口', default: '3306' },
+    { key: 'user', label: '用户名' },
+    { key: 'password', label: '密码', type: 'password' },
+    { key: 'database', label: '数据库名' }
+  ], { host: '', port: '3306', user: '', password: '', database: '' }, async data => {
+    if (!data.host || !data.user || !data.database) { showToast('请填写完整连接信息', 'warning'); return; }
+    try {
+      const result = await api(`/api/platform/data-sources/${sourceId}/refresh-db`, { method: 'POST', body: JSON.stringify(data) });
+      await loadAll();
+      renderAll();
+      showToast(`数据库已刷新：${result.table_count} 张表，${result.total_rows} 行`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+  });
+}
+
 // 切换 MCP 资产可见性
 async function toggleAssetVisibility(assetId, visibility) {
   if (!assetId) return;
@@ -1667,10 +1957,20 @@ function viewAssetTimeline(assetId) {
 }
 
 window.triggerRecognition = triggerRecognition;
+window.showCapabilityPanel = showCapabilityPanel;
+window.filterCapabilities = filterCapabilities;
+window.toggleAllCaps = toggleAllCaps;
+window.packageSelectedCapabilities = packageSelectedCapabilities;
+window.closeCapabilityPanel = closeCapabilityPanel;
+window.updateCapSelectCount = updateCapSelectCount;
 window.openAiRecognizeModal = openAiRecognizeModal;
 window.showAiAnalysisResult = showAiAnalysisResult;
 window.closeAiAnalysis = closeAiAnalysis;
 window.toggleAssetVisibility = toggleAssetVisibility;
+window.editTool = editTool;
+window.deleteTool = deleteTool;
+window.addTool = addTool;
+window.refreshDbSource = refreshDbSource;
 window.runSandboxTest = runSandboxTest;
 
 // 沙箱综合测试（逐 Tool + 部署检查 + 安全审计）

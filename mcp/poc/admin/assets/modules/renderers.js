@@ -232,13 +232,14 @@ function renderIntake() {
     const recStatus = item.recognition_status || 'draft';
     const statusBadge = badge(item.status || 'draft');
     const recBadge = recStatus === 'done' ? '<span class="badge success">已识别</span>' : recStatus === 'pending' ? '<span class="badge warning">识别中</span>' : '<span class="badge info">待识别</span>';
+    const isDbConn = item.auth_mode === 'Database Connection';
     const actionBtn = recStatus === 'done'
-      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button><button type="button" class="ghost-btn small" onclick="downloadSourceReport('${item.id}')">下载识别报告</button><button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')" title="使用真实 AI 大模型重新识别">重新识别</button></div>`
+      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button><button type="button" class="ghost-btn small" onclick="downloadSourceReport('${item.id}')">下载识别报告</button>${isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${item.id}')" title="重新读取数据库表结构">🔄 刷新DDL</button>` : ''}<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')" title="使用真实 AI 大模型重新识别">重新识别</button></div>`
       : `<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">开始识别</button>`;
     const outputInfo = recStatus === 'done'
       ? '<span class="badge success">OpenAPI 草案已生成</span>'
       : '<span class="muted-line">-</span>';
-    return `<tr><td><strong>${text(item.name || '未命名资料')}</strong></td><td>${text(item.project_name || item.project_id || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
+    return `<tr><td><strong>${text(item.name || '未命名资料')}</strong>${isDbConn ? ' <span style="font-size:10px;color:#2563eb">🗄️直连</span>' : ''}</td><td>${text(item.project_name || item.project_id || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
   }), '暂无业务资料。点击右上角「导入业务资料」开始接入。', 8);
 
   // 识别进度看板
@@ -402,6 +403,10 @@ function renderTooling() {
                 <code style="font-size:11px;color:var(--primary)">${text(tool.name)}</code>
                 ${visChip}
                 <span style="font-size:10px;color:#a16207;background:#fef3c7;padding:1px 6px;border-radius:3px">AI 推荐</span>
+                <span style="margin-left:auto;display:flex;gap:4px">
+                  <button type="button" class="ghost-btn small" style="font-size:11px;padding:2px 8px" onclick="editTool('${asset.id}','${escapeJs(tool.name)}')">编辑</button>
+                  <button type="button" class="ghost-btn small" style="font-size:11px;padding:2px 8px;color:#dc2626" onclick="deleteTool('${asset.id}','${escapeJs(tool.name)}')">删除</button>
+                </span>
               </div>
               <p style="margin:3px 0 0;font-size:12px;color:#64748b">${text(tool.description || '')}</p>
               ${tool.sensitivity_reason ? `<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ${text(tool.sensitivity_reason)}</p>` : ''}
@@ -418,6 +423,7 @@ function renderTooling() {
         <p class="muted-line" style="margin:4px 0 0">脱敏字段：${maskingRules.length ? text(maskingRules.join(' / ')) : '无'}</p>
       </div>` : '<p class="muted-line" style="margin:8px 0 0">尚未配置安全规则</p>'}
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="ghost-btn small" onclick="addTool('${asset.id}')">+ 新增 Tool</button>
         <button type="button" class="ghost-btn small" onclick="jumpToAssets('${asset.id}')">查看资产详情</button>
         <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
       </div>

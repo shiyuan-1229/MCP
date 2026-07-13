@@ -5,8 +5,9 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import fs from "fs";
 import Database from "better-sqlite3";
-import { runFullPipeline, analyzeBusinessData, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
+import { runFullPipeline, analyzeBusinessData, previewCapabilities, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
 import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
+import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema } from "./db-connector.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -1365,6 +1366,68 @@ app.get("/api/platform/data-sources", requireAuth, (req, res) => {
     ORDER BY s.status DESC, s.id`).all(...ids));
 });
 
+// 数据库直连：测试连接
+app.post("/api/platform/db/test-connection", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await dbTestConnection(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.json({ ok: false, message: err.message });
+  }
+});
+
+// 数据库直连：读取表结构
+app.post("/api/platform/db/fetch-schema", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { host, port, user, password, database, include_sample } = req.body || {};
+    if (!host || !user || !database) return res.status(400).json({ error: "host, user, database required" });
+    const schema = await dbFetchSchema({ host, port, user, password, database }, { includeSample: include_sample !== false });
+    res.json(schema);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 数据库直连：创建数据源并自动读取 DDL
+app.post("/api/platform/db/import", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { project_id, host, port, user, password, database, name } = req.body || {};
+    if (!project_id || !host || !user || !database) return res.status(400).json({ error: "project_id, host, user, database required" });
+    const project = db.prepare("SELECT id FROM platform_projects WHERE id = ?").get(project_id);
+    if (!project) return res.status(404).json({ error: "project not found" });
+
+    // 读取数据库结构
+    const schema = await dbFetchSchema({ host, port, user, password, database });
+
+    // 创建数据源
+    const dsId = makeId("ds");
+    const dsName = name || `${database} 数据库`;
+    db.prepare("INSERT INTO platform_data_sources (id, project_id, name, type, auth_mode, status, recognition_status) VALUES (?,?,?,?,?,?,?)").run(
+      dsId, project_id, dsName, 'Database', 'Database Connection', 'connected', 'draft'
+    );
+
+    // 存储数据库连接信息和 DDL 到 ai_analysis_results 作为临时存储
+    const analysisId = makeId("ai");
+    db.prepare(`INSERT OR REPLACE INTO ai_analysis_results
+      (id, source_id, project_id, analysis_json, openapi_spec_id, tools_json, categories_json, model, usage_json, raw_content, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))`).run(
+      analysisId, dsId, project_id,
+      JSON.stringify({ type: 'db_schema', database, table_count: schema.table_count, total_rows: schema.total_rows }),
+      '', '[]', '{}', 'db-connector', JSON.stringify({}), schema.full_content
+    );
+
+    res.status(201).json({
+      source_id: dsId,
+      source_name: dsName,
+      table_count: schema.table_count,
+      total_rows: schema.total_rows,
+      tables: schema.tables.map(t => ({ name: t.table_name, rows: t.table_rows, columns: t.column_count, comment: t.table_comment }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/platform/data-sources", requireAuth, requireAdmin, (req, res) => {
   const { project_id, name, type, auth_mode, scope, status } = req.body || {};
   if (!project_id || !name || !type) return res.status(400).json({ error: "project_id, name and type required" });
@@ -1383,6 +1446,49 @@ app.post("/api/platform/data-sources", requireAuth, requireAdmin, (req, res) => 
     JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?`).get(id));
 });
 
+// 能力预览：AI 快速扫描 → 列出发现的能力（不做封装）
+app.post("/api/platform/data-sources/:id/preview", requireAuth, requireAdmin, async (req, res) => {
+  const source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(req.params.id);
+  if (!source) return res.status(404).json({ error: "data source not found" });
+
+  if (!isAIConfigured()) return res.status(400).json({ error: "AI 引擎未配置 API Key" });
+
+  try {
+    // 获取样本内容（与 recognize 相同的逻辑）
+    let effectiveSample = req.body?.sample_content || '';
+    if (!effectiveSample) {
+      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      if (dbCache?.raw_content) {
+        effectiveSample = dbCache.raw_content;
+      } else {
+        const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
+        if (lvchengSrc) effectiveSample = lvchengSrc.sampleContent;
+      }
+    }
+
+    const result = await previewCapabilities({
+      name: source.name,
+      type: source.type,
+      auth_mode: source.auth_mode,
+      description: effectiveSample ? effectiveSample.slice(0, 500) : `业务资料类型: ${source.type}`,
+      sampleContent: effectiveSample || ''
+    });
+
+    res.json({
+      source_id: source.id,
+      capabilities: result.analysis.capabilities || [],
+      summary: result.analysis.summary || '',
+      data_type: result.analysis.data_type || '',
+      table_count: result.analysis.table_count || 0,
+      total_fields: result.analysis.total_fields || 0,
+      model: result.model,
+      usage: result.usage
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 触发 AI 接口识别：异步调用大模型 → 生成 OpenAPI + Tools
 app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, async (req, res) => {
   const source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(req.params.id);
@@ -1390,6 +1496,7 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
 
   const useAI = req.body?.use_ai !== false; // 默认使用 AI
   const sampleContent = req.body?.sample_content || req.body?.description || '';
+  const customInstructions = req.body?.custom_instructions || '';
 
   // 标记识别中
   db.prepare("UPDATE platform_data_sources SET recognition_status = 'pending' WHERE id = ?").run(source.id);
@@ -1430,12 +1537,19 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
 
   // 真实 AI 识别流程
   try {
-    // 如果前端未提供样本内容，尝试从种子数据中获取
+    // 如果前端未提供样本内容，尝试从种子数据或数据库导入缓存中获取
     let effectiveSample = sampleContent;
     if (!effectiveSample) {
-      const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
-      if (lvchengSrc) {
-        effectiveSample = lvchengSrc.sampleContent;
+      // 先查 ai_analysis_results 中 db-connector 存的 raw_content
+      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      if (dbCache?.raw_content) {
+        effectiveSample = dbCache.raw_content;
+      } else {
+        // 再查种子数据
+        const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
+        if (lvchengSrc) {
+          effectiveSample = lvchengSrc.sampleContent;
+        }
       }
     }
 
@@ -1444,7 +1558,8 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
       type: source.type,
       auth_mode: source.auth_mode,
       description: effectiveSample ? effectiveSample.slice(0, 500) : `业务资料类型: ${source.type}`,
-      sampleContent: effectiveSample || ''
+      sampleContent: effectiveSample || '',
+      customInstructions
     });
 
     // 更新数据源状态
@@ -1926,6 +2041,91 @@ app.put("/api/platform/mcp-assets/:id/visibility", requireAuth, requireAdmin, (r
   if (!asset) return res.status(404).json({ error: "asset not found" });
   db.prepare("UPDATE platform_mcp_assets SET visibility = ? WHERE id = ?").run(visibility, req.params.id);
   res.json({ id: req.params.id, visibility });
+});
+
+// 更新资产中的单个 Tool
+app.put("/api/platform/mcp-assets/:id/tools/:toolName", requireAuth, requireAdmin, (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const tools = decode(asset.tools);
+  const idx = tools.findIndex(t => (typeof t === 'object' ? t.name : t) === req.params.toolName);
+  if (idx < 0) return res.status(404).json({ error: "tool not found" });
+
+  const updates = req.body || {};
+  const tool = tools[idx];
+  if (typeof tool === 'object') {
+    if (updates.display_name !== undefined) tool.display_name = updates.display_name;
+    if (updates.description !== undefined) tool.description = updates.description;
+    if (updates.category !== undefined) tool.category = updates.category;
+    if (updates.visibility !== undefined) tool.visibility = updates.visibility;
+    if (updates.sensitivity_reason !== undefined) tool.sensitivity_reason = updates.sensitivity_reason;
+    if (updates.inputSchema !== undefined) tool.inputSchema = updates.inputSchema;
+    if (updates.name !== undefined && updates.name !== req.params.toolName) tool.name = updates.name;
+  }
+  tools[idx] = tool;
+  db.prepare("UPDATE platform_mcp_assets SET tools = ? WHERE id = ?").run(JSON.stringify(tools), req.params.id);
+  res.json({ ok: true, tool });
+});
+
+// 新增 Tool
+app.post("/api/platform/mcp-assets/:id/tools", requireAuth, requireAdmin, (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const { name, display_name, description, category, visibility, inputSchema } = req.body || {};
+  if (!name) return res.status(400).json({ error: "name required" });
+  const tools = decode(asset.tools);
+  if (tools.some(t => (typeof t === 'object' ? t.name : t) === name)) {
+    return res.status(409).json({ error: "tool name already exists" });
+  }
+  tools.push({ name, display_name: display_name || name, description: description || '', category: category || '未分类', visibility: visibility || 'internal', inputSchema: inputSchema || { type: 'object', properties: {}, required: [] } });
+  db.prepare("UPDATE platform_mcp_assets SET tools = ? WHERE id = ?").run(JSON.stringify(tools), req.params.id);
+  res.status(201).json({ ok: true, tool: tools[tools.length - 1] });
+});
+
+// 删除 Tool
+app.delete("/api/platform/mcp-assets/:id/tools/:toolName", requireAuth, requireAdmin, (req, res) => {
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const tools = decode(asset.tools);
+  const filtered = tools.filter(t => (typeof t === 'object' ? t.name : t) !== req.params.toolName);
+  if (filtered.length === tools.length) return res.status(404).json({ error: "tool not found" });
+  db.prepare("UPDATE platform_mcp_assets SET tools = ? WHERE id = ?").run(JSON.stringify(filtered), req.params.id);
+  res.json({ ok: true, remaining: filtered.length });
+});
+
+// 刷新数据库直连数据源（重新读取 DDL）
+app.post("/api/platform/data-sources/:id/refresh-db", requireAuth, requireAdmin, async (req, res) => {
+  const source = db.prepare("SELECT * FROM platform_data_sources WHERE id = ?").get(req.params.id);
+  if (!source) return res.status(404).json({ error: "data source not found" });
+  if (source.auth_mode !== 'Database Connection') return res.status(400).json({ error: "仅数据库直连数据源支持刷新" });
+
+  const config = req.body || {};
+  if (!config.host || !config.user || !config.database) return res.status(400).json({ error: "host, user, database required" });
+
+  try {
+    const schema = await dbFetchSchema({ host: config.host, port: config.port || '3306', user: config.user, password: config.password, database: config.database });
+    // 更新缓存的 DDL
+    db.prepare("UPDATE ai_analysis_results SET raw_content = ?, analysis_json = ?, created_at = datetime('now') WHERE source_id = ? AND model = 'db-connector'").run(
+      schema.full_content,
+      JSON.stringify({ type: 'db_schema', database: config.database, table_count: schema.table_count, total_rows: schema.total_rows, refreshed_at: new Date().toISOString().slice(0, 19).replace('T', ' ') }),
+      source.id
+    );
+    // 如果没有 db-connector 记录则新建
+    const existing = db.prepare("SELECT id FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector'").get(source.id);
+    if (!existing) {
+      const analysisId = makeId("ai");
+      db.prepare(`INSERT OR REPLACE INTO ai_analysis_results
+        (id, source_id, project_id, analysis_json, model, usage_json, raw_content, created_at)
+        VALUES (?,?,?,?,?,?,?, datetime('now'))`).run(
+        analysisId, source.id, source.project_id,
+        JSON.stringify({ type: 'db_schema', database: config.database, table_count: schema.table_count, total_rows: schema.total_rows }),
+        'db-connector', JSON.stringify({}), schema.full_content
+      );
+    }
+    res.json({ ok: true, table_count: schema.table_count, total_rows: schema.total_rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/platform/mcp-assets", requireAuth, requireAdmin, (req, res) => {
