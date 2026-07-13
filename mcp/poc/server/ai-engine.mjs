@@ -104,10 +104,65 @@ function extractJSON(text) {
 }
 
 // ============================================================
+// 阶段0: 能力预览 — AI 快速扫描发现了哪些能力（不做封装）
+// ============================================================
+export async function previewCapabilities(sourceMeta) {
+  const { name, type, auth_mode, description, sampleContent } = sourceMeta;
+
+  const systemPrompt = `你是一个企业数据分析师。请快速扫描企业提供的业务数据，列出其中包含的所有可识别的业务能力，不做详细封装。
+
+输出要求：
+- 返回严格的 JSON 格式
+- 不要输出任何其他文本
+- JSON 结构如下：
+{
+  "summary": "整体分析总结（中文，2-3句话）",
+  "data_type": "REST API | Database | Knowledge Base | Mixed",
+  "capabilities": [
+    {
+      "name": "能力中文名称",
+      "category": "分类，如：会员管理|积分管理|订单管理|营销活动|库存管理|系统配置",
+      "description": "这个能力是做什么的（1句话）",
+      "source": "来源表名或接口路径",
+      "visibility": "public|internal（只读/公开数据=public，含个人信息/敏感数据=internal）",
+      "field_count": 涉及的主要字段数量（数字）
+    }
+  ],
+  "table_count": 数据库表数量或接口数量（数字）,
+  "total_fields": 总字段数（数字）
+}`;
+
+  const userPrompt = `请快速扫描以下企业业务数据，列出所有可识别的业务能力：
+
+资料名称：${name}
+资料类型：${type}
+认证方式：${auth_mode}
+
+${sampleContent ? `资料内容/样例：\n${sampleContent.slice(0, 8000)}` : '（未提供详细内容）'}
+
+请列出所有发现的业务能力，每个能力标注分类、可见性和敏感程度。`;
+
+  const { content, usage } = await chatCompletion([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt }
+  ], { temperature: 0.2, max_tokens: 2048 });
+
+  const parsed = extractJSON(content);
+  if (!parsed) throw new Error('AI 返回内容无法解析为 JSON');
+
+  return {
+    analysis: parsed,
+    usage,
+    model: getAI_MODEL(),
+    analyzedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+  };
+}
+
+// ============================================================
 // 阶段1: AI 识别企业数据 → 生成结构化接口分析
 // ============================================================
 export async function analyzeBusinessData(sourceMeta) {
-  const { name, type, auth_mode, description, sampleContent } = sourceMeta;
+  const { name, type, auth_mode, description, sampleContent, customInstructions } = sourceMeta;
 
   const systemPrompt = `你是一个资深的企业 API 架构师和安全顾问。你的任务是分析企业提供的业务数据/资料，识别出其中包含的 API 接口、数据表、业务功能，并为每个识别出的能力生成标准的 OpenAPI 3.0 端点描述。
 
@@ -163,6 +218,8 @@ export async function analyzeBusinessData(sourceMeta) {
 描述：${description || '无'}
 
 ${sampleContent ? `资料内容/样例：\n${sampleContent.slice(0, 8000)}` : '（未提供详细内容，请根据资料名称和类型推断合理的接口定义）'}
+
+${customInstructions ? `\n## 封装要求（来自企业用户）\n${customInstructions}\n\n请在识别和封装时严格遵循以上要求。` : ''}
 
 请识别其中的接口/数据表/业务功能，生成结构化的分析结果。`;
 

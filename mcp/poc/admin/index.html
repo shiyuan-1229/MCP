@@ -110,6 +110,42 @@
           </div>
         </div>
 
+        <!-- 能力预览与封装工作台 -->
+        <div id="capabilityPanel" class="panel" style="margin-bottom:14px;display:none">
+          <div class="panel-head">
+            <h3 id="capPanelTitle">🔍 能力预览</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge info" id="capModelBadge"></span>
+              <button type="button" class="ghost-btn small" onclick="closeCapabilityPanel()">收起</button>
+            </div>
+          </div>
+          <div id="capSummary" style="padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:12px"></div>
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+            <input id="capFilter" placeholder="搜索能力名称或分类..." style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;flex:1;min-width:200px" oninput="filterCapabilities()">
+            <select id="capCategoryFilter" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px" onchange="filterCapabilities()">
+              <option value="">全部分类</option>
+            </select>
+            <select id="capVisFilter" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px" onchange="filterCapabilities()">
+              <option value="">全部可见性</option>
+              <option value="public">🌐 公开</option>
+              <option value="internal">🔒 内部</option>
+            </select>
+            <button type="button" class="ghost-btn small" onclick="toggleAllCaps(true)">全选</button>
+            <button type="button" class="ghost-btn small" onclick="toggleAllCaps(false)">全不选</button>
+            <span style="font-size:12px;color:#64748b" id="capSelectCount"></span>
+          </div>
+          <div id="capList" style="max-height:400px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px"></div>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px">
+            <strong style="display:block;margin-bottom:6px">📦 封装要求（可选）</strong>
+            <span style="font-size:12px;color:#64748b;display:block;margin-bottom:8px">勾选上方你想要的能力，然后在这里告诉 AI 你希望怎么封装。留空则按默认封装全部勾选的能力。</span>
+            <textarea id="capCustomInstructions" rows="3" placeholder="例：只要查询类 Tool；把订单相关的合并成一个 Tool；每个 Tool 最多 5 个参数..." style="width:100%;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:6px;resize:vertical;margin-bottom:10px"></textarea>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="button" class="primary-btn" id="capPackageBtn" onclick="packageSelectedCapabilities()">开始封装选中能力</button>
+              <span id="capStatusHint" style="font-size:12px"></span>
+            </div>
+          </div>
+        </div>
+
         <div class="content-grid two-col">
           <article class="panel">
             <div class="panel-head"><h3>资料接入引导</h3></div>
