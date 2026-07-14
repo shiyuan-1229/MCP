@@ -1,7 +1,6 @@
 import { request } from './modules/api.js';
 import { state, navItems, customerNavItems, isCustomerView, getNavItems, displayAssetName } from './modules/state.js';
 import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
-import { renderAll } from './modules/renderers.js';import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
 import { renderAll } from './modules/renderers.js';
 
 function list(value) { return Array.isArray(value) ? value : []; }
