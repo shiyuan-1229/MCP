@@ -63,6 +63,12 @@
           <div id="builderValueBoard" class="metric-grid"></div>
         </div>
         <div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>打造驾驶舱</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="summaryCards" class="metric-grid"></div></div>
+        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>业务价值</h3><small class="muted-line">模拟案例用于解释人工治理带来的结果</small></div><div id="governanceValueBoard" class="metric-grid"></div></article>
+        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>治理链路</h3><small class="muted-line">AI 提议 -> 人工修订 -> 最终发布</small></div><div id="governanceFlowBoard" class="metric-grid"></div></article>
+        <div class="content-grid two-col" id="governanceFocusBoards" style="margin-bottom:14px">
+          <article class="panel"><div class="panel-head"><h3>待处理事项</h3><small class="muted-line">按人工控制关口处理</small></div><div id="governanceActionBoard" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>风险提示</h3><small class="muted-line">优先处理安全、权限和验收阻断</small></div><div id="governanceRiskBoard" class="card-list"></div></article>
+        </div>
         <article class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资产生成漏斗</h3><small class="muted-line">点击各阶段可跳转到对应页面</small></div>
           <div id="generationFunnel" class="funnel-container" style="padding:16px;display:grid;gap:8px"></div>
@@ -200,8 +206,13 @@
         <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
           <select id="toolingCustomerFilter" onchange="filterToolingByCustomer()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><option value="">全部企业</option></select>
         </div>
+        <div class="panel control-flow-notice" style="margin-bottom:14px">
+          <strong>当前阶段：AI 只提供候选，不会自动生成正式 Tool 或 MCP</strong>
+          <p class="muted-line" style="margin:6px 0 0">请先看来源资料、业务域、读写类型和分组理由，再由管理员确认 Tool 边界，最后单独组装 MCP 草稿。</p>
+        </div>
+        <div id="toolingCandidateBoard" class="content-grid two-col tooling-candidate-board" style="margin-bottom:14px"></div>
         <div class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>Tool 映射看板</h3><small class="muted-line">接口端点 → MCP Tool → 安全规则</small></div>
+          <div class="panel-head"><h3>Tool 映射看板：已确认 Tool / MCP 资产</h3><small class="muted-line">只有通过人工边界确认的内容才会进入这里</small></div>
           <div class="metric-grid" id="toolingSummary" style="padding:14px"></div>
         </div>
         <article class="panel">
@@ -299,49 +310,13 @@
         </article>
       </section>
 
-      <section id="authorization" class="page" data-title="凭证与授权" data-eyebrow="处理调用阻断 · 验证授权 · 追踪变更">
-        <article class="panel p0-page-intro">
-          <div>
-            <p class="eyebrow">P0 · 先处理阻断</p>
-            <h2>凭证与授权中心</h2>
-            <p class="muted-line">先确认哪个 MCP 不能调用，再处理凭证、授权范围和接入健康。完整密钥只在服务端使用，页面只展示脱敏信息。</p>
-          </div>
-          <div class="p0-next-action"><strong>建议动作</strong><span>先处理第一条红色或黄色阻断项</span><button type="button" class="primary-btn small" onclick="document.getElementById('authorizationRows')?.scrollIntoView({ behavior: 'smooth', block: 'center' })">查看阻断项</button></div>
-        </article>
-        <div id="authorizationSummary" class="metric-grid"></div>
-        <div id="authorizationFocusBanner" class="p0-focus-banner hidden"></div>
-        <article class="panel">
-          <div class="panel-head"><div><h3>凭证与接入清单</h3><small class="muted-line">按状态和环境筛选，优先处理不能调用的接入项</small></div><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
-          <div id="authorizationFilters" class="project-controls"></div>
-          <div class="table-wrap">
-            <table class="p0-table">
-              <thead><tr><th>接入项</th><th>客户 / 项目</th><th>环境</th><th>授权范围</th><th>健康状态</th><th>凭证状态</th><th>过期时间</th><th>操作</th></tr></thead>
-              <tbody id="authorizationRows"></tbody>
-            </table>
-          </div>
-        </article>
-        <div class="content-grid two-col" style="margin-top:14px">
-          <article class="panel">
-            <div class="panel-head"><div><h3>接入验证</h3><small class="muted-line">测试失败时保留状态码和 Trace ID，便于回到调用监控诊断</small></div></div>
-            <div class="simulate-box p0-test-box">
-              <select id="authorizationTestConfig"><option value="">- 请选择接入项 -</option></select>
-              <button id="authorizationTestBtn" type="button" class="primary-btn" disabled onclick="runAuthorizationTest()">开始验证</button>
-              <pre id="authorizationTestResult">选择接入项后可查看验证结果</pre>
-            </div>
-          </article>
-          <article class="panel">
-            <div class="panel-head"><div><h3>最近健康检查</h3><small class="muted-line">只保留当前排障需要的结果</small></div></div>
-            <div class="table-wrap"><table class="p0-table compact"><thead><tr><th>时间</th><th>接入项</th><th>状态</th><th>延迟</th><th>状态码</th><th>Trace ID</th></tr></thead><tbody id="authorizationHealthRows"></tbody></table></div>
-          </article>
-        </div>
-      </section>
 
       <section id="monitoring" class="page" data-title="调用监控" data-eyebrow="异常优先 · Trace ID · Tool 调用诊断">
         <article class="panel p0-page-intro">
           <div>
             <p class="eyebrow">P0 · 再定位异常</p>
             <h2>调用监控与诊断</h2>
-            <p class="muted-line">先看失败调用，再看具体 Tool、调用方和 Trace ID。401/403 直接回到凭证与授权，400 直接回到 Tool 映射。</p>
+            <p class="muted-line">先看失败调用，再看具体 Tool、调用方和 Trace ID。401/403 直接去治理统计处理接入凭证，400 直接回到 Tool 映射。</p>
           </div>
           <div class="p0-next-action"><strong>建议动作</strong><span>先处理第一条异常，再确认成功调用</span><button type="button" class="primary-btn small" onclick="document.getElementById('monitoringRows')?.scrollIntoView({ behavior: 'smooth', block: 'center' })">查看异常</button></div>
         </article>
@@ -367,7 +342,8 @@
           </div>
         </article>
       </section>
-      <section id="governance" class="page" data-title="治理与统计" data-eyebrow="网关策略 · 调用监控 · 审计日志 · 使用统计">
+      <section id="governance" class="page" data-title="治理与统计" data-eyebrow="网关策略 · 接入台账 · 调用成效 · 审计日志">
+        <div id="accessBlockBanner" class="p0-focus-banner hidden" style="margin-bottom:14px"></div>
         <article class="panel" style="margin-bottom:20px">
           <div class="panel-head"><h3>运行成效总览</h3></div>
           <div class="tabs" id="accessTabs">
@@ -431,11 +407,14 @@
             </div>
           </article>
 
-        <!-- API 凭证管理 + 知识资料 + 结算资料 -->
+      </section>
+
+      <section id="settings" class="page" data-title="设置" data-eyebrow="客户管理 · 项目管理 · API 凭证 · 知识库 · 计费配置">
         <div class="content-grid two-col">
           <article class="panel">
             <div class="panel-head"><h3>API 凭证管理</h3><button id="createApiKeyBtn" type="button" class="primary-btn small admin-only" onclick="createApiKey()">创建 API Key</button></div>
             <p class="muted-line" style="margin:0 0 10px">每个接入方需要独立 API Key，用于 MCP 调用鉴权和调用追踪。支持设置权限范围和有效期。</p>
+            <div id="apiKeySummary" class="api-key-summary" aria-label="API 凭证统计"></div>
             <div class="table-wrap"><table><thead><tr><th>凭证名称</th><th>所属客户</th><th>Key ID</th><th>类型</th><th>环境</th><th>权限范围</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead><tbody id="apiKeyRows"></tbody></table></div>
           </article>
           <article class="panel">
@@ -464,9 +443,11 @@
       </section>
 
       <section id="review" class="page" data-title="分层审核" data-eyebrow="先审候选是否可信 → 再审 Tool 是否合理 → 最后验收 MCP 是否可发布">
+        <div id="reviewStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <article class="panel" style="margin-bottom:20px">
           <div class="panel-head"><h3>分层审核工作台</h3><small class="muted-line">先审候选是否可信 &#8594; 再审 Tool 是否合理 &#8594; 最后验收 MCP 是否可发布</small></div>
           <div id="reviewTodayGuide" style="margin-bottom:14px"></div>
+          <div id="reviewExampleBoard" class="review-example-board" style="margin-bottom:14px"></div>
           <div class="tabs" id="reviewStageTabs" style="margin-bottom:14px">
             <button type="button" class="tab-btn active" data-stage="candidate_review" onclick="switchReviewStageTab('candidate_review')">候选资产审核</button>
             <button type="button" class="tab-btn" data-stage="tool_review" onclick="switchReviewStageTab('tool_review')">Tool 审核</button>

@@ -63,9 +63,22 @@ const { pathToFileURL } = require('node:url');
   const repoUrl = pathToFileURL(path.resolve(__dirname, '..', 'mcp/poc/server/modules/governance/repository.mjs')).href;
   const { createGovernanceRepository } = await import(repoUrl);
   const manualUrl = pathToFileURL(path.resolve(__dirname, '..', 'mcp/poc/server/modules/governance/manual-checks.mjs')).href;
-  const { validateAcceptanceChecklist } = await import(manualUrl);
+  const { checkPublishGate, formatPublishGateResult, validateAcceptanceChecklist } = await import(manualUrl);
 
   const repo = createGovernanceRepository(db);
+
+  const incompleteGate = checkPublishGate({
+    manual_screen_decision: 'approve',
+    acceptance_passed: 1,
+    tool_boundary_status: 'confirmed',
+    tool_draft_id: 'tool_draft_1',
+    tool_draft_status: 'draft',
+    mcp_composition_status: 'not_started',
+    mcp_draft_status: 'not_started',
+    mcp_id: null
+  }, {});
+  assert.equal(incompleteGate.mcp_composition_confirmed, false);
+  assert.equal(formatPublishGateResult(incompleteGate).canPublish, false);
 
   // 准备项目
   db.prepare('INSERT INTO platform_projects (id, name, customer_id) VALUES (?, ?, ?)').run('proj_1', 'Demo Project', 'cust_1');

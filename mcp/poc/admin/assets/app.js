@@ -17,6 +17,10 @@ async function api(path, options = {}) {
   return request(state, path, options, handleUnauthorized);
 }
 
+window.__state = state;
+window.authHeader = () => state.token ? { Authorization: 'Bearer ' + state.token } : {};
+window.controlFlowRequest = api;
+
 window.syncBuilderRequestToServer = async function syncBuilderRequestToServer(payload = {}) {
   return api('/api/platform/builder/requests', {
     method: 'POST',
@@ -278,7 +282,9 @@ async function loadAll() {
       api('/api/platform/deliverables'),
       api('/api/platform/access-configs'),
       api('/api/platform/billing'),
-      api('/api/platform/builder/requests').catch(() => [])
+      api('/api/platform/builder/requests').catch(() => []),
+    api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
+    api('/api/platform/governance/reviews').catch(() => ({ items: [] }))
     ]);
     const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
     Object.assign(state, {
@@ -290,12 +296,14 @@ async function loadAll() {
       access,
       billing,
       builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
+    candidates: Array.isArray(candidates?.items) ? candidates.items : [],
+    reviews: Array.isArray(reviews?.items) ? reviews.items : [],
       accessGuide: null
     });
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions, builderRequests] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions, builderRequests, candidates, reviews, toolDrafts, governanceDemoOverview] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -318,7 +326,11 @@ async function loadAll() {
     api('/api/platform/governance/retro-summary').catch(() => null),
     api('/api/platform/governance/retro-reasons').catch(() => ({ items: [] })),
     api('/api/platform/governance/reuse-suggestions').catch(() => ({ items: [] })),
-    api('/api/platform/builder/requests').catch(() => [])
+    api('/api/platform/builder/requests').catch(() => []),
+    api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
+    api('/api/platform/governance/reviews').catch(() => ({ items: [] })),
+    api('/api/platform/governance/tool-drafts').catch(() => []),
+    api('/api/platform/governance/demo-overview').catch(() => null)
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
@@ -346,10 +358,16 @@ async function loadAll() {
     retroSummary: retroSummary || null,
     retroReasons: Array.isArray(retroReasons?.items) ? retroReasons.items : [],
     reuseSuggestions: Array.isArray(reuseSuggestions?.items) ? reuseSuggestions.items : [],
-    builderRequests: Array.isArray(builderRequests) ? builderRequests : []
+    builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
+    candidates: Array.isArray(candidates?.items) ? candidates.items : [],
+    reviews: Array.isArray(reviews?.items) ? reviews.items : [],
+    toolDrafts: Array.isArray(toolDrafts) ? toolDrafts : [],
+    governanceDemoOverview: governanceDemoOverview || null
   });
   refreshLocalAdminCollections();
 }
+
+window.refreshData = async function refreshData() { await loadAll(); renderAll(); };
 
 async function login() {
   $('loginError').textContent = '';
@@ -2553,15 +2571,7 @@ function navigateToPage(pageId, focus = {}) {
   const allowed = navItems.some(item => item.id === pageId && item.roles.includes('admin'));
   if (!allowed) return;
   state.currentPage = pageId;
-  if (pageId === 'authorization') state.authorizationFocusId = focus.accessId || null;
   if (pageId === 'monitoring') state.monitoringFocusId = focus.eventId || null;
-  renderAll();
-}
-
-function setAuthorizationFilter(key, value) {
-  if (!state.authorizationFilters) state.authorizationFilters = { status: 'all', environment: 'all', projectId: 'all' };
-  if (!Object.prototype.hasOwnProperty.call(state.authorizationFilters, key)) return;
-  state.authorizationFilters[key] = value;
   renderAll();
 }
 
@@ -2572,17 +2582,9 @@ function setMonitoringFilter(key, value) {
   renderAll();
 }
 
-async function runAuthorizationTest() {
-  const select = $('authorizationTestConfig');
-  if (!select?.value) {
-    showToast('请选择接入项', 'warning');
-    return;
-  }
-  await testAccessConfig(select.value, 'authorizationTestResult');
-}
 // 步骤条点击跳转（被 renderers.js 中 step-item onclick 调用）
 function jumpToPage(pageId) {
-  const allPages = ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'authorization', 'monitoring'];
+  const allPages = ['summary', 'intake', 'recognition', 'tooling', 'review', 'assets', 'publish', 'delivery', 'monitoring'];
   if (!allPages.includes(pageId)) return;
   // 检查权限
   if (state.user?.role !== 'admin') return;
@@ -2927,9 +2929,7 @@ window.jumpToAssets = jumpToAssets;
 window.jumpToPublish = jumpToPublish;
 window.jumpToPage = jumpToPage;
 window.navigateToPage = navigateToPage;
-window.setAuthorizationFilter = setAuthorizationFilter;
 window.setMonitoringFilter = setMonitoringFilter;
-window.runAuthorizationTest = runAuthorizationTest;
 
 async function bootApp() {
   if (!state.user) state.user = await api('/auth/me');

@@ -97,18 +97,12 @@ export const state = {
     search: '',
     sortBy: 'time-desc'
   },
-  authorizationFilters: {
-    status: 'all',
-    environment: 'all',
-    projectId: 'all'
-  },
   monitoringFilters: {
     status: 'all',
     assetId: 'all',
     toolName: 'all',
     timeRange: '24h'
   },
-  authorizationFocusId: null,
   monitoringFocusId: null,
   billingFilters: {
     customer: 'all',
@@ -137,6 +131,10 @@ export const state = {
   },
   // 企业 MCP 打造工作台：B 端价值指标
   builderMetrics: null,
+  candidates: [],
+  reviews: [],
+  toolDrafts: [],
+  governanceDemoOverview: null,
   // 复盘与复用（嵌入 MCP 资产页）
   retroSummary: null,
   retroReasons: [],
@@ -152,11 +150,10 @@ export const navItems = [
   { id: 'review', label: '分层审核', icon: '📋', desc: '人工审核工作台 · 候选审核 → Tool 审核 → 发布验收', roles: ['admin'] },
   { id: 'assets', label: 'MCP 资产', icon: '📦', desc: '已封装的 MCP Server 资产列表、版本、状态与复用/复盘信息', roles: ['admin'] },
   { id: 'publish', label: '测试发布', icon: '🚀', desc: '交付负责人验收发布 · 沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
-  { id: 'authorization', label: '凭证与授权', icon: '🔐', desc: '处理凭证、授权范围和接入健康阻断，确认 MCP 是否可以安全调用', roles: ['admin'] },
   { id: 'monitoring', label: '调用监控', icon: '📈', desc: '按异常优先查看 Tool 调用、Trace ID 和下一步诊断动作', roles: ['admin'] },
   { id: 'delivery', label: '交付管理', icon: '📋', desc: '交付团队归档与复盘 · 配置包、测试报告、调用日志等交付物下载', roles: ['admin'] },
-  { id: 'governance', label: '治理统计', icon: '🛡️', desc: '网关策略、调用监控、审计日志与使用统计', roles: ['admin'] },
-  { id: 'settings', label: '设置', icon: '⚙️', desc: '客户管理、项目管理、计费配置、知识库与 API 凭证', roles: ['admin'] }
+  { id: 'governance', label: '治理统计', icon: '🛡️', desc: '网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
+  { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
 ];
 export const customerNavItems = [
   { id: 'mcp-builder', label: '\u0041\u0049 \u9700\u6c42\u751f\u6210 MCP', roles: ['customer'] },

@@ -106,7 +106,11 @@ export function switchPage(id) {
 function renderMetricSummary(targetId, items) {
   const node = $(targetId);
   if (!node) return;
-  node.innerHTML = items.map(item => metric(item.label, item.value, item.meta || '')).join('');
+  node.innerHTML = items.map(item => {
+    const card = metric(item.label, item.value, item.meta || '');
+    if (!item.page) return card;
+    return `<div class="metric-link" role="button" tabindex="0" onclick="jumpToPage('${item.page}')" onkeydown="if(event.key==='Enter'||event.key===' '){jumpToPage('${item.page}')}" style="cursor:pointer">${card}</div>`;
+  }).join('');
 }
 
 function renderSimpleRows(targetId, rows, emptyMessage, colspan) {
@@ -127,25 +131,29 @@ function renderCardList(targetId, cards, emptyMessage) {
 function renderStepBar(currentStep) {
   const steps = [
     { n: 1, label: '资料接入', page: 'intake' },
-    { n: 2, label: '接口识别', page: 'recognition' },
-    { n: 3, label: 'Tool 映射', page: 'tooling' },
-    { n: 4, label: 'MCP 资产', page: 'assets' },
-    { n: 5, label: '测试发布', page: 'publish' },
-    { n: 6, label: '交付管理', page: 'delivery' }
+    { n: 2, label: 'AI 识别结果', page: 'recognition' },
+    { n: 3, label: '候选业务能力', page: 'review' },
+    { n: 4, label: '候选接口人工初筛', page: 'review' },
+    { n: 5, label: '人工确认 Tool 边界', page: 'tooling' },
+    { n: 6, label: '生成 Tool 草稿', page: 'tooling' },
+    { n: 7, label: '人工确认 MCP 组成', page: 'tooling' },
+    { n: 8, label: '生成 MCP 草稿', page: 'assets' },
+    { n: 9, label: '发布前验收', page: 'publish' },
+    { n: 10, label: '正式发布', page: 'publish' }
   ];
   return `<div class="step-bar">${steps.map(s => `
     <div class="step-item ${s.n <= currentStep ? 'done' : ''} ${s.n === currentStep ? 'current' : ''}" onclick="jumpToPage('${s.page}')">
       <span class="step-num">${s.n <= currentStep ? '\u2705' : s.n}</span>
       <span class="step-text">${s.label}</span>
     </div>
-    ${s.n < 6 ? '<span class="step-arrow">\u2192</span>' : ''}
+    ${s.n < 10 ? '<span class="step-arrow">\u2192</span>' : ''}
   `).join('')}</div>`;
 }
 
 // ============================================================
 // 1. 生成总览 — 资产生成驾驶舱 + 全链路漏斗
 // ============================================================
-function renderSummary() {
+function renderLegacySummary() {
   const sources = list(state.sources);
   const specs = list(state.openapiSpecs);
   const assets = list(state.assets);
@@ -164,6 +172,43 @@ function renderSummary() {
   ]);
 
   // 资产生成漏斗
+  const demo = state.governanceDemoOverview;
+  if (demo?.valueMetrics) {
+    const metrics = demo.valueMetrics;
+    renderMetricSummary('governanceValueBoard', [
+      { label: '资料转资产周期', value: `${metrics.asset_cycle_days} 天`, meta: '从接入到可发布的平均周期' },
+      { label: '拦截高风险项', value: metrics.risk_items_intercepted, meta: '敏感字段或写操作进入人工审核' },
+      { label: '复用已有资产', value: metrics.reused_assets, meta: '避免重复梳理和重复封装' },
+      { label: '减少重复工作', value: `${metrics.repeated_work_reduction}%`, meta: 'AI 识别后由人工聚焦关键差异' },
+      { label: '当前可发布 MCP', value: metrics.publishable_mcps, meta: '已完成所有治理门禁' }
+    ]);
+    const completed = ['资料接入', 'AI 识别结果', '候选业务能力', '人工初筛', 'Tool 边界确认', 'Tool 草稿', 'MCP 组成确认', 'MCP 草稿', '发布前验收', '正式发布'];
+    const governanceFlowRoutes = ['intake', 'recognition', 'review', 'review', 'tooling', 'tooling', 'assets', 'assets', 'publish', 'publish'];
+    renderMetricSummary('governanceFlowBoard', completed.map((label, index) => ({
+      label,
+      value: index < 8 ? '已确认' : index === 8 ? '待验收' : '已发布',
+      meta: index === 5 ? `${demo.toolDrafts.length} 个 Tool 草稿，前往 Tool 映射` : index === 7 ? `${demo.mcpDrafts.length} 个 MCP 草稿，前往 MCP 资产` : '点击前往对应工作台',
+      page: governanceFlowRoutes[index]
+    })));
+
+    renderCardList('governanceActionBoard', [
+      `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('review')"><h4>处理高风险审核</h4><p>${metrics.risk_items_intercepted} 个敏感字段或写操作需要人工审核</p></div>`,
+      `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('tooling')"><h4>确认 Tool 草稿</h4><p>${demo.toolDrafts.length} 个草稿等待确认业务边界</p></div>`,
+      `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('publish')"><h4>验收并发布 MCP</h4><p>${metrics.publishable_mcps} 个 MCP 已具备发布条件</p></div>`
+    ], '当前没有待处理事项');
+
+    const failures = list(demo.acceptanceFailures);
+    renderCardList('governanceRiskBoard', failures.map(item =>
+      `<div class="info-card" style="cursor:pointer;border-left:3px solid #c93636" onclick="jumpToPage('monitoring')"><h4>${text(item.check || '验收失败')} · HTTP ${text(item.status_code || '-')}</h4><p>Trace ID：${text(item.trace_id || '-')} · 前往调用监控诊断</p></div>`
+    ), '当前没有发布阻断风险');
+  }
+
+  ['builderValueBoard', 'summaryCards', 'generationFunnel', 'generationFlowBoard', 'projectRows', 'activityList'].forEach(id => {
+    const node = $(id);
+    const panel = node?.closest('.panel');
+    if (panel) panel.hidden = true;
+  });
+
   const funnelData = [
     { label: '业务资料', value: sources.length, color: '#3558d6', page: 'intake' },
     { label: 'OpenAPI 草案', value: specs.length, color: '#2563a8', page: 'recognition' },
@@ -224,6 +269,78 @@ function renderSummary() {
 // ============================================================
 // 2. 资料接入 — 上传 + 识别 + 产出物
 // ============================================================
+function governanceWorkQueue(demo) {
+  const candidates = list(demo?.candidates);
+  const drafts = list(demo?.toolDrafts);
+  const mcps = list(demo?.mcpDrafts);
+  return {
+    manualScreen: candidates.filter(item => item.stage === 'rejected').length,
+    toolBoundary: candidates.filter(item => item.stage === 'risk_review').length,
+    mcpComposition: drafts.filter(item => item.status === 'draft').length,
+    acceptance: mcps.filter(item => item.status === 'acceptance_failed').length
+  };
+}
+
+function removeLegacySummaryPanels() {
+  if (typeof document === 'undefined') return;
+  ['builderValueBoard', 'summaryCards', 'generationFunnel', 'generationFlowBoard', 'projectRows', 'activityList'].forEach(id => {
+    $(id)?.closest('.panel')?.remove();
+  });
+}
+
+function renderGovernanceFlow() {
+  const demo = state.governanceDemoOverview;
+  const metrics = demo?.valueMetrics;
+  const board = $('governanceFlowBoard');
+  if (!board || !metrics) return;
+  board.classList.remove('metric-grid');
+
+  const queue = governanceWorkQueue(demo);
+  const steps = [
+    { label: '资料接入', page: 'intake', state: 'done', status: '已完成' },
+    { label: 'AI 识别结果', page: 'recognition', state: 'done', status: '已完成' },
+    { label: '候选业务能力', page: 'review', state: 'done', status: '已完成' },
+    { label: '候选接口人工初筛', page: 'review', state: 'blocked', status: '被拦截', count: queue.manualScreen },
+    { label: '人工确认 Tool 边界', page: 'tooling', state: 'pending', status: '待处理', count: queue.toolBoundary },
+    { label: '生成 Tool 草稿', page: 'tooling', state: 'done', status: '已完成' },
+    { label: '人工确认 MCP 组成', page: 'tooling', state: 'pending', status: '待处理', count: queue.mcpComposition },
+    { label: '生成 MCP 草稿', page: 'assets', state: 'done', status: '已完成' },
+    { label: '发布前验收', page: 'publish', state: 'pending', status: '待处理', count: queue.acceptance },
+    { label: '正式发布', page: 'publish', state: 'ready', status: '可发布', count: metrics.publishable_mcps }
+  ];
+  const current = steps.find(item => item.state === 'pending');
+  board.innerHTML = `<div class="governance-flow-summary"><strong>当前卡点：${text(current?.label || '暂无待处理关口')}</strong><span>${current?.count || 0} 项待处理，按优先级进入下方待办</span></div><ol class="governance-flow-board">${steps.map((item, index) => `<li class="governance-flow-step is-${item.state}"><button type="button" onclick="jumpToPage('${item.page}')"><span class="flow-index">${index + 1}</span><span class="flow-label">${item.label}</span><span class="flow-state">${item.status}${item.count ? ` ${item.count}` : ''}</span></button></li>`).join('')}</ol>`;
+}
+
+function renderSummary() {
+  removeLegacySummaryPanels();
+  const demo = state.governanceDemoOverview;
+  const metrics = demo?.valueMetrics;
+  if (!metrics) return;
+
+  const queue = governanceWorkQueue(demo);
+  renderMetricSummary('governanceValueBoard', [
+    { label: '资料转资产周期', value: `${metrics.asset_cycle_days} 天`, meta: '从接入到可发布的平均周期' },
+    { label: '高风险拦截', value: metrics.risk_items_intercepted, meta: '敏感字段或写操作进入人工审核' },
+    { label: '复用资产', value: metrics.reused_assets, meta: '避免重复梳理和重复封装' },
+    { label: '减少重复工作', value: `${metrics.repeated_work_reduction}%`, meta: 'AI 识别后由人工聚焦关键差异' },
+    { label: '可发布 MCP', value: metrics.publishable_mcps, meta: '已完成所有治理门禁' }
+  ]);
+  renderGovernanceFlow();
+
+  const actions = [
+    { label: '待人工初筛', count: queue.manualScreen, page: 'review', description: '案例：订单状态更新候选，需确认是否具备独立业务责任边界' },
+    { label: '待确认 Tool 边界', count: queue.toolBoundary, page: 'tooling', description: '案例：客户手机号导出，需限制敏感字段与读取范围' },
+    { label: '待确认 MCP 组成', count: queue.mcpComposition, page: 'tooling', description: '案例：订单查询与订单明细是否组合为一个只读 MCP' },
+    { label: '待验收', count: queue.acceptance, page: 'publish', description: '案例：退款处理 MCP，先处理安全检测和发布前阻断' }
+  ];
+  $('governanceActionBoard')?.classList.add('governance-action-list');
+  renderCardList('governanceActionBoard', actions.map((item, index) => `<button type="button" class="governance-action" onclick="jumpToPage('${item.page}')"><span class="action-priority">优先级 ${index + 1}</span><strong>${item.label}</strong><span class="action-description">${item.description}</span><span class="action-count">${item.count}</span><span class="action-link">前往处理</span></button>`), '当前没有待处理事项');
+
+  const failures = list(demo.acceptanceFailures).slice(0, 3);
+  renderCardList('governanceRiskBoard', failures.map(item => `<button type="button" class="governance-risk" onclick="navigateToPage('monitoring', { eventId: '${escapeJs(item.trace_id || '')}' })"><span class="risk-title">${text(item.check || '验收失败')} · HTTP ${text(item.status_code || '-')}</span><span class="risk-trace">Trace ID：${text(item.trace_id || '-')}</span><span class="action-link">调用监控诊断</span></button>`), '当前没有发布阻断风险');
+}
+
 function renderIntake() {
   const items = list(state.sources);
   const builderRequests = list(state.builderRequests);
@@ -469,7 +586,147 @@ function extractEndpointCount(specObj) {
 // ============================================================
 // 4. Tool 映射 — OpenAPI -> MCP Tool + 安全规则配置
 // ============================================================
+function jsonList(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderToolingCandidates() {
+  const root = $('toolingCandidateBoard');
+  if (!root) return;
+  const candidates = list(state.candidates);
+  root.classList.toggle('is-empty', !candidates.length);
+  if (!candidates.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">资料确认后，AI 结果会先出现在这里。确认候选和 Tool 边界后，才会出现 MCP 草稿。</p></article>';
+    return;
+  }
+
+  root.innerHTML = candidates.map(candidate => {
+    const tables = jsonList(candidate.source_tables);
+    const endpoints = jsonList(candidate.source_endpoints);
+    const hits = jsonList(candidate.sensitive_hits);
+    const aiTools = jsonList(candidate.ai_tools_snapshot);
+    const humanTools = jsonList(candidate.human_tools_snapshot);
+    const screenApproved = candidate.manual_screen_decision === 'approve';
+    const toolConfirmed = candidate.tool_boundary_status === 'confirmed';
+    const toolDraft = candidate.tool_draft_status === 'draft';
+    const mcpCompositionConfirmed = candidate.mcp_composition_status === 'confirmed';
+    const mcpDraft = candidate.mcp_draft_status === 'draft';
+    const status = mcpDraft ? 'MCP 草稿已生成' : toolConfirmed ? 'Tool 边界已确认' : screenApproved ? '待确认 Tool 边界' : '待人工初筛';
+    const statusClass = mcpDraft || toolConfirmed ? 'success' : screenApproved ? 'warning' : 'info';
+    const toolNames = (toolConfirmed ? humanTools : aiTools).map(tool => typeof tool === 'string' ? tool : (tool.name || tool.display_name || '未命名 Tool'));
+    const controls = !screenApproved
+      ? '<button type="button" class="primary-btn small" onclick="confirmCandidateScreen(\'' + escapeJs(candidate.id) + '\')">确认候选业务能力</button>'
+      : !toolConfirmed
+        ? '<button type="button" class="primary-btn small" onclick="confirmCandidateTool(\'' + escapeJs(candidate.id) + '\')">确认 Tool 边界</button>'
+        : !mcpDraft
+          ? '<button type="button" class="primary-btn small" onclick="assembleCandidateMcp(\'' + escapeJs(candidate.id) + '\')">组装 MCP 草稿</button>'
+          : '<span class="badge success">等待发布前验收</span>';
+    return '<article class="panel control-flow-candidate">' +
+      '<div class="panel-head"><div><span class="eyebrow">AI 候选业务能力</span><h3>' + text(candidate.name || '-') + '</h3><p class="muted-line">不是正式 Tool，也不是已发布 MCP</p></div><span class="badge ' + statusClass + '">' + status + '</span></div>' +
+      '<div class="control-flow-grid">' +
+        '<div><strong>来源证据</strong><p>表：' + text(tables.join('、') || '未识别') + '</p><p>接口：' + text(endpoints.join('、') || '未识别') + '</p></div>' +
+        '<div><strong>AI 建议与理由</strong><p>业务域：' + text(candidate.business_domain || '-') + '</p><p>业务动作：' + text(candidate.business_action || '-') + '</p><p>读写类型：' + text(candidate.operation_type || '-') + ' · 权限：' + text(candidate.permission_scope || '-') + '</p><p>分组理由：' + text(candidate.grouping_reason || '-') + '</p><p>边界规则：' + text(candidate.boundary_rule || '-') + '</p></div>' +
+        '<div><strong>人工最终边界</strong><label class="muted-line">Tool 名称（可删减、合并或拆分）<input id="toolNames_' + escapeJs(candidate.id) + '" value="' + escapeHtml(toolNames.join(', ')) + '" placeholder="例如：query_order, query_order_status" style="width:100%;margin-top:4px"></label><p>敏感字段：' + text(hits.map(hit => typeof hit === 'string' ? hit : (hit.label || hit.field || '')).join('、') || '未命中') + '</p><label class="muted-line">确认理由<input id="toolReason_' + escapeJs(candidate.id) + '" value="' + escapeHtml(candidate.tool_confirmation_reason || '人工确认：AI 建议与业务边界一致') + '" style="width:100%;margin-top:4px"></label></div>' +
+      '</div><div class="row-actions" style="margin-top:12px">' + controls + '</div></article>';
+  }).join('');
+}
+
+window.confirmCandidateScreen = async function(candidateId) {
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/manual-screen', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'approve', reason: '人工确认候选业务能力可进入 Tool 边界审核' })
+    });
+    await window.refreshData();
+    showToast('候选业务能力已确认，下一步请确认 Tool 边界。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
+window.confirmCandidateTool = async function(candidateId) {
+  const candidate = list(state.candidates).find(item => item.id === candidateId);
+  const reason = $('toolReason_' + candidateId)?.value?.trim();
+  const aiTools = jsonList(candidate?.ai_tools_snapshot);
+  const editedNames = ($('toolNames_' + candidateId)?.value || '').split(',').map(name => name.trim()).filter(Boolean);
+  const humanTools = editedNames.map(name => aiTools.find(tool => (typeof tool === 'object' ? tool.name : tool) === name) || { name, description: '人工新增或拆分的 Tool' });
+  if (!humanTools.length) {
+    showToast('请至少保留一个 Tool 名称。', 'warning');
+    return;
+  }
+  if (!reason) {
+    showToast('请填写 Tool 边界确认理由。', 'warning');
+    return;
+  }
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/confirm-tool', {
+      method: 'POST',
+      body: JSON.stringify({ human_tools: humanTools, reason })
+    });
+    await window.refreshData();
+    showToast('Tool 边界已确认，可以组装 MCP 草稿。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
+window.createCandidateToolDraft = async function(candidateId) {
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/create-tool-draft', {
+      method: 'POST'
+    });
+    await window.refreshData();
+    showToast('Tool 草稿已生成，请人工确认 MCP 由哪些 Tool 组成。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
+window.confirmCandidateMcpComposition = async function(candidateId) {
+  const reason = window.prompt('请填写 MCP 组成确认理由，例如：订单查询场景只组合只读 Tool。', '按业务场景、权限范围和读写风险确认 MCP 组成');
+  if (!reason) return;
+  const candidate = list(state.candidates).find(item => item.id === candidateId);
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/confirm-mcp-composition', {
+      method: 'POST',
+      body: JSON.stringify({ tool_draft_ids: [candidate?.tool_draft_id], reason })
+    });
+    await window.refreshData();
+    showToast('MCP 组成已确认，现在可以生成 MCP 草稿。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
+window.assembleCandidateMcp = async function(candidateId) {
+  const candidate = list(state.candidates).find(item => item.id === candidateId);
+  if (candidate?.tool_boundary_status === 'confirmed' && candidate?.tool_draft_status !== 'draft') {
+    return window.createCandidateToolDraft(candidateId);
+  }
+  if (candidate?.mcp_composition_status !== 'confirmed') {
+    return window.confirmCandidateMcpComposition(candidateId);
+  }
+  const name = window.prompt('请输入 MCP 草稿名称：', (candidate?.name || '业务能力') + ' MCP 草稿');
+  if (!name) return;
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/assemble-mcp', {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    });
+    await window.refreshData();
+    showToast('MCP 草稿已生成，请进入发布前人工验收。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
 function renderTooling() {
+  renderToolingCandidates();
   const allAssets = list(state.assets);
   const policies = list(state.policies);
 
@@ -492,7 +749,7 @@ function renderTooling() {
 
   // 步骤条
   const stepBar = $('toolingStepBar');
-  if (stepBar) stepBar.innerHTML = renderStepBar(3);
+  if (stepBar) stepBar.innerHTML = renderStepBar(5);
 
   renderMetricSummary('toolingSummary', [
     { label: 'OpenAPI 草案（已确认）', value: confirmedSpecs, meta: '已确认，可进入 Tool 映射阶段' },
@@ -514,7 +771,7 @@ function renderTooling() {
     let html = '';
     const cnames = Object.keys(grouped);
     if (!cnames.length) {
-      html = emptyState('暂无 Tool 映射结果。请先在接口识别页确认 OpenAPI 草案，系统将自动映射为 MCP Tool。');
+      html = emptyState('暂无已确认 Tool。请先在接口识别页确认 OpenAPI 草案，再到这里查看 AI 候选并人工确认 Tool 边界。');
     } else {
       cnames.forEach(cname => {
         html += `<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;padding:6px 10px;background:var(--surface-2);border-radius:4px">🏢 ${escapeHtml(cname)}</div>`;
@@ -596,7 +853,7 @@ function renderTooling() {
 function renderAssets() {
   // 步骤条
   const stepBar = $('assetsStepBar');
-  if (stepBar) stepBar.innerHTML = renderStepBar(4);
+  if (stepBar) stepBar.innerHTML = renderStepBar(8);
 
   renderSimpleRows('assetRows', list(state.assets).map(asset => {
     const tools = list(asset.tools);
@@ -777,7 +1034,7 @@ function renderRetroSummaryBoard() {
 function renderPublish() {
   const allReleases = adminReleases();
   const stepBar = $('publishStepBar');
-  if (stepBar) stepBar.innerHTML = renderStepBar(5);
+  if (stepBar) stepBar.innerHTML = renderStepBar(9);
 
   // 企业筛选器
   const filter = $('publishCustomerFilter');
@@ -919,7 +1176,7 @@ function renderDeliveryClosureBoard() {
 
 function renderDeliverables() {
   const stepBar = $('deliveryStepBar');
-  if (stepBar) stepBar.innerHTML = renderStepBar(6);
+  if (stepBar) stepBar.innerHTML = renderStepBar(10);
   renderDeliveryClosureBoard();
 
   // 企业筛选器
@@ -1004,73 +1261,26 @@ function maskCallText(value) {
     .replace(/(api[_-]?key|secret|token|password|authorization|身份证号|账号)(\s*[:=]\s*)(["'][^"']*["']|[^,\s}]+)/gi, '$1$2***')
     .slice(0, 600);
 }
-function renderAuthorizationPage() {
-  if (isCustomerView()) return;
-  const filters = state.authorizationFilters || { status: 'all', environment: 'all', projectId: 'all' };
-  const allAccess = list(state.access);
-  const filtered = allAccess.filter(item => {
-    const status = item.status || (item.last_health_status === 'error' ? 'error' : 'pending');
-    return (filters.status === 'all' || status === filters.status)
-      && (filters.environment === 'all' || item.environment === filters.environment)
-      && (filters.projectId === 'all' || item.project_id === filters.projectId);
-  });
-  const blocked = allAccess.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error');
-  const enabled = allAccess.filter(item => item.status === 'enabled');
-  const expiring = allAccess.filter(item => item.credential_expires_at && new Date(item.credential_expires_at) < new Date(Date.now() + 30 * 86400000));
 
-  renderMetricSummary('authorizationSummary', [
-    { label: '待处理阻断', value: blocked.length, meta: '先处理红色或黄色接入项' },
-    { label: '已启用凭证', value: enabled.length, meta: '当前可用于调用' },
-    { label: '健康异常', value: allAccess.filter(item => item.last_health_status === 'error').length, meta: '建议查看最近检查' },
-    { label: '30 天内过期', value: expiring.length, meta: expiring.length ? '需要提前更新' : '暂无即将过期' }
-  ]);
-
-  const focus = state.authorizationFocusId ? allAccess.find(item => item.id === state.authorizationFocusId) : null;
-  const priority = focus || blocked[0] || allAccess[0];
-  const focusBanner = $('authorizationFocusBanner');
-  if (focusBanner) {
-    focusBanner.classList.toggle('hidden', !priority);
-    if (priority) {
-      const reason = priority.last_health_status === 'error' ? '最近健康检查失败' : priority.status === 'expired' ? '凭证已过期' : priority.status === 'enabled' ? '当前接入可用，可继续查看调用' : '当前凭证或授权状态需要处理';
-      focusBanner.innerHTML = `<div><strong>${focus ? '来自调用异常的关联接入项' : '现在优先处理'}</strong><span>${text(priority.customer_name || '-')} / ${text(priority.project_name || '-')} · ${text(priority.name || '-')} · ${reason}</span></div><div class="row-actions"><button type="button" class="primary-btn small" onclick="editAccessConfig('${escapeJs(priority.id)}')">去处理</button><button type="button" class="ghost-btn small" onclick="navigateToPage('monitoring')">查看调用异常</button></div>`;
-    }
-  }
-
-  const filterNode = $('authorizationFilters');
-  if (filterNode) {
-    const projectOptions = list(state.projects).map(project => `<option value="${escapeJs(project.id)}" ${filters.projectId === project.id ? 'selected' : ''}>${text(project.name || project.id || '-')}</option>`).join('');
-    filterNode.innerHTML = `<div class="filter-summary"><span>当前显示 ${filtered.length} / ${allAccess.length} 个接入项</span><div class="filter-row"><select onchange="setAuthorizationFilter('status', this.value)"><option value="all">全部状态</option><option value="enabled" ${filters.status === 'enabled' ? 'selected' : ''}>可用</option><option value="error" ${filters.status === 'error' ? 'selected' : ''}>健康异常</option><option value="disabled" ${filters.status === 'disabled' ? 'selected' : ''}>停用</option><option value="revoked" ${filters.status === 'revoked' ? 'selected' : ''}>已撤销</option><option value="expired" ${filters.status === 'expired' ? 'selected' : ''}>已过期</option></select><select onchange="setAuthorizationFilter('environment', this.value)"><option value="all">全部环境</option><option value="sandbox" ${filters.environment === 'sandbox' ? 'selected' : ''}>沙箱</option><option value="production" ${filters.environment === 'production' ? 'selected' : ''}>生产</option></select><select onchange="setAuthorizationFilter('projectId', this.value)"><option value="all">全部项目</option>${projectOptions}</select></div></div>`;
-  }
-
-  renderSimpleRows('authorizationRows', filtered.map(item => {
-    const status = item.status || (item.last_health_status === 'error' ? 'error' : 'pending');
-    const health = item.last_health_status === 'error' ? callTypeBadge('error') : item.last_health_status || '未检查';
-    const keyPreview = item.api_key_preview || (item.api_key ? `${String(item.api_key).slice(0, 6)}***` : '未配置');
-    return `<tr data-access-id="${escapeJs(item.id)}"><td><strong>${text(item.name || '-')}</strong><div class="muted-line">${text(item.type || '接入配置')} · ${text(keyPreview)}</div></td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.project_id || '-')}</div></td><td>${text(item.environment || '-')}</td><td class="cell-truncate" title="${escapeJs(item.scope || item.description || '')}">${text(item.scope || item.description || '未配置')}</td><td>${health}</td><td>${badge(status)}</td><td>${text(item.credential_expires_at || item.expires_at || '永不过期')}</td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="runAuthorizationTest('${escapeJs(item.id)}')">测试</button><button type="button" class="ghost-btn small" onclick="editAccessConfig('${escapeJs(item.id)}')">查看</button></div></td></tr>`;
-  }), '暂无接入项。请先在项目中配置测试环境凭证。', 8);
-
-  const testSelect = $('authorizationTestConfig');
-  const testButton = $('authorizationTestBtn');
-  if (testSelect) {
-    const current = testSelect.value;
-    testSelect.innerHTML = `<option value="">- 请选择接入项 -</option>${allAccess.map(item => `<option value="${escapeJs(item.id)}" ${current === item.id ? 'selected' : ''}>${text(item.customer_name || '-')} / ${text(item.name || '-')}</option>`).join('')}`;
-    testSelect.onchange = () => { if (testButton) testButton.disabled = !testSelect.value; };
-    if (state.authorizationFocusId && allAccess.some(item => item.id === state.authorizationFocusId)) testSelect.value = state.authorizationFocusId;
-    if (testButton) testButton.disabled = !testSelect.value;
-  }
-
-  renderSimpleRows('authorizationHealthRows', list(state.accessHealth).slice(0, 10).map(item => `<tr><td>${text(item.last_health_check_at || '-')}</td><td>${text(item.name || item.id || '-')}</td><td>${item.last_health_status === 'error' ? callTypeBadge('error') : badge(item.last_health_status || 'pending')}</td><td>${text(item.last_health_detail?.latency_ms ?? '-')} ms</td><td>${text(item.last_health_detail?.status_code ?? '-')}</td><td><code>${text(item.last_health_detail?.trace_id || '-')}</code></td></tr>`), '暂无健康检查记录。选择接入项后执行一次验证。', 6);
-  if (state.authorizationFocusId && typeof document !== 'undefined') {
-    const row = document.querySelector(`#authorizationRows tr[data-access-id="${escapeJs(state.authorizationFocusId)}"]`);
-    row?.classList.add('focus-row');
-    row?.scrollIntoView({ block: 'nearest' });
-  }
+function governanceFailureEvents() {
+  return list(state.governanceDemoOverview?.acceptanceFailures).map(item => ({
+    id: `governance_${item.trace_id}`,
+    trace_id: item.trace_id,
+    asset_id: item.mcp_id,
+    asset_name: item.mcp_id,
+    tool_name: item.check || '安全检测',
+    caller: '发布前验收',
+    status: 'failed',
+    status_code: item.status_code,
+    response_summary: `验收失败，HTTP ${item.status_code || '-'}`,
+    created_at: new Date().toISOString()
+  }));
 }
 
 function renderMonitoringPage() {
   if (isCustomerView()) return;
   const filters = state.monitoringFilters || { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h' };
-  const events = list(state.events).map(item => {
+  const events = [...list(state.events), ...governanceFailureEvents()].map(item => {
     let inputTokens = Number(item.input_tokens) || 0;
     let outputTokens = Number(item.output_tokens) || 0;
     if (!inputTokens && !outputTokens) {
@@ -1108,7 +1318,7 @@ function renderMonitoringPage() {
     if (focus) focusBanner.innerHTML = `<div><strong>当前聚焦异常</strong><span>${text(focus._tool)} · ${callTypeBadge(focus._type)} · Trace ID ${text(focus.trace_id || '-')}</span></div><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(focus.id || focus.trace_id)}')">打开诊断</button>`;
   }
 
-  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('authorization',{ accessId: '${escapeJs(item.access_id || '')}' })">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
+  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('governance')">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
   renderSimpleRows('monitoringRows', errors.map(rowHtml), '暂无异常调用。可以先到“测试发布”执行一次沙箱测试。', 9);
   renderSimpleRows('monitoringSuccessRows', successes.slice(0, 5).map(item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.response_summary || item.business_result || '-')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">详情</button></td></tr>`), '暂无成功调用记录。先完成一次沙箱测试后，这里会显示正常调用。', 7);
   if (state.monitoringFocusId && typeof document !== 'undefined') {
@@ -1119,6 +1329,16 @@ function renderMonitoringPage() {
 }
 
 function renderAccess() {
+  const allAccess = list(state.access);
+  const blocked = allAccess.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error');
+  const banner = $('accessBlockBanner');
+  if (banner) {
+    banner.classList.toggle('hidden', blocked.length === 0);
+    if (blocked.length > 0) {
+      const names = blocked.slice(0, 3).map(item => `${text(item.customer_name || '-')} / ${text(item.name || '-')}`).join('、');
+      banner.innerHTML = `<div><strong>P0 · ${blocked.length} 个接入项阻断</strong><span>优先处理：${names}${blocked.length > 3 ? ' 等' : ''}</span></div><div class="row-actions"><button type="button" class="ghost-btn small" onclick="navigateToPage('monitoring')">查看调用异常</button></div>`;
+    }
+  }
   renderMetricSummary('accessOverview', [
     { label: '已交付接入项', value: list(state.access).length, meta: '客户可用的接入条目' },
     { label: '正式环境', value: list(state.access).filter(item => item.environment === 'production').length, meta: '生产接入' },
@@ -1209,14 +1429,15 @@ function renderApiKeys() {
     return new Date(k.expires_at) < new Date(Date.now() + 30 * 86400000);
   }).length;
 
-  let html = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">`;
-  html += `<div class="info-card" style="padding:12px"><h4 style="margin:0;font-size:13px">总凭证数</h4><p style="font-size:22px;font-weight:700;color:#2563eb;margin:4px 0 0">${keys.length}</p></div>`;
-  html += `<div class="info-card" style="padding:12px"><h4 style="margin:0;font-size:13px">已启用</h4><p style="font-size:22px;font-weight:700;color:#16a34a;margin:4px 0 0">${enabledCount}</p></div>`;
-  html += `<div class="info-card" style="padding:12px"><h4 style="margin:0;font-size:13px">生产环境</h4><p style="font-size:22px;font-weight:700;color:#b45309;margin:4px 0 0">${prodCount}</p></div>`;
-  html += `<div class="info-card" style="padding:12px"><h4 style="margin:0;font-size:13px">30天内过期</h4><p style="font-size:22px;font-weight:700;color:${expiringSoon > 0 ? '#dc2626' : '#64748b'};margin:4px 0 0">${expiringSoon}</p></div>`;
-  html += `</div>`;
+  const summaryHtml = `
+    <div class="api-key-stat"><span>总凭证数</span><strong class="is-primary">${keys.length}</strong></div>
+    <div class="api-key-stat"><span>已启用</span><strong class="is-success">${enabledCount}</strong></div>
+    <div class="api-key-stat"><span>生产环境</span><strong class="is-warning">${prodCount}</strong></div>
+    <div class="api-key-stat"><span>30 天内过期</span><strong class="${expiringSoon > 0 ? 'is-danger' : 'is-muted'}">${expiringSoon}</strong></div>`;
+  const summaryNode = $('apiKeySummary');
+  if (summaryNode) summaryNode.innerHTML = summaryHtml;
 
-  html += keys.map(key => {
+  const rows = keys.map(key => {
     const keyDisplay = key.api_key_preview || (key.api_key || '').slice(0, 8) + '***';
     const envBadge = key.environment === 'production'
       ? '<span class="badge" style="background:#fef3c7;color:#92400e">生产</span>'
@@ -1245,7 +1466,7 @@ function renderApiKeys() {
   }).join('');
 
   const node = $('apiKeyRows');
-  if (node) node.innerHTML = html || `<tr><td colspan="9">${emptyState('暂无 API 凭证。点击「创建 API Key」为接入方生成凭证。')}</td></tr>`;
+  if (node) node.innerHTML = rows || `<tr><td colspan="9">${emptyState('暂无 API 凭证。点击「创建 API Key」为接入方生成凭证。')}</td></tr>`;
 }
 
 window.copyApiKey = function copyApiKey(id) {
@@ -2060,7 +2281,6 @@ export function renderAll() {
   renderAssets();
   renderPublish();
   renderDeliverables();
-  renderAuthorizationPage();
   renderMonitoringPage();
   renderAccess();
   renderGateway();
@@ -2200,7 +2420,21 @@ function sortReviewsByPriority(reviews) {
   });
 }
 
+function renderReviewExamples() {
+  const board = $('reviewExampleBoard');
+  if (!board) return;
+  const examples = list(state.governanceDemoOverview?.reviewExamples);
+  if (!examples.length) {
+    board.innerHTML = '';
+    return;
+  }
+  board.innerHTML = `<div class="review-example-head"><strong>审核案例参考</strong><span>案例仅用于说明 AI 建议如何经过人工审核，不影响下方真实任务</span></div><div class="review-example-list">${examples.map(item => `<article class="review-example-card"><div class="review-example-top"><span class="badge ${item.risk === '高风险' ? 'danger' : item.risk === '中风险' ? 'warning' : 'success'}">${text(item.risk)}</span><span class="muted-line">${text(REVIEW_STAGE_LABELS[item.stage] || item.stage)}</span></div><h4>${text(item.title)}</h4><p><strong>AI 建议：</strong>${text(item.ai_suggestion)}</p><p><strong>人工判断：</strong>${text(item.human_decision)}</p><p class="muted-line"><strong>审核原因：</strong>${text(item.reason)}${item.trace_id ? ` · Trace ID：${text(item.trace_id)}` : ''}</p></article>`).join('')}</div>`;
+}
+
 export function renderReviewWorkbench() {
+  const stepBar = $('reviewStepBar');
+  if (stepBar) stepBar.innerHTML = renderStepBar(4);
+  renderReviewExamples();
   const allReviews = window.__state?.reviews || [];
   const reviews = sortReviewsByPriority(
     allReviews.filter(r => !currentReviewStage || r.review_stage === currentReviewStage)
@@ -2253,7 +2487,7 @@ export function renderReviewWorkbench() {
   if (summaryEl) {
     summaryEl.innerHTML = `
       ${Object.entries(stageCounts).map(([stage, counts]) => `
-        <div class="metric-card ${currentReviewStage === stage ? 'active' : ''}" style="${currentReviewStage === stage ? 'border-color:var(--accent)' : ''}cursor:pointer" onclick="switchReviewStageTab('${stage}')">
+        <div class="metric-card ${currentReviewStage === stage ? 'active' : ''}" style="${currentReviewStage === stage ? 'border-color:var(--primary)' : ''}cursor:pointer" onclick="switchReviewStageTab('${stage}')">
           <span class="metric-label">${REVIEW_STAGE_LABELS[stage] || stage}</span>
           <strong>${counts.open}</strong>
           <span class="muted-line">${counts.open} 待处理 / ${counts.total} 总计</span>

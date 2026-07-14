@@ -228,6 +228,17 @@ export function getAcceptanceRequiredFields() {
 // stageSummary 为可选参数，由调用方从 repository 传入
 export function checkPublishGate(candidate, stageSummary) {
   const summary = stageSummary || {};
+  return {
+    open_review_tasks: !Object.values(summary).some(stage => stage && stage.open > 0),
+    manual_screen_passed: candidate.manual_screen_decision === 'approve',
+    tool_boundary_confirmed: candidate.tool_boundary_status === 'confirmed',
+    tool_draft_created: Boolean(candidate.tool_draft_id) && candidate.tool_draft_status === 'draft',
+    mcp_composition_confirmed: candidate.mcp_composition_status === 'confirmed',
+    mcp_draft_created: candidate.mcp_draft_status === 'draft' && Boolean(candidate.mcp_id),
+    acceptance_checklist_passed: Number(candidate.acceptance_passed) === 1
+  };
+
+  /* Legacy staged checks remain below as historical reference. */
   
   // 1. 检查开放审核任务
   const hasOpenTasks = Object.values(summary).some(stage => stage && stage.open > 0);

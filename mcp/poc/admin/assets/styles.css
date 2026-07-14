@@ -93,6 +93,16 @@ tr:hover td { background: #fafcff; }
 .info-card h4 { margin: 0 0 6px; font-size: 14px; line-height: 1.35; }
 .info-card h5 { margin: 0 0 4px; font-size: 13px; line-height: 1.35; }
 .info-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.api-key-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); margin: 0 16px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.api-key-stat { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border-right: 1px solid var(--line); }
+.api-key-stat:last-child { border-right: 0; }
+.api-key-stat span { color: var(--muted); font-size: 12px; font-weight: 650; white-space: nowrap; }
+.api-key-stat strong { font-size: 22px; line-height: 1.1; }
+.api-key-stat .is-primary { color: var(--primary); }
+.api-key-stat .is-success { color: var(--success); }
+.api-key-stat .is-warning { color: #b45309; }
+.api-key-stat .is-danger { color: var(--danger); }
+.api-key-stat .is-muted { color: var(--muted); }
 .simulate-box { display: grid; gap: 12px; padding: 16px; }
 pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; background: #101827; color: #dce6f8; border-radius: 8px; padding: 14px; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 .primary-btn, .ghost-btn { border-radius: 8px; padding: 9px 13px; border: 1px solid transparent; font-weight: 700; font-size: 13px; transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease; }
@@ -483,15 +493,68 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
    流程步骤条
    ============================================================ */
 .step-bar-container { }
-.step-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.step-item { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: background 0.15s; font-size: 13px; }
+.step-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.step-item { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; cursor: pointer; transition: background 0.15s; font-size: 12px; white-space: nowrap; }
 .step-item:hover { background: var(--surface-2); }
 .step-item.done { color: var(--success); }
 .step-item.current { background: var(--primary); color: #fff; }
 .step-item.current .step-num { filter: brightness(1.2); }
 .step-num { font-size: 14px; font-weight: 700; }
 .step-text { font-weight: 650; }
-.step-arrow { color: var(--muted); font-size: 14px; }
+.step-arrow { flex: 0 0 auto; color: var(--muted); font-size: 13px; }
+
+/* 总览只保留治理状态、待办与风险，已完成节点保持低视觉权重。 */
+.governance-flow-summary { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:0 0 12px; border-bottom:1px solid var(--line); }
+#governanceValueBoard { grid-template-columns:repeat(5, minmax(0, 1fr)); }
+#reviewStageSummary { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+.governance-flow-summary strong { color:var(--ink); font-size:14px; }
+.governance-flow-summary span { color:var(--muted); font-size:12px; }
+.governance-flow-board { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 0; padding:0; list-style:none; }
+.governance-flow-step button { display:flex; align-items:center; gap:5px; min-height:30px; padding:5px 7px; border:0; border-radius:6px; background:transparent; color:var(--muted); font:inherit; font-size:12px; cursor:pointer; }
+.governance-flow-step button:hover { background:var(--surface-2); color:var(--ink); }
+.flow-index { display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:var(--surface-2); color:var(--muted); font-size:10px; font-weight:700; }
+.flow-label { font-weight:650; }
+.flow-state { font-size:11px; }
+.governance-flow-step.is-done .flow-state { color:var(--muted); font-size:10px; }
+.governance-flow-step.is-blocked button { background:#fff5f5; color:#a12626; }
+.governance-flow-step.is-blocked .flow-index { background:#ffe4e6; color:#a12626; }
+.governance-flow-step.is-pending button { background:#fff8e8; color:#855800; }
+.governance-flow-step.is-pending .flow-index { background:#fde7ad; color:#855800; }
+.governance-flow-step.is-ready button { background:#ecfdf3; color:#167246; }
+.governance-flow-step.is-ready .flow-index { background:#c9f3d8; color:#167246; }
+.governance-action-list { display:grid; gap:8px; }
+.governance-action { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; column-gap:10px; row-gap:3px; align-items:center; width:100%; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; }
+.governance-action:hover { border-color:var(--primary); background:var(--surface-2); }
+.governance-action:focus-visible, .governance-risk:focus-visible, .governance-flow-step button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+.action-priority { grid-row:1 / span 2; padding:3px 6px; border-radius:4px; background:var(--surface-2); color:var(--muted); font-size:10px; font-weight:700; }
+.governance-action strong { font-size:13px; }
+.action-description { grid-column:2; color:var(--muted); font-size:12px; }
+.action-count { grid-column:3; grid-row:1 / span 2; min-width:26px; color:var(--primary-strong); font-size:18px; font-weight:750; text-align:right; }
+.action-link { color:var(--primary); font-size:11px; font-weight:650; white-space:nowrap; }
+.governance-action .action-link { grid-column:4; grid-row:1 / span 2; }
+.governance-risk { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:4px 10px; width:100%; padding:12px; border:1px solid #f1c5c5; border-radius:8px; background:#fffafa; color:var(--ink); text-align:left; font:inherit; cursor:pointer; }
+.governance-risk:hover { background:#fff3f3; }
+.risk-title { color:#9f1d1d; font-size:13px; font-weight:700; }
+.risk-trace { color:#7c3131; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; }
+.governance-risk .action-link { grid-column:2; grid-row:1 / span 2; align-self:center; }
+.review-example-board { border:1px solid var(--line); border-radius:8px; background:var(--surface-2); padding:12px; }
+.review-example-head { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:10px; }
+.review-example-head strong { font-size:13px; }
+.review-example-head span { color:var(--muted); font-size:11px; }
+.review-example-list { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.review-example-card { padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.review-example-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.review-example-card h4 { margin:8px 0 6px; font-size:13px; }
+.review-example-card p { margin:4px 0; color:#475569; font-size:12px; line-height:1.5; }
+@media (max-width: 720px) { .review-example-head { align-items:flex-start; flex-direction:column; } .review-example-list { grid-template-columns:1fr; } }
+@media (max-width: 720px) {
+  #governanceValueBoard { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .governance-flow-summary { align-items:flex-start; flex-direction:column; }
+  .governance-action { grid-template-columns:auto minmax(0, 1fr) auto; }
+  .governance-action .action-link { display:none; }
+  .governance-risk { grid-template-columns:1fr; }
+  .governance-risk .action-link { display:none; }
+}
 
 /* ============================================================
    行操作按钮组
@@ -526,4 +589,11 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
   .p0-next-action { min-width:0; }
   .p0-table { min-width:760px; }
   .table-wrap { overflow-x:auto; }
-}
+}
+.control-flow-notice { border-left: 4px solid #2563eb; background: #eff6ff; }
+.control-flow-candidate { border-top: 3px solid #f59e0b; }
+.tooling-candidate-board.is-empty { grid-template-columns: minmax(0, 1fr); }
+.control-flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.control-flow-grid > div { padding: 10px; background: var(--surface-2); border-radius: 8px; min-height: 112px; }
+.control-flow-grid p { margin: 5px 0 0; font-size: 12px; color: #475569; }
+@media (max-width: 900px) { .control-flow-grid { grid-template-columns: 1fr; } }

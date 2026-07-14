@@ -309,6 +309,34 @@ export function createGovernanceRepository(db) {
         boundary_warnings: boundary.warnings
       };
     },
+    createToolDraft(draft) {
+      db.prepare(`INSERT INTO platform_tool_drafts
+        (id, source_candidate_id, project_id, name, status, tools, change_reason, created_by)
+        VALUES (@id, @source_candidate_id, @project_id, @name, @status, @tools, @change_reason, @created_by)`)
+        .run({ ...draft, tools: JSON.stringify(draft.tools || []) });
+      return this.getToolDraft(draft.id);
+    },
+    getToolDraft(id) {
+      return db.prepare("SELECT * FROM platform_tool_drafts WHERE id = ?").get(id) || null;
+    },
+    listToolDrafts(projectId) {
+      const sql = projectId
+        ? "SELECT * FROM platform_tool_drafts WHERE project_id = ? ORDER BY created_at DESC"
+        : "SELECT * FROM platform_tool_drafts ORDER BY created_at DESC";
+      return projectId ? db.prepare(sql).all(projectId) : db.prepare(sql).all();
+    },
+    saveGovernanceDecision({ candidateId, decisionType, aiSnapshot, humanSnapshot, reason, by }) {
+      const id = `gdec_${crypto.randomBytes(5).toString('hex')}`;
+      db.prepare(`INSERT INTO platform_governance_decisions
+        (id, candidate_id, decision_type, ai_snapshot, human_snapshot, reason, decided_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+        id, candidateId, decisionType, aiSnapshot || '', humanSnapshot || '', reason || '', by || ''
+      );
+      return db.prepare("SELECT * FROM platform_governance_decisions WHERE id = ?").get(id);
+    },
+    getCandidateByMcpId(mcpId) {
+      return db.prepare("SELECT * FROM platform_candidate_assets WHERE mcp_id = ?").get(mcpId) || null;
+    },
     getToolSnapshots(id) {
       const candidate = this.getCandidate(id);
       if (!candidate) return null;

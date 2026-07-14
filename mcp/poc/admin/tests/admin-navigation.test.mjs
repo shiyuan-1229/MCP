@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,7 +39,6 @@ async function verifyNavItems() {
       { id: 'review', label: '分层审核' },
       { id: 'assets', label: 'MCP 资产' },
       { id: 'publish', label: '测试发布' },
-      { id: 'authorization', label: '凭证与授权' },
       { id: 'monitoring', label: '调用监控' },
       { id: 'delivery', label: '交付管理' },
       { id: 'governance', label: '治理统计' },
@@ -51,7 +50,7 @@ async function verifyNavItems() {
 async function verifyPageShells() {
   const html = await readFile(indexFilePath, 'utf8');
 
-  for (const id of ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'authorization', 'monitoring', 'governance', 'review']) {
+  for (const id of ['summary', 'intake', 'recognition', 'tooling', 'assets', 'publish', 'delivery', 'monitoring', 'governance', 'review']) {
     assert.match(html, new RegExp(`section id="${id}"`, 'u'));
   }
 

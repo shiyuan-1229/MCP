@@ -14,7 +14,9 @@ import { suggestReuse, REUSE_CATEGORY_TEXT } from "./modules/governance/reuse-se
 import { detectSensitiveHits, buildManualGate, validateManualDecision, validateAcceptanceChecklist, explainPublishBlock, getAcceptanceRequiredFields, validateManualTrigger, buildEscalation, checkStageAdvancement, checkPublishGate, formatPublishGateResult } from "./modules/governance/manual-checks.mjs";
 import { validateRetroReason, RETRO_REASONS, buildRetroHint, summarizeRetro } from "./modules/governance/retro-service.mjs";
 import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUNDARY_RULE_REFERENCE } from "./modules/governance/boundary-detector.mjs";
+import { buildCandidateFromAi, canCreateToolDraft, buildToolDraft, canConfirmMcpComposition, confirmMcpComposition, canAssembleMcp, buildMcpDraft } from "./modules/governance/control-flow.mjs";
 import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
+import { GOVERNANCE_DEMO_SCENARIOS } from "./modules/governance/demo-scenarios.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,15 @@ function safeParse(value) {
 
 function count(table) {
   return db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+}
+
+function getCandidatePublishReadiness(candidate) {
+  const stageSummary = governanceRepo.getReviewStageSummary(candidate.id);
+  const gateResult = checkPublishGate(candidate, stageSummary);
+  return {
+    gateResult,
+    ...formatPublishGateResult(gateResult)
+  };
 }
 
 function ensureColumn(table, name, definition) {
@@ -336,7 +347,46 @@ function runMigrations() {
   ensureColumn('platform_builder_requests', 'intake_source_id', 'TEXT');
   ensureColumn('platform_builder_requests', 'updated_at', 'TEXT');
   ensureColumn('platform_mcp_assets', 'visibility', "TEXT DEFAULT 'internal'");
-
+  ensureColumn('platform_candidate_assets', 'business_action', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'operation_type', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'source_tables', "TEXT DEFAULT '[]'");
+  ensureColumn('platform_candidate_assets', 'source_endpoints', "TEXT DEFAULT '[]'");
+  ensureColumn('platform_candidate_assets', 'suggested_group', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'grouping_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'boundary_rule', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'permission_scope', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'human_confirmed', 'INTEGER DEFAULT 0');
+  ensureColumn('platform_candidate_assets', 'tool_boundary_status', "TEXT DEFAULT 'pending'");
+  ensureColumn('platform_candidate_assets', 'tool_confirmation_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_draft_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_id', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'tool_draft_id', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'tool_draft_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_composition_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_composition_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_composition_by', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_composition_at', 'TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_tool_drafts (
+    id TEXT PRIMARY KEY,
+    source_candidate_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    tools TEXT NOT NULL,
+    change_reason TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_governance_decisions (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    decision_type TEXT NOT NULL,
+    ai_snapshot TEXT,
+    human_snapshot TEXT,
+    reason TEXT NOT NULL,
+    decided_by TEXT,
+    decided_at TEXT DEFAULT (datetime('now'))
+  )`);
   // 阶段三：数据源 OpenAPI 描述与生成时间线
   db.exec(`CREATE TABLE IF NOT EXISTS platform_openapi_specs (
     id TEXT PRIMARY KEY,
@@ -2226,135 +2276,102 @@ app.put("/api/platform/data-sources/:id", requireAuth, requireAdmin, (req, res) 
   res.json(db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(source.id));
 });
 
-// 确认 OpenAPI 草案 → 自动生成 MCP 资产 + Tool
+ // 确认 OpenAPI 草案 → 只创建候选业务能力，不自动创建 Tool/MCP
 app.put("/api/platform/openapi-specs/:id/confirm", requireAuth, requireAdmin, (req, res) => {
   const spec = db.prepare("SELECT * FROM platform_openapi_specs WHERE id = ?").get(req.params.id);
   if (!spec) return res.status(404).json({ error: "spec not found" });
+
   db.prepare("UPDATE platform_openapi_specs SET status = 'confirmed' WHERE id = ?").run(req.params.id);
 
-  // 查找关联的 AI 分析结果
   const aiResult = db.prepare("SELECT * FROM ai_analysis_results WHERE openapi_spec_id = ? ORDER BY created_at DESC LIMIT 1").get(req.params.id);
+  const source = db.prepare("SELECT * FROM platform_data_sources WHERE id = ?").get(spec.source_id);
+  const analysis = safeParse(aiResult?.analysis_json) || {};
+  const tools = safeParse(aiResult?.tools_json) || [];
+  const grouped = new Map();
 
-  if (aiResult) {
-    const tools = safeParse(aiResult.tools_json) || [];
-    const categories = safeParse(aiResult.categories_json) || {};
-    const analysis = safeParse(aiResult.analysis_json) || {};
-    const categoryNames = Object.keys(categories);
+  tools.forEach((tool, index) => {
+    const group = tool.category || tool.business_domain || '待人工命名业务能力';
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group).push({ ...tool, source_index: index });
+  });
+  if (!grouped.size) grouped.set(source?.name || '待确认业务能力', []);
 
-    // 为每个分类创建一个 MCP 资产（如果还没有）
-    const existingAsset = db.prepare("SELECT id FROM platform_mcp_assets WHERE id = ?").get(`mcp_ai_${spec.source_id}`);
-    const assetId = existingAsset?.id || `mcp_ai_${spec.source_id}`;
-    const source = db.prepare("SELECT * FROM platform_data_sources WHERE id = ?").get(spec.source_id);
-
-    // 构建工具列表（保留完整的 tool 定义而不仅是名字）
-    const toolNames = tools.map(t => t.name || t.tool_name || 'tool');
-    const primaryCategory = categoryNames[0] || (source?.type === 'Database' ? '数据查询' : '业务接口');
-
-    // 获取分析总结作为能力描述
-    const capability = analysis.summary ? String(analysis.summary).slice(0, 200) : `${source?.name || 'AI生成'} MCP 能力`;
-
-    // AI 推荐的资产可见性：有任一 public tool 就允许 public，但默认仍为 internal 需人工确认
-    const hasPublicTool = tools.some(t => t.visibility === 'public');
-    const assetVisibility = 'internal'; // 资产级默认 internal，tools 级有各自的 AI 推荐
-
-    if (existingAsset) {
-      // 更新已有资产
-      db.prepare("UPDATE platform_mcp_assets SET capability = ?, category = ?, tools = ?, status = 'tooling', version = 'v1.0.0' WHERE id = ?").run(
-        capability, primaryCategory, JSON.stringify(tools), assetId
-      );
-    } else {
-      // 创建新资产
-      db.prepare("INSERT INTO platform_mcp_assets (id, project_id, name, capability, status, version, endpoint, category, tools, visibility) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
-        assetId,
-        spec.project_id,
-        source ? `${source.name} MCP` : 'AI 生成 MCP 资产',
-        capability,
-        'tooling',
-        'v1.0.0',
-        `/mcp/ai-${spec.source_id}`,
-        primaryCategory,
-        JSON.stringify(tools),
-        assetVisibility
-      );
+  const candidateItems = [];
+  for (const [groupName, groupTools] of grouped.entries()) {
+    const sourceTables = [];
+    const sourceEndpoints = [];
+    groupTools.forEach(tool => {
+      (Array.isArray(tool.source_tables) ? tool.source_tables : []).forEach(item => sourceTables.push(item));
+      (Array.isArray(tool.source_endpoints) ? tool.source_endpoints : []).forEach(item => sourceEndpoints.push(item));
+      if (tool.path) sourceEndpoints.push(String(tool.method || 'GET').toUpperCase() + ' ' + tool.path);
+    });
+    const uniqueTables = [...new Set(sourceTables)];
+    const uniqueEndpoints = [...new Set(sourceEndpoints)];
+    const parameterNames = groupTools.flatMap(tool => Object.keys(tool.inputSchema?.properties || {}));
+    const sensitiveHits = detectSensitiveHits(parameterNames);
+    const writeCount = groupTools.filter(tool => ['post', 'put', 'patch', 'delete', 'write'].includes(String(tool.operation_type || tool.operation || tool.method || '').toLowerCase())).length;
+    const operationType = writeCount === 0 ? 'read' : writeCount === groupTools.length ? 'write' : 'mixed';
+    const riskLevel = sensitiveHits.length || operationType !== 'read' ? 'high' : 'medium';
+    const candidateId = 'cand_' + spec.source_id + '_' + String(groupName).replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, '_').slice(0, 30);
+    const existing = db.prepare("SELECT id FROM platform_candidate_assets WHERE id = ?").get(candidateId);
+    if (existing) {
+      candidateItems.push(governanceRepo.getCandidate(candidateId));
+      continue;
     }
 
-    // ── 生成下游数据：release + deliverable + gateway policy ──
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const candidate = buildCandidateFromAi({
+      id: candidateId,
+      project_id: spec.project_id,
+      source_type: source?.type || 'OpenAPI',
+      source_ref: spec.id,
+      name: groupName,
+      business_domain: groupName,
+      business_action: groupTools[0]?.description || groupName,
+      operation_type: operationType,
+      source_tables: uniqueTables,
+      source_endpoints: uniqueEndpoints,
+      suggested_group: groupName,
+      grouping_reason: 'AI 按业务域和业务动作提出分组建议，需人工确认是否合并或拆分',
+      boundary_rule: '按业务能力与权限边界组织 Tool，不按单表拆分',
+      sensitive_hits: sensitiveHits,
+      permission_scope: 'project-only',
+      risk_level: riskLevel
+    });
+    const aiSnapshot = JSON.stringify(groupTools);
+    const rawPayload = JSON.stringify({
+      source_name: source?.name || '',
+      ai_snapshot: groupTools,
+      analysis_summary: analysis.summary || '',
+      control_flow: 'candidate_pending_review'
+    });
 
-    // 1. 创建 release 记录（测试发布页需要）
-    const existingRelease = db.prepare("SELECT id FROM platform_mcp_releases WHERE asset_id = ? LIMIT 1").get(assetId);
-    if (!existingRelease) {
-      db.prepare("INSERT INTO platform_mcp_releases (id, asset_id, version, status, tested_at, released_at, notes) VALUES (?,?,?,?,?,?,?)").run(
-        `rel_${assetId}`, assetId, 'v1.0.0', 'testing', null, null,
-        `AI 自动生成，${tools.length} 个 Tool，待沙箱测试`
-      );
-    }
+    db.prepare("INSERT INTO platform_candidate_assets (id, project_id, source_type, source_ref, name, business_domain, business_action, operation_type, source_tables, source_endpoints, suggested_group, grouping_reason, boundary_rule, permission_scope, confidence, risk_level, sensitive_hits, mapping_status, ai_summary, raw_payload, status, manual_screen_status, needs_human_review, ai_tools_snapshot, tool_boundary_status, mcp_draft_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+      candidate.id, candidate.project_id, candidate.source_type, candidate.source_ref, candidate.name,
+      candidate.business_domain, candidate.business_action, candidate.operation_type,
+      JSON.stringify(candidate.source_tables), JSON.stringify(candidate.source_endpoints),
+      candidate.suggested_group, candidate.grouping_reason, candidate.boundary_rule,
+      candidate.permission_scope, 0.72, candidate.risk_level, JSON.stringify(candidate.sensitive_hits),
+      'unknown', analysis.summary || '', rawPayload, candidate.status, 'pending', 1,
+      aiSnapshot, candidate.tool_boundary_status, candidate.mcp_draft_status
+    );
 
-    // 2. 创建交付物（交付管理页需要）
-    const existingDel = db.prepare("SELECT id FROM platform_deliverables WHERE project_id = ? AND name LIKE ?").get(spec.project_id, `%${source?.name || 'AI'}%`);
-    if (!existingDel) {
-      const deliverableTypes = [
-        ['config', '配置包', 'generating'],
-        ['test-report', '测试报告', 'generating'],
-        ['effect-report', '效果报告', 'generating']
-      ];
-      deliverableTypes.forEach((d, i) => {
-        const delId = `del_${assetId}_${i}`;
-        db.prepare("INSERT OR IGNORE INTO platform_deliverables (id, project_id, name, type, status, updated_at) VALUES (?,?,?,?,?,?)").run(
-          delId, spec.project_id, `${source?.name || 'AI资产'} ${d[1]}`, d[0], d[2], now
-        );
-      });
-    }
-
-    // 3. 创建网关策略（治理与统计页需要）
-    const existingPolicy = db.prepare("SELECT id FROM platform_gateway_policies WHERE project_id = ? LIMIT 1").get(spec.project_id);
-    if (!existingPolicy) {
-      const maskingFields = [];
-      const allParams = tools.flatMap(t => Object.keys(t.inputSchema?.properties || {}));
-      // 自动识别敏感字段
-      if (allParams.some(p => /phone|mobile|tel/i.test(p))) maskingFields.push('mobile');
-      if (allParams.some(p => /id_card|idcard|identity/i.test(p))) maskingFields.push('id_card');
-      if (allParams.some(p => /email|mail/i.test(p))) maskingFields.push('email');
-      if (allParams.some(p => /password|pwd/i.test(p))) maskingFields.push('password');
-      if (!maskingFields.length) maskingFields.push('user_id');
-
-      db.prepare("INSERT INTO platform_gateway_policies (id, project_id, name, auth_mode, authorization_scope, rate_limit, masking_rules, audit_enabled, status) VALUES (?,?,?,?,?,?,?,?,?)").run(
-        `pol_${spec.project_id}`, spec.project_id,
-        `${source?.name || 'AI资产'} 网关策略`,
-        source?.auth_mode || 'API Key',
-        'read, invoke',
-        '100/min',
-        JSON.stringify(maskingFields),
-        1, 'enabled'
-      );
-    }
-
-    // 4. 生成模拟调用事件（治理与统计页需要）
-    const existingEvents = db.prepare("SELECT id FROM platform_call_events WHERE asset_id = ? LIMIT 1").get(assetId);
-    if (!existingEvents) {
-      // 为每个 tool 生成一条模拟调用
-      const callers = ['运营 Agent', '客服助手', '管理后台', '数据分析 Agent'];
-      tools.slice(0, 5).forEach((tool, i) => {
-        const toolName = tool.name || `tool_${i}`;
-        const evId = `evt_${assetId}_${i}`;
-        const latency = Math.floor(80 + Math.random() * 200);
-        const isSuccess = Math.random() > 0.1;
-        db.prepare("INSERT OR IGNORE INTO platform_call_events (id, asset_id, caller, status, latency_ms, business_result, trace_id, created_at) VALUES (?,?,?,?,?,?,?,?)").run(
-          evId, assetId,
-          callers[i % callers.length],
-          isSuccess ? 'success' : 'error',
-          latency,
-          isSuccess ? `${tool.display_name || toolName} 调用成功` : `${toolName} 调用超时`,
-          `trace_${assetId}_${i}`,
-          now
-        );
-      });
-    }
+    const persisted = governanceRepo.getCandidate(candidate.id);
+    governanceRepo.saveReviewTasks(buildReviewTasksForCandidate({
+      ...persisted,
+      ai_tools_snapshot: aiSnapshot,
+      human_tools_snapshot: '[]'
+    }));
+    candidateItems.push(governanceRepo.getCandidate(candidate.id));
   }
 
-  res.json(db.prepare("SELECT o.*, s.name AS source_name, s.type AS source_type FROM platform_openapi_specs o JOIN platform_data_sources s ON s.id = o.source_id WHERE o.id = ?").get(req.params.id));
+  res.json({
+    ...spec,
+    status: 'confirmed',
+    control_flow: 'candidate_review',
+    candidates: candidateItems,
+    next_step: '先完成人工初筛，再确认 Tool 边界，最后组装 MCP 草稿'
+  });
 });
-
 // 阶段三：OpenAPI 描述 API
 app.get("/api/platform/openapi-specs", requireAuth, (req, res) => {
   const ids = scopedProjects(req).map(p => p.id);
@@ -2692,6 +2709,20 @@ app.post("/api/platform/releases/:id/publish", requireAuth, requireAdmin, (req, 
     return res.status(400).json({ error: `当前状态 ${release.status}，需先完成沙箱测试` });
   }
 
+  const candidate = db.prepare("SELECT * FROM platform_candidate_assets WHERE mcp_id = ?").get(release.asset_id);
+  if (!candidate) {
+    return res.status(409).json({ error: 'legacy release requires governance migration' });
+  }
+  const readiness = getCandidatePublishReadiness(candidate);
+  if (!readiness.canPublish) {
+    return res.status(409).json({
+      error: 'release is blocked by governance gates',
+      reason: readiness.blockedReason,
+      failed_conditions: readiness.failedConditions,
+      gate_result: readiness.gateResult
+    });
+  }
+
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   // 1. 更新 release 为 published
@@ -2996,6 +3027,16 @@ app.post("/api/platform/governance/candidates/:id/publish", requireAuth, (req, r
   const candidate = governanceRepo.getCandidate(req.params.id);
   if (!candidate) return res.status(404).json({ error: "candidate not found" });
 
+  const readiness = getCandidatePublishReadiness(candidate);
+  if (!readiness.canPublish) {
+    return res.status(409).json({
+      error: 'candidate is not ready for publish',
+      reason: readiness.blockedReason,
+      failed_conditions: readiness.failedConditions,
+      gate_result: readiness.gateResult
+    });
+  }
+
   // 防御性检查 1：若有未完成的审核任务，阻止发布（三层所有阶段都要清零）
   const openTasks = governanceRepo.listOpenReviewTasksForCandidate(candidate.id);
   if (openTasks.length > 0) {
@@ -3029,6 +3070,10 @@ app.post("/api/platform/governance/candidates/:id/publish", requireAuth, (req, r
   }
 
   const published = governanceRepo.publishCandidate({ candidate, publishedBy: req.user.display_name || '' });
+  if (candidate.mcp_id) {
+    db.prepare("UPDATE platform_mcp_assets SET status = 'published' WHERE id = ?").run(candidate.mcp_id);
+    db.prepare("UPDATE platform_mcp_releases SET status = 'published', released_at = datetime('now') WHERE asset_id = ? AND status IN ('tested', 'ready_to_publish')").run(candidate.mcp_id);
+  }
   const suggestions = suggestReuse({ candidate, publishedAssets: governanceRepo.listPublishedAssets() });
   governanceRepo.saveReuseSuggestions({ candidateId: candidate.id, projectId: candidate.project_id, suggestions });
   res.json({ published, suggestions });
@@ -3175,6 +3220,125 @@ app.post("/api/platform/governance/candidates/:id/build-tool", requireAuth, (req
   });
 });
 
+ // 人工确认 Tool 边界：确认前只保留 AI 候选，不生成正式 Tool
+app.post("/api/platform/governance/candidates/:id/confirm-tool", requireAuth, requireAdmin, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  if (candidate.manual_screen_decision !== 'approve') {
+    return res.status(409).json({ error: 'candidate must pass manual screening first', reason: '请先完成人工初筛' });
+  }
+
+  const humanTools = Array.isArray(req.body?.human_tools) ? req.body.human_tools : [];
+  if (!humanTools.length) return res.status(400).json({ error: 'human_tools required', reason: '至少确认一个 Tool' });
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return res.status(400).json({ error: 'reason required', reason: '请填写人工确认理由' });
+
+  const saved = governanceRepo.saveToolBuild({
+    id: candidate.id,
+    aiTools: safeParse(candidate.ai_tools_snapshot) || [],
+    humanTools,
+    businessRules: req.body?.business_rules || '',
+    by: req.user?.display_name || ''
+  });
+  if (!saved.ok) return res.status(404).json({ error: saved.error || '保存 Tool 边界失败' });
+
+  db.prepare("UPDATE platform_candidate_assets SET human_confirmed = 1, tool_boundary_status = 'confirmed', tool_confirmation_reason = ?, status = 'tool_confirmed' WHERE id = ?").run(reason, candidate.id);
+  res.json({
+    ok: true,
+    control_flow: 'tool_confirmed',
+    candidate: governanceRepo.getCandidate(candidate.id),
+    next_step: '确认 Tool 后，再组装 MCP 草稿'
+  });
+});
+
+// 人工确认 MCP 组成：只创建 draft，不创建发布记录、不自动上线
+app.post("/api/platform/governance/candidates/:id/create-tool-draft", requireAuth, requireAdmin, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  const normalized = { ...candidate, human_tools_snapshot: safeParse(candidate.human_tools_snapshot) || [] };
+  if (!canCreateToolDraft(normalized)) {
+    return res.status(409).json({ error: 'candidate is not ready for a Tool draft' });
+  }
+  const draft = buildToolDraft(normalized, {
+    id: makeId('tool_draft'),
+    by: req.user?.display_name || '',
+    reason: candidate.tool_confirmation_reason || ''
+  });
+  governanceRepo.createToolDraft(draft);
+  governanceRepo.saveGovernanceDecision({
+    candidateId: candidate.id,
+    decisionType: 'tool_draft_created',
+    aiSnapshot: candidate.ai_tools_snapshot,
+    humanSnapshot: candidate.human_tools_snapshot,
+    reason: draft.change_reason || 'Tool draft created after human boundary confirmation',
+    by: req.user?.display_name || ''
+  });
+  db.prepare("UPDATE platform_candidate_assets SET tool_draft_id = ?, tool_draft_status = 'draft', status = 'tool_draft' WHERE id = ?").run(draft.id, candidate.id);
+  res.status(201).json({ ok: true, control_flow: 'tool_draft', draft, candidate: governanceRepo.getCandidate(candidate.id) });
+});
+
+app.post("/api/platform/governance/candidates/:id/confirm-mcp-composition", requireAuth, requireAdmin, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+  if (!canConfirmMcpComposition(candidate)) {
+    return res.status(409).json({ error: 'candidate requires a Tool draft before MCP composition' });
+  }
+  let composition;
+  try {
+    composition = confirmMcpComposition(candidate, {
+      toolDraftIds: req.body?.tool_draft_ids || [candidate.tool_draft_id],
+      reason: req.body?.reason,
+      by: req.user?.display_name || ''
+    });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  db.prepare("UPDATE platform_candidate_assets SET mcp_composition_status = 'confirmed', mcp_composition_reason = ?, mcp_composition_by = ?, mcp_composition_at = datetime('now'), status = 'mcp_composition_confirmed' WHERE id = ?").run(composition.reason, composition.confirmed_by, candidate.id);
+  governanceRepo.saveGovernanceDecision({
+    candidateId: candidate.id,
+    decisionType: 'mcp_composition_confirmed',
+    aiSnapshot: candidate.ai_tools_snapshot,
+    humanSnapshot: JSON.stringify(composition),
+    reason: composition.reason,
+    by: composition.confirmed_by
+  });
+  res.json({ ok: true, control_flow: 'mcp_composition_confirmed', composition, candidate: governanceRepo.getCandidate(candidate.id) });
+});
+
+app.post("/api/platform/governance/candidates/:id/assemble-mcp", requireAuth, requireAdmin, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: 'candidate not found' });
+
+  const normalized = {
+    ...candidate,
+    human_tools_snapshot: safeParse(candidate.human_tools_snapshot)
+  };
+  if (!canAssembleMcp(normalized)) {
+    return res.status(409).json({
+      error: 'candidate is not ready for MCP draft',
+      reason: '请先完成人工初筛和 Tool 边界确认'
+    });
+  }
+
+  const draft = buildMcpDraft(normalized, {
+    name: req.body?.name,
+    by: req.user?.display_name || ''
+  });
+  const assetId = makeId('mcp');
+  db.prepare("INSERT INTO platform_mcp_assets (id, project_id, name, capability, status, version, endpoint, category, tools, visibility) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    assetId, draft.project_id, draft.name, draft.capability, draft.status, draft.version,
+    draft.endpoint, draft.category, JSON.stringify(draft.tools), draft.visibility
+  );
+  db.prepare("UPDATE platform_candidate_assets SET mcp_draft_status = 'draft', mcp_id = ?, status = 'mcp_draft' WHERE id = ?").run(assetId, candidate.id);
+
+  res.status(201).json({
+    ok: true,
+    control_flow: 'mcp_draft',
+    candidate_id: candidate.id,
+    asset: db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(assetId),
+    next_step: '进入发布前人工验收，确认后才能发布'
+  });
+});
 // 拉取某个候选的工具快照对比
 app.get("/api/platform/governance/candidates/:id/tool-snapshots", requireAuth, (req, res) => {
   const snapshots = governanceRepo.getToolSnapshots(req.params.id);
@@ -3182,6 +3346,15 @@ app.get("/api/platform/governance/candidates/:id/tool-snapshots", requireAuth, (
   // 额外返回 diff
   const diff = diffToolSnapshots(snapshots.ai_tools, snapshots.human_tools);
   res.json({ ...snapshots, diff });
+});
+
+app.get("/api/platform/governance/tool-drafts", requireAuth, (req, res) => {
+  const projectId = req.query.project_id || '';
+  res.json(governanceRepo.listToolDrafts(projectId));
+});
+
+app.get("/api/platform/governance/demo-overview", requireAuth, (req, res) => {
+  res.json(GOVERNANCE_DEMO_SCENARIOS);
 });
 
 app.get("/api/platform/governance/tool-edit-rules", requireAuth, (req, res) => {
