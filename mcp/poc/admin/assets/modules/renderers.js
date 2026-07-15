@@ -41,6 +41,7 @@ function customerAssets() {
 }
 
 const customerPageMeta = {
+  'customer-overview': { title: '交付总览', eyebrow: '已交付 MCP、待处理事项与运行状态' },
   'my-assets': { title: '我的 MCP 资产', eyebrow: '已交付资产的运行总览' },
   'my-usage': { title: '调用统计', eyebrow: '近 30 天调用趋势与成功率' },
   'my-billing': { title: '账单管理', eyebrow: '当期账单与历史明细' },
@@ -923,6 +924,7 @@ function renderAssets() {
     } else {
       mcpList.innerHTML = filteredAssets.map(asset => {
         const tools = list(asset.tools);
+        const runtime = list(state.pocRuntimes).find(item => item.asset_id === asset.id && ['starting', 'running'].includes(item.status));
         const isNew = (asset.name || '').includes('[NEW]');
         const visBadge = asset.visibility === 'public' ? '🌐 公开' : '🔒 内部';
         return `<div class="info-card" style="padding:12px;${isNew ? 'border:2px solid #7c3aed' : ''}">
@@ -946,6 +948,7 @@ function renderAssets() {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="muted-line" style="font-size:11px">v${text(asset.version || '0.1.0')}</span>
+            ${runtime ? `<span class="badge success">POC 运行中</span><code style="font-size:10px">${text(runtime.endpoint || '')}</code><button type="button" class="ghost-btn small" onclick="stopPocRuntime('${runtime.id}')">停止 POC</button>` : asset.status === 'published' ? `<button type="button" class="primary-btn small" onclick="startPocRuntime('${asset.id}')">启动 POC</button>` : ''}
             <button type="button" class="ghost-btn small" onclick="editAsset('${asset.id}')">编辑</button>
             <button type="button" class="ghost-btn small" style="color:#dc2626" onclick="deleteSingleAsset('${asset.id}')">删除</button>
           </div>
@@ -1117,6 +1120,7 @@ function renderPublish() {
 
 // 交付闭环必需的 5 类交付资料
 const CLOSURE_TYPES = [
+  { type: 'poc-evidence', label: 'POC 验收凭证', icon: '🔗' },
   { type: 'config', label: '配置包', icon: '📦' },
   { type: 'test-report', label: '测试报告', icon: '📄' },
   { type: 'log', label: '调用日志', icon: '📊' },
@@ -1318,7 +1322,7 @@ function renderMonitoringPage() {
     if (focus) focusBanner.innerHTML = `<div><strong>当前聚焦异常</strong><span>${text(focus._tool)} · ${callTypeBadge(focus._type)} · Trace ID ${text(focus.trace_id || '-')}</span></div><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(focus.id || focus.trace_id)}')">打开诊断</button>`;
   }
 
-  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('governance')">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
+  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code>${String(item.business_result || '').startsWith('poc_sse:') ? '<span class="badge success" style="margin-left:4px">真实 MCP</span>' : ''}</td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('governance')">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
   renderSimpleRows('monitoringRows', errors.map(rowHtml), '暂无异常调用。可以先到“测试发布”执行一次沙箱测试。', 9);
   renderSimpleRows('monitoringSuccessRows', successes.slice(0, 5).map(item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.response_summary || item.business_result || '-')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">详情</button></td></tr>`), '暂无成功调用记录。先完成一次沙箱测试后，这里会显示正常调用。', 7);
   if (state.monitoringFocusId && typeof document !== 'undefined') {
@@ -1882,6 +1886,58 @@ function renderCustomerBuilder() {
   }
 }
 
+function renderCustomerOverview() {
+  const overview = state.customerOverview || {};
+  const assets = list(overview.assets);
+  const actions = list(overview.action_items);
+  const releases = list(overview.release_updates);
+  renderMetricSummary('customerOverviewCards', [
+    { label: '已交付 MCP', value: assets.length, meta: `${assets.filter(item => item.status === 'published').length} 个处于可用状态` },
+    { label: '稳定运行', value: assets.filter(item => Number(item.success_rate || 0) >= 95).length, meta: '成功率不低于 95%' },
+    { label: '待处理事项', value: actions.length, meta: actions.length ? '请优先完成高优先级事项' : '当前没有待处理事项' },
+    { label: '近期版本', value: releases.length, meta: releases[0]?.released_at || releases[0]?.tested_at || '暂无发布记录' }
+  ]);
+  renderCardList('customerOverviewActions', actions.map(item => {
+    const action = item.type === 'deliverable'
+      ? `<button type="button" class="ghost-btn small" onclick="openCustomerPage('my-deliverables')">查看交付物</button>`
+      : `<button type="button" class="ghost-btn small" onclick="openCustomerAsset('${escapeJs(item.target_id)}')">查看接入说明</button>`;
+    return `<div class="info-card customer-overview-action"><h4>${text(item.title || '待处理事项')}</h4><p>${text(item.priority === 'high' ? '建议优先处理' : '可按项目节奏处理')}</p><div class="customer-action-row">${action}</div></div>`;
+  }), '当前没有待处理事项。');
+  renderCardList('customerOverviewReleases', releases.map(item => `<div class="info-card"><h4>${text(item.asset_name || 'MCP 版本更新')}</h4><p>${text(item.version || '-')} · ${text(item.released_at || item.tested_at || '-')}</p><p class="muted-line">${text(item.notes || '已完成发布')}</p></div>`), '最近没有新的版本更新。');
+  renderCardList('customerOverviewAssets', assets.map(asset => `<div class="info-card customer-overview-asset"><div><h4>${text(displayAssetName(asset.name))}</h4><p>${text(asset.capability || '业务能力待补充')}</p></div><div class="customer-inline-badges">${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || '-')}</span></div><p class="muted-line">成功率 ${text(asset.success_rate ?? 100)}% · 平均延迟 ${text(asset.avg_latency_ms || 0)} ms · ${text(asset.call_count || 0)} 次调用</p><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${escapeJs(asset.id)}')">查看服务详情</button></div></div>`), '当前没有已发布 MCP，请联系交付负责人确认发布状态。');
+}
+
+function renderCustomerAssetOverlay() {
+  const overlay = $('customerAssetOverlay');
+  const title = $('customerAssetDetailTitle');
+  const content = $('customerAssetDetailContent');
+  const detail = state.customerAssetDetail;
+  if (!overlay || !title || !content) return;
+  if (!detail?.asset) {
+    overlay.style.display = 'none';
+    content.innerHTML = '';
+    return;
+  }
+  const asset = detail.asset;
+  const tools = list(asset.tools).map(tool => typeof tool === 'string' ? tool : tool?.display_name || tool?.name || '-');
+  const releases = list(detail.releases);
+  const events = list(detail.recent_events);
+  const isMemberAsset = String(asset.id || '').includes('member');
+  const isOrderAsset = String(asset.id || '').includes('order');
+  const trial = state.customerTrialResult?.assetId === asset.id ? state.customerTrialResult : null;
+  title.textContent = `${displayAssetName(asset.name)} 服务详情`;
+  overlay.style.display = 'grid';
+  content.innerHTML = `
+    <div class="customer-detail-grid">
+      <section class="info-card"><h4>服务能力</h4><p>${text(asset.capability || '-')}</p><p class="muted-line">版本 ${text(asset.version || '-')} · ${text(displayStatus(asset.status || 'published'))}</p></section>
+      <section class="info-card"><h4>接入信息</h4><p>环境：${text(detail.access?.environment || '-')}</p><p>鉴权：${text(detail.access?.type || '-')}</p><p>范围：${text(detail.access?.scope || '-')}</p><p class="muted-line">${text(detail.access?.description || '暂无接入说明')}</p></section>
+    </div>
+    <section class="info-card customer-detail-section"><h4>可调用 Tool</h4><p>${text(tools.join(' / ') || '暂无 Tool 清单')}</p></section>
+    <section class="info-card customer-detail-section"><h4>在线试调</h4><p class="muted-line">试调会生成可追溯的 Trace ID，并记录到运行与效果页面。</p><div class="customer-trial-form">${isMemberAsset ? '<label>会员编号<input id="customerTrialVipCode" value="GC10001" maxlength="64"></label>' : ''}${isOrderAsset ? '<label>订单编号<input id="customerTrialOrderId" value="GC-ORDER-20260712" maxlength="64"></label>' : ''}<button type="button" class="primary-btn" onclick="runCustomerTrial('${escapeJs(asset.id)}')">执行在线试调</button></div>${trial ? `<div class="customer-trial-result"><strong>${text(displayStatus(trial.status || 'success'))}</strong><span>${text(trial.latency_ms || 0)} ms</span><code>${text(trial.trace_id || '-')}</code><p>${text(trial.summary || '试调完成')}</p></div>` : ''}</section>
+    <section class="customer-detail-section"><h4>版本记录</h4><div class="card-list customer-detail-list">${releases.length ? releases.map(item => `<div class="info-card"><h4>${text(item.version || '-')}</h4><p>${text(item.released_at || item.tested_at || '-')}</p><p class="muted-line">${text(item.notes || '已完成发布')}</p></div>`).join('') : emptyState('暂无版本记录')}</div></section>
+    <section class="customer-detail-section"><h4>最近调用</h4><div class="table-wrap"><table><thead><tr><th>时间</th><th>状态</th><th>耗时</th><th>结果</th><th>Trace ID</th></tr></thead><tbody>${events.length ? events.map(item => `<tr><td>${text(item.created_at || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td>${text(item.business_result || '-')}</td><td><code>${text(item.trace_id || '-')}</code></td></tr>`).join('') : '<tr><td colspan="5" class="muted-line">暂无调用记录</td></tr>'}</tbody></table></div></section>
+  `;
+}
 function renderCustomerReleaseTimeline() {
   const dashboard = state.customerDashboard || {};
   const cards = [];
@@ -1903,7 +1959,7 @@ function renderCustomerDashboard() {
     { label: '调用成功率', value: `${dashboard.success_rate ?? 100}%`, meta: '按调用事件统计' },
     { label: '当期金额', value: money(dashboard.month_amount || 0), meta: `账单状态：${displayStatus(dashboard.billing_status || 'pending')}` }
   ]);
-  renderCardList('customerAssetCards', assets.map(asset => `<div class="info-card customer-asset-card"><h4>${displayAssetName(asset.name)}</h4><p class="muted-line">${text(asset.capability || '业务能力待补充')}</p><p>${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || 'v1.0.0')}</span></p><div class="customer-inline-badges">${list(asset.tools).map(tool => `<span class="badge info">${text(typeof tool === 'string' ? tool : tool?.name || '-')}</span>`).join(' ') || '<span class="muted-line">暂无 Tool 清单</span>'}</div><div class="customer-action-row"><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${asset.id}')">查看接入指引</button></div></div>`), '暂时没有可查看的 MCP 资产');
+  renderCardList('customerAssetCards', assets.map(asset => `<div class="info-card customer-asset-card"><h4>${displayAssetName(asset.name)}</h4><p class="muted-line">${text(asset.capability || '业务能力待补充')}</p><p>${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || 'v1.0.0')}</span></p><div class="customer-inline-badges">${list(asset.tools).map(tool => `<span class="badge info">${text(typeof tool === 'string' ? tool : tool?.name || '-')}</span>`).join(' ') || '<span class="muted-line">暂无 Tool 清单</span>'}</div><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${asset.id}')">查看服务详情</button><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${asset.id}')">查看接入指引</button></div></div>`), '暂时没有可查看的 MCP 资产');
   renderCardList('customerQuickActions', [
     `<div class="info-card customer-quick-card"><h4>查看接入指引</h4><p>逐个资产查看地址、鉴权方式和接入约束。</p></div>`,
     `<div class="info-card customer-quick-card"><h4>下载交付资料</h4><p>配置包、测试报告、日志与复盘会持续沉淀到交付物下载页。</p></div>`,
@@ -1924,10 +1980,11 @@ function renderCustomerUsage() {
     { label: '已使用资产', value: new Set(events.map(item => item.asset_id || item.asset_name)).size, meta: '发生过调用的 MCP 数量' }
   ]);
   const trendBars = trends.slice(-10).map(item => {
-    const height = Math.max(18, Math.round(Number(item.calls || 0) / maxCalls * 140));
-    return `<div class="customer-trend-bar"><strong>${text(item.calls || 0)}</strong><div class="bar" style="height:${height}px"></div><small>${text(item.date || '-')}</small></div>`;
-  });
-  const trendNode = $('customerUsageTrendBars');
+    const calls = Number(item.calls || 0);
+    const height = calls ? Math.max(22, Math.round(calls / maxCalls * 140)) : 4;
+    return `<div class="customer-trend-bar ${calls ? 'has-data' : 'is-zero'}"><strong>${calls || ''}</strong><div class="bar" style="height:${height}px"></div><small>${text(item.date || '-')}</small></div>`;
+  });  const liveStatus = $('customerUsageLiveStatus');
+  if (liveStatus) liveStatus.textContent = state.customerLiveUpdatedAt ? `已更新 ${state.customerLiveUpdatedAt}` : '自动刷新';  const trendNode = $('customerUsageTrendBars');
   if (trendNode) trendNode.innerHTML = trendBars.length ? `<div class="customer-trend-chart">${trendBars.join('')}</div>` : emptyState('近 30 天还没有调用趋势数据');
   renderCardList('customerUsageHighlights', [
     `<div class="info-card"><h4>调用观察</h4><p>近月累计 ${text(state.customerTrends?.total_calls || 0)} 次调用，成功率 ${text(state.customerTrends?.success_rate ?? 100)}%。</p></div>`,
@@ -1981,7 +2038,7 @@ function renderCustomerAccess() {
   ]);
   renderCardList('customerAccessGuideList', [
     `<div class="info-card"><h4>使用前须知</h4><p>先确认资产名称、环境地址、鉴权方式，再安排联调。</p></div>`,
-    ...assets.slice(0, 4).map(asset => `<div class="info-card"><h4>${displayAssetName(asset.name)}</h4><p>${text(asset.capability || '业务能力说明待补充')}</p><div class="customer-action-row"><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${asset.id}')">查看接入指引</button></div></div>`)
+    ...assets.slice(0, 4).map(asset => `<div class="info-card"><h4>${displayAssetName(asset.name)}</h4><p>${text(asset.capability || '业务能力说明待补充')}</p><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${asset.id}')">查看服务详情</button><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${asset.id}')">查看接入指引</button></div></div>`)
   ], '暂无可查看的接入指引');
   renderCardList('customerAccessList', access.map(item => `<div class="info-card customer-access-card"><h4>${text(item.name || '接入项')}</h4><p class="muted-line">${text(item.project_name || '-')} \u00b7 ${text(item.environment || '-')}</p><p>地址：${text(item.endpoint || '-')}</p><p>范围：${text(item.scope || '-')}</p><div class="customer-action-row">${item.endpoint ? `<button type="button" class="ghost-btn small" onclick="copyText('${escapeJs(item.endpoint)}')">复制地址</button>` : ''}</div></div>`), '暂无接入配置');
 }
@@ -2290,6 +2347,7 @@ export function renderAll() {
   renderKnowledge();
   renderBilling();
   renderCustomerBuilder();
+  renderCustomerOverview();
   renderCustomerDashboard();
   renderCustomerUsage();
   renderCustomerBilling();
@@ -2302,6 +2360,7 @@ export function renderAll() {
   renderDeliverableDrawer();
   renderKnowledgeDrawer();
   renderAccessGuideOverlay();
+  renderCustomerAssetOverlay();
   renderBuilderValueBoard();
   renderReviewWorkbench();
   switchPage(state.currentPage);

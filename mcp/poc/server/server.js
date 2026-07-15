@@ -17,6 +17,8 @@ import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUND
 import { buildCandidateFromAi, canCreateToolDraft, buildToolDraft, canConfirmMcpComposition, confirmMcpComposition, canAssembleMcp, buildMcpDraft } from "./modules/governance/control-flow.mjs";
 import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 import { GOVERNANCE_DEMO_SCENARIOS } from "./modules/governance/demo-scenarios.mjs";
+import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
+import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +41,7 @@ const db = new Database(DB_PATH);
 const ADMIN_DIR = path.join(__dirname, "..", "admin");
 const CLIENT_DIR = path.join(__dirname, "..", "client");
 const governanceRepo = createGovernanceRepository(db);
+let pocRuntimeManager;
 
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
@@ -375,6 +378,31 @@ function runMigrations() {
     tools TEXT NOT NULL,
     change_reason TEXT NOT NULL,
     created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_poc_runtime_instances (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL,
+    release_id TEXT,
+    status TEXT NOT NULL,
+    port INTEGER,
+    endpoint TEXT,
+    event_token TEXT NOT NULL,
+    health_checked_at TEXT,
+    last_error TEXT,
+    last_trace_id TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    stopped_at TEXT
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_poc_acceptance_runs (
+    id TEXT PRIMARY KEY,
+    runtime_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    steps_json TEXT NOT NULL,
+    trace_id TEXT,
+    executed_by TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS platform_governance_decisions (
@@ -746,6 +774,45 @@ function buildKnowledgeBaseRecord(req, source, options = {}) {
 }
 
 // ============== Seed 鏁版嵁 ==============
+function repairLvchengDemoText(database) {
+  const updateAsset = database.prepare("UPDATE platform_mcp_assets SET name = ?, capability = ? WHERE id = ?");
+  updateAsset.run("\u7eff\u57ce\u4f1a\u5458\u753b\u50cf\u67e5\u8be2 MCP", "\u4f1a\u5458\u753b\u50cf\u67e5\u8be2", "mcp_lvcheng_member_profile");
+  updateAsset.run("\u7eff\u57ce\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf MCP", "\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf", "mcp_lvcheng_order_journey");
+
+  const updateRelease = database.prepare("UPDATE platform_mcp_releases SET notes = ? WHERE id = ?");
+  updateRelease.run("\u7eff\u57ce\u4f1a\u5458\u753b\u50cf MCP \u5df2\u6b63\u5f0f\u53d1\u5e03", "rel_lvcheng_member_profile_100");
+  updateRelease.run("\u7eff\u57ce\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf MCP \u5df2\u6b63\u5f0f\u53d1\u5e03", "rel_lvcheng_order_journey_100");
+
+  const updateDeliverable = database.prepare("UPDATE platform_deliverables SET name = ? WHERE id = ?");
+  updateDeliverable.run("\u7eff\u57ce CDP MCP \u914d\u7f6e\u5305", "del_cfg_lvcheng");
+  updateDeliverable.run("\u7eff\u57ce\u8054\u8c03\u9a8c\u6536\u62a5\u544a", "del_test_lvcheng");
+  updateDeliverable.run("\u7eff\u57ce\u8fd0\u884c\u8bf4\u660e", "del_run_lvcheng");
+
+  database.prepare("UPDATE platform_billing_records SET item = ?, notes = ? WHERE id = ?").run(
+    "\u7eff\u57ce CDP \u4e13\u4e1a\u7248\u6708\u8d39",
+    "\u4f1a\u5458\u753b\u50cf + \u8ba2\u5355\u65c5\u7a0b\u53cc MCP \u4ea4\u4ed8",
+    "bill_sub_lvcheng"
+  );
+
+  database.prepare("UPDATE platform_access_configs SET name = ?, scope = ?, description = ? WHERE id = ?").run(
+    "\u7eff\u57ce CDP OAuth \u63a5\u5165",
+    "\u4f1a\u5458\u753b\u50cf\u3001\u8ba2\u5355\u65c5\u7a0b",
+    "\u7eff\u57ce\u4e2d\u56fd\u5ba2\u6237\u4fa7\u6b63\u5f0f\u8054\u8c03\u5165\u53e3",
+    "acc_lvcheng_cdp"
+  );
+
+  const updateEvent = database.prepare("UPDATE platform_call_events SET caller = ?, business_result = ?, response_summary = ? WHERE id = ?");
+  updateEvent.run("\u7eff\u57ce\u4f1a\u5458\u4e2d\u5fc3", "\u4f1a\u5458\u753b\u50cf\u67e5\u8be2", JSON.stringify({ level: "\u9ed1\u94bb", recent_visit_mall: "\u676d\u5dde IFC" }), "evt_lvcheng_001");
+  updateEvent.run("\u7eff\u57ce\u8fd0\u8425\u53f0", "\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf", JSON.stringify({ journey_status: "completed", refund_risk: "low" }), "evt_lvcheng_002");
+
+  const updateCandidate = database.prepare("UPDATE platform_candidate_assets SET name = ?, ai_summary = ? WHERE id = ?");
+  updateCandidate.run("\u7eff\u57ce\u4f1a\u5458\u753b\u50cf\u67e5\u8be2", "\u4ece\u4f1a\u5458\u4e3b\u6570\u636e\u3001\u7b49\u7ea7\u5386\u53f2\u548c\u6269\u5c55\u8868\u751f\u6210\u4f1a\u5458\u753b\u50cf\u67e5\u8be2 MCP", "cand_lvcheng_member_profile");
+  updateCandidate.run("\u7eff\u57ce\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf", "\u4ece\u8ba2\u5355\u4e3b\u8868\u4e0e\u5ba1\u6838\u5386\u53f2\u751f\u6210\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf MCP", "cand_lvcheng_order_journey");
+
+  const updatePublished = database.prepare("UPDATE platform_published_assets SET name = ?, published_by = ? WHERE id = ?");
+  updatePublished.run("\u7eff\u57ce\u4f1a\u5458\u753b\u50cf\u67e5\u8be2", "\u5e73\u53f0\u7ba1\u7406\u5458", "pub_lvcheng_member_profile");
+  updatePublished.run("\u7eff\u57ce\u8ba2\u5355\u65c5\u7a0b\u6d1e\u5bdf", "\u5e73\u53f0\u7ba1\u7406\u5458", "pub_lvcheng_order_journey");
+}
 function seed() {
   const hasUsers = count("platform_users") > 0;
   if (!hasUsers) {
@@ -1033,6 +1100,182 @@ function seed() {
   db.prepare("UPDATE platform_access_configs SET last_health_status = ?, last_health_check_at = ?, last_health_detail = ? WHERE id = ?").run("success", "2026-07-07 10:30:00", JSON.stringify({ message: "token valid" }), "acc_retail_api");
   db.prepare("UPDATE platform_access_configs SET last_health_status = ?, last_health_check_at = ?, last_health_detail = ? WHERE id = ?").run("success", "2026-07-07 10:20:00", JSON.stringify({ message: "sandbox connected" }), "acc_manuf_oauth");
   db.prepare("UPDATE platform_access_configs SET last_health_status = ?, last_health_check_at = ?, last_health_detail = ? WHERE id = ?").run("error", "2026-07-07 09:50:00", JSON.stringify({ message: "certificate pending" }), "acc_finance_mtls");
+  db.prepare("UPDATE platform_projects SET status = ?, progress = ?, deadline = ? WHERE id = ?").run("published", 76, "2026-08-20", "proj_lvcheng_cdp");
+  db.prepare("INSERT OR IGNORE INTO platform_gateway_policies (id, project_id, name, auth_mode, authorization_scope, rate_limit, masking_rules, audit_enabled, status) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    "pol_lvcheng",
+    "proj_lvcheng_cdp",
+    "绿城 CDP 发布策略",
+    "OAuth + API Key",
+    "绿城 CRM、会员中心、订单运营台",
+    "180 rpm / 客户",
+    JSON.stringify(["mobile", "id_card_number", "vip_code", "order_id"]),
+    1,
+    "enabled"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_mcp_assets (id, project_id, name, capability, status, version, endpoint, category, tools) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    "mcp_lvcheng_member_profile",
+    "proj_lvcheng_cdp",
+    "lvcheng_member_profile_query",
+    "绿城会员画像查询",
+    "published",
+    "v1.0.0",
+    "/mcp/lvcheng/member-profile",
+    "CDP",
+    JSON.stringify(["lvcheng_member_profile_query", "lvcheng_member_level_history"])
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_mcp_assets (id, project_id, name, capability, status, version, endpoint, category, tools) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    "mcp_lvcheng_order_journey",
+    "proj_lvcheng_cdp",
+    "lvcheng_order_journey",
+    "绿城订单旅程洞察",
+    "published",
+    "v1.0.0",
+    "/mcp/lvcheng/order-journey",
+    "CDP",
+    JSON.stringify(["lvcheng_order_journey", "lvcheng_refund_risk_check"])
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_mcp_releases (id, asset_id, version, status, tested_at, released_at, notes) VALUES (?,?,?,?,?,?,?)").run(
+    "rel_lvcheng_member_profile_100",
+    "mcp_lvcheng_member_profile",
+    "v1.0.0",
+    "published",
+    "2026-07-12 14:10:00",
+    "2026-07-13 09:30:00",
+    "绿城会员画像 MCP 已正式发布"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_mcp_releases (id, asset_id, version, status, tested_at, released_at, notes) VALUES (?,?,?,?,?,?,?)").run(
+    "rel_lvcheng_order_journey_100",
+    "mcp_lvcheng_order_journey",
+    "v1.0.0",
+    "published",
+    "2026-07-12 17:40:00",
+    "2026-07-13 11:15:00",
+    "绿城订单旅程洞察 MCP 已正式发布"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_deliverables (id, project_id, name, type, status, updated_at) VALUES (?,?,?,?,?,?)").run("del_cfg_lvcheng", "proj_lvcheng_cdp", "绿城 CDP MCP 配置包", "config", "ready", "2026-07-13 11:20:00");
+  db.prepare("INSERT OR IGNORE INTO platform_deliverables (id, project_id, name, type, status, updated_at) VALUES (?,?,?,?,?,?)").run("del_test_lvcheng", "proj_lvcheng_cdp", "绿城联调验收报告", "test-report", "ready", "2026-07-13 11:20:00");
+  db.prepare("INSERT OR IGNORE INTO platform_deliverables (id, project_id, name, type, status, updated_at) VALUES (?,?,?,?,?,?)").run("del_run_lvcheng", "proj_lvcheng_cdp", "绿城运行说明", "run-guide", "ready", "2026-07-13 11:20:00");
+  db.prepare("INSERT OR IGNORE INTO platform_billing_records (id, customer_id, tier, billing_type, item, period, base_amount, overage_calls, overage_amount, total_amount, status, usage_count, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    "bill_sub_lvcheng",
+    "cust_lvcheng",
+    "professional",
+    "subscription",
+    "绿城 CDP 专业版月费",
+    "2026-07",
+    12800,
+    0,
+    0,
+    12800,
+    "confirmed",
+    6320,
+    "会员画像 + 订单旅程双 MCP 交付"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_access_configs (id, customer_id, project_id, name, type, endpoint, api_key, scope, status, environment, certificate, expires_at, credential_last_rotated_at, webhook_url, description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    "acc_lvcheng_cdp",
+    "cust_lvcheng",
+    "proj_lvcheng_cdp",
+    "绿城 CDP OAuth 接入",
+    "oauth",
+    "https://api.lvcheng.mock/cdp",
+    "token_lvcheng_***",
+    "会员画像、订单旅程",
+    "enabled",
+    "production",
+    null,
+    "2026-12-31T23:59:59",
+    "2026-07-10T09:30:00",
+    "https://hooks.mcpforge.local/lvcheng/callback",
+    "绿城中国客户侧正式联调入口"
+  );
+  db.prepare("UPDATE platform_access_configs SET last_health_status = ?, last_health_check_at = ?, last_health_detail = ? WHERE id = ?").run("success", "2026-07-13 10:05:00", JSON.stringify({ message: "green city client connected" }), "acc_lvcheng_cdp");
+  db.prepare("INSERT OR IGNORE INTO platform_call_events (id, asset_id, caller, status, latency_ms, business_result, trace_id, input_tokens, output_tokens, request_params, response_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+    "evt_lvcheng_001",
+    "mcp_lvcheng_member_profile",
+    "绿城会员中心",
+    "success",
+    196,
+    "会员画像查询",
+    "trace_lvcheng_001",
+    62,
+    142,
+    JSON.stringify({ vip_code: "GC10001" }),
+    JSON.stringify({ level: "黑钻", recent_visit_mall: "杭州IFC" })
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_call_events (id, asset_id, caller, status, latency_ms, business_result, trace_id, input_tokens, output_tokens, request_params, response_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+    "evt_lvcheng_002",
+    "mcp_lvcheng_order_journey",
+    "绿城运营台",
+    "success",
+    224,
+    "订单旅程洞察",
+    "trace_lvcheng_002",
+    74,
+    168,
+    JSON.stringify({ order_id: "GC-ORDER-20260712" }),
+    JSON.stringify({ journey_status: "completed", refund_risk: "low" })
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_candidate_assets (id, project_id, source_type, source_ref, name, business_domain, confidence, risk_level, sensitive_hits, mapping_status, ai_summary, raw_payload, status, manual_screen_status, manual_screen_decision, needs_human_review, acceptance_passed, acceptance_checklist, mcp_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    "cand_lvcheng_member_profile",
+    "proj_lvcheng_cdp",
+    "ddl",
+    "ds_lvcheng_member",
+    "绿城会员画像查询",
+    "customer-profile",
+    0.94,
+    "medium",
+    JSON.stringify(["mobile", "id_card_number", "vip_code"]),
+    "mapped",
+    "从会员主数据、等级历史和扩展表生成会员画像查询 MCP",
+    JSON.stringify({ tools: ["lvcheng_member_profile_query", "lvcheng_member_level_history"] }),
+    "published",
+    "approved",
+    "approved",
+    0,
+    1,
+    JSON.stringify({ business_ready: true, security_checked: true, delivery_ready: true }),
+    "mcp_lvcheng_member_profile"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_candidate_assets (id, project_id, source_type, source_ref, name, business_domain, confidence, risk_level, sensitive_hits, mapping_status, ai_summary, raw_payload, status, manual_screen_status, manual_screen_decision, needs_human_review, acceptance_passed, acceptance_checklist, mcp_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    "cand_lvcheng_order_journey",
+    "proj_lvcheng_cdp",
+    "ddl",
+    "ds_lvcheng_order",
+    "绿城订单旅程洞察",
+    "order-ops",
+    0.91,
+    "medium",
+    JSON.stringify(["order_id", "refund_reason"]),
+    "mapped",
+    "从订单主表与审核历史生成订单旅程洞察 MCP",
+    JSON.stringify({ tools: ["lvcheng_order_journey", "lvcheng_refund_risk_check"] }),
+    "published",
+    "approved",
+    "approved",
+    0,
+    1,
+    JSON.stringify({ business_ready: true, security_checked: true, delivery_ready: true }),
+    "mcp_lvcheng_order_journey"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_published_assets (id, candidate_id, project_id, name, business_domain, asset_payload, published_by, published_at) VALUES (?,?,?,?,?,?,?,?)").run(
+    "pub_lvcheng_member_profile",
+    "cand_lvcheng_member_profile",
+    "proj_lvcheng_cdp",
+    "绿城会员画像查询",
+    "customer-profile",
+    JSON.stringify({ asset_id: "mcp_lvcheng_member_profile", tools: ["lvcheng_member_profile_query", "lvcheng_member_level_history"] }),
+    "平台管理员",
+    "2026-07-13 09:30:00"
+  );
+  db.prepare("INSERT OR IGNORE INTO platform_published_assets (id, candidate_id, project_id, name, business_domain, asset_payload, published_by, published_at) VALUES (?,?,?,?,?,?,?,?)").run(
+    "pub_lvcheng_order_journey",
+    "cand_lvcheng_order_journey",
+    "proj_lvcheng_cdp",
+    "绿城订单旅程洞察",
+    "order-ops",
+    JSON.stringify({ asset_id: "mcp_lvcheng_order_journey", tools: ["lvcheng_order_journey", "lvcheng_refund_risk_check"] }),
+    "平台管理员",
+    "2026-07-13 11:15:00"
+  );
 
   const kbCols = [
     ["col_store_ops", "门店运营手册", "门店日常运营、收银、退换货与服务规范", 4, 12, "active"],
@@ -1446,6 +1689,8 @@ function seed() {
   ];
   const specStmt2 = db.prepare("INSERT OR IGNORE INTO platform_openapi_specs (id, source_id, project_id, title, spec) VALUES (?,?,?,?,?)");
   openapiSpecs.forEach(item => specStmt2.run(...item));
+
+  repairLvchengDemoText(db);
 
 }
 
@@ -2562,6 +2807,82 @@ app.get("/api/platform/knowledge-bases/:id/recall-logs", requireAuth, (req, res)
 
 app.get("/api/platform/mcp-assets", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({ ...a, tools: decode(a.tools) }))));
 
+app.get("/api/platform/poc-runtimes", requireAuth, (req, res) => {
+  const assetIds = scopedAssets(req).map(asset => asset.id);
+  if (!assetIds.length) return res.json([]);
+  const rows = db.prepare(`SELECT runtime.*, asset.name AS asset_name FROM platform_poc_runtime_instances runtime JOIN platform_mcp_assets asset ON asset.id = runtime.asset_id WHERE runtime.asset_id IN (${assetIds.map(() => "?").join(",")}) ORDER BY runtime.created_at DESC`).all(...assetIds);
+  res.json(rows);
+});
+
+app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, requireAdmin, async (req, res) => {
+  const asset = scopedAssets(req).find(item => item.id === req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  if (asset.status !== "published") return res.status(400).json({ error: "only published assets can start a POC runtime" });
+  const tools = decode(asset.tools);
+  if (tools.some(tool => /create|update|delete|write|insert|modify/i.test(typeof tool === "string" ? tool : tool.name || ""))) return res.status(400).json({ error: "POC runtime only supports read-only tools" });
+  const release = db.prepare("SELECT * FROM platform_mcp_releases WHERE asset_id = ? AND status = 'published' ORDER BY released_at DESC LIMIT 1").get(asset.id);
+  if (!release) return res.status(400).json({ error: "published release is required before starting a POC runtime" });
+  const existing = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE asset_id = ? AND status IN ('starting','running') ORDER BY created_at DESC LIMIT 1").get(asset.id);
+  if (existing) return res.json(existing);
+  const id = makeId("pocrun");
+  const eventToken = crypto.randomBytes(24).toString("hex");
+  db.prepare("INSERT INTO platform_poc_runtime_instances (id, asset_id, release_id, status, event_token, created_by) VALUES (?,?,?,?,?,?)").run(id, asset.id, release.id, "starting", eventToken, req.user.display_name);
+  try {
+    const started = await pocRuntimeManager.start({ runtime: { id, asset_id: asset.id, release_id: release.id }, asset: { ...asset, tools }, eventToken, eventUrl: `http://127.0.0.1:${PORT}/api/internal/poc-runtimes/${id}/events` });
+    db.prepare("UPDATE platform_poc_runtime_instances SET status = 'running', port = ?, endpoint = ?, health_checked_at = datetime('now') WHERE id = ?").run(started.port, started.endpoint, id);
+    res.status(201).json(db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(id));
+  } catch (error) {
+    db.prepare("UPDATE platform_poc_runtime_instances SET status = 'failed', last_error = ? WHERE id = ?").run(error.message, id);
+    res.status(500).json({ error: error.message, runtime_id: id });
+  }
+});
+
+app.post("/api/platform/poc-runtimes/:id/stop", requireAuth, requireAdmin, async (req, res) => {
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(req.params.id);
+  if (!runtime || !scopedAssets(req).some(asset => asset.id === runtime.asset_id)) return res.status(404).json({ error: "runtime not found" });
+  await pocRuntimeManager.stop(runtime.id);
+  db.prepare("UPDATE platform_poc_runtime_instances SET status = 'stopped', stopped_at = datetime('now') WHERE id = ?").run(runtime.id);
+  res.json({ ok: true, id: runtime.id, status: "stopped" });
+});
+
+app.get("/api/platform/poc-runtimes/:id/health", requireAuth, async (req, res) => {
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(req.params.id);
+  if (!runtime || !scopedAssets(req).some(asset => asset.id === runtime.asset_id)) return res.status(404).json({ error: "runtime not found" });
+  try {
+    const response = await fetch(runtime.endpoint.replace(/\/sse$/, "/health"));
+    const body = await response.json();
+    db.prepare("UPDATE platform_poc_runtime_instances SET status = ?, health_checked_at = datetime('now'), last_error = ? WHERE id = ?").run(response.ok ? "running" : "failed", response.ok ? null : `HTTP ${response.status}`, runtime.id);
+    res.status(response.status).json(body);
+  } catch (error) {
+    db.prepare("UPDATE platform_poc_runtime_instances SET status = 'failed', last_error = ? WHERE id = ?").run(error.message, runtime.id);
+    res.status(502).json({ error: error.message });
+  }
+});
+
+app.post("/api/platform/poc-runtimes/:id/connect", requireAuth, requireAdmin, async (req, res) => {
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(req.params.id);
+  if (!runtime || !scopedAssets(req).some(asset => asset.id === runtime.asset_id)) return res.status(404).json({ error: "runtime not found" });
+  const inspection = await inspectRuntime(runtime.endpoint);
+  db.prepare("INSERT INTO platform_poc_acceptance_runs (id, runtime_id, asset_id, status, steps_json, executed_by) VALUES (?,?,?,?,?,?)").run(makeId("pocaccept"), runtime.id, runtime.asset_id, inspection.ok ? "passed" : "failed", JSON.stringify(inspection.steps), req.user.display_name);
+  res.status(inspection.ok ? 200 : 502).json({ runtime_id: runtime.id, endpoint: runtime.endpoint, ...inspection });
+});
+
+app.post("/api/internal/poc-runtimes/:id/events", (req, res) => {
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(req.params.id);
+  if (!runtime || req.get("x-poc-runtime-token") !== runtime.event_token) return res.status(401).json({ error: "invalid runtime token" });
+  const event = req.body || {};
+  if (event.event_type !== "tool_call") return res.status(400).json({ error: "unsupported runtime event" });
+  db.prepare("INSERT INTO platform_call_events (id, asset_id, caller, status, latency_ms, business_result, trace_id, request_params, response_summary) VALUES (?,?,?,?,?,?,?,?,?)").run(makeId("evt"), runtime.asset_id, "智能体联调台", event.status || "error", Number(event.latency_ms) || 0, `poc_sse:${event.tool_name || "unknown"}`, event.trace_id || makeId("trace"), JSON.stringify(event.request_params || {}).slice(0, 1000), JSON.stringify(event.response_summary || event.error || {}).slice(0, 1000));
+  db.prepare("UPDATE platform_poc_runtime_instances SET last_trace_id = ?, last_error = ? WHERE id = ?").run(event.trace_id || null, event.status === "error" ? event.error || "MCP Tool call failed" : null, runtime.id);
+  if (event.status === "success") {
+    const asset = db.prepare("SELECT project_id, name, version FROM platform_mcp_assets WHERE id = ?").get(runtime.asset_id);
+    db.prepare("INSERT OR REPLACE INTO platform_deliverables (id, project_id, name, type, status, updated_at) VALUES (?,?,?,?,?,datetime('now'))").run(
+      `poc_evidence_${runtime.asset_id}`, asset.project_id, `${asset.name} POC 验收凭证`, "poc-evidence", "ready"
+    );
+  }
+  res.status(202).json({ ok: true });
+});
+
 // 编辑 MCP 资产属性
 app.put("/api/platform/mcp-assets/:id", requireAuth, requireAdmin, (req, res) => {
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
@@ -2857,7 +3178,16 @@ app.get("/api/platform/governance/candidates", requireAuth, (req, res) => {
 
 app.get("/api/platform/governance/reviews", requireAuth, (req, res) => {
   const stage = req.query.stage; // 可选：candidate_review / tool_review / publish_acceptance
-  res.json({ items: governanceRepo.listReviewTasks(stage) });
+  const cid = customerScope(req);
+  const items = governanceRepo.listReviewTasks(stage);
+  if (!cid) return res.json({ items });
+  const scopedProjectIds = new Set(scopedProjects(req).map(project => project.id));
+  res.json({
+    items: items.filter(item => {
+      const candidate = governanceRepo.getCandidate(item.candidate_id);
+      return candidate && scopedProjectIds.has(candidate.project_id);
+    })
+  });
 });
 
 // 获取三层审核阶段配置元数据
@@ -2938,7 +3268,11 @@ app.post("/api/platform/governance/reviews/:id/decision", requireAuth, (req, res
 });
 
 app.get("/api/platform/governance/published-assets", requireAuth, (req, res) => {
-  res.json({ items: governanceRepo.listPublishedAssets() });
+  const cid = customerScope(req);
+  const items = governanceRepo.listPublishedAssets();
+  if (!cid) return res.json({ items });
+  const scopedProjectIds = new Set(scopedProjects(req).map(project => project.id));
+  res.json({ items: items.filter(item => scopedProjectIds.has(item.project_id)) });
 });
 
 app.get("/api/platform/governance/reuse-suggestions", requireAuth, (req, res) => {
@@ -3915,6 +4249,20 @@ app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
     content = generateTestReport(item);  // 复用测试报告模板
     filename = `mcp-forge-effect-report-${item.id}.html`;
     contentType = 'text/html; charset=utf-8';
+  } else if (type === 'poc-evidence') {
+    const runtime = db.prepare("SELECT runtime.*, asset.name AS asset_name, asset.version AS asset_version FROM platform_poc_runtime_instances runtime JOIN platform_mcp_assets asset ON asset.id = runtime.asset_id WHERE runtime.asset_id = ? ORDER BY runtime.created_at DESC LIMIT 1").get(item.id.replace('poc_evidence_', ''));
+    const event = runtime ? db.prepare("SELECT * FROM platform_call_events WHERE asset_id = ? AND business_result LIKE 'poc_sse:%' ORDER BY created_at DESC LIMIT 1").get(runtime.asset_id) : null;
+    content = [
+      '# MCP Forge POC 验收凭证', '',
+      `- MCP 资产：${runtime?.asset_name || '-'}`, `- 版本：${runtime?.asset_version || '-'}`,
+      '- 数据连接器：Mock Connector（仅证明协议与治理链路）',
+      `- SSE 地址：${runtime?.endpoint || '-'}`, `- 运行状态：${runtime?.status || '-'}`,
+      `- Tool：${event?.business_result?.replace('poc_sse:', '') || '-'}`,
+      `- Trace ID：${event?.trace_id || '-'}`, `- 耗时：${event?.latency_ms ?? '-'} ms`,
+      `- 验收时间：${event?.created_at || '-'}`
+    ].join('\n');
+    filename = `mcp-forge-poc-evidence-${item.id}.md`;
+    contentType = 'text/markdown; charset=utf-8';
   } else {
     content = JSON.stringify(item, null, 2);
     filename = `mcp-forge-deliverable-${item.id}.json`;
@@ -4043,7 +4391,7 @@ app.get("/api/customer/dashboard", requireAuth, (req, res) => {
   const cid = customerScope(req);
   if (!cid) return res.status(403).json({ error: "仅客户可访问" });
   const projects = scopedProjects(req);
-  const assets = scopedAssets(req);
+  const assets = scopedAssets(req).filter(a => a.status === "published");
   const assetIds = assets.map(a => a.id);
   const billing = db.prepare("SELECT * FROM platform_billing_records WHERE customer_id = ? ORDER BY period DESC").all(cid);
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -4076,6 +4424,84 @@ app.get("/api/customer/dashboard", requireAuth, (req, res) => {
   });
 });
 
+function customerPublishedAsset(req, assetId) {
+  return scopedAssets(req).find(asset => asset.id === assetId && asset.status === "published") || null;
+}
+
+function customerAssetHealth(asset) {
+  const stats = db.prepare("SELECT COUNT(*) AS total, AVG(latency_ms) AS avg_latency, SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success FROM platform_call_events WHERE asset_id = ?").get(asset.id);
+  const release = db.prepare("SELECT version, released_at, tested_at, notes FROM platform_mcp_releases WHERE asset_id = ? ORDER BY COALESCE(released_at, tested_at) DESC LIMIT 1").get(asset.id);
+  return {
+    id: asset.id,
+    name: asset.name,
+    capability: asset.capability,
+    version: release?.version || asset.version || "-",
+    status: asset.status,
+    tools: decode(asset.tools),
+    success_rate: stats?.total ? Math.round((stats.success || 0) / stats.total * 100) : 100,
+    avg_latency_ms: Math.round(stats?.avg_latency || 0),
+    call_count: stats?.total || 0,
+    latest_release_at: release?.released_at || release?.tested_at || null
+  };
+}
+
+app.get("/api/customer/overview", requireAuth, (req, res) => {
+  const cid = customerScope(req);
+  if (!cid) return res.status(403).json({ error: "customer role required" });
+  const assets = scopedAssets(req).filter(asset => asset.status === "published");
+  const projectIds = [...new Set(assets.map(asset => asset.project_id))];
+  const deliverables = projectIds.length
+    ? db.prepare(`SELECT d.*, p.name AS project_name FROM platform_deliverables d JOIN platform_projects p ON p.id = d.project_id WHERE d.project_id IN (${projectIds.map(() => "?").join(",")}) ORDER BY d.updated_at DESC LIMIT 5`).all(...projectIds)
+    : [];
+  const releases = assets.length
+    ? db.prepare(`SELECT r.version, r.released_at, r.tested_at, r.notes, a.id AS asset_id, a.name AS asset_name FROM platform_mcp_releases r JOIN platform_mcp_assets a ON a.id = r.asset_id WHERE r.asset_id IN (${assets.map(() => "?").join(",")}) ORDER BY COALESCE(r.released_at, r.tested_at) DESC LIMIT 5`).all(...assets.map(asset => asset.id))
+    : [];
+  const actionItems = [
+    ...deliverables.filter(item => item.status === "ready").slice(0, 3).map(item => ({ type: "deliverable", target_id: item.id, title: `下载 ${item.name}`, priority: "normal" })),
+    ...assets.filter(asset => !asset.endpoint).map(asset => ({ type: "access", target_id: asset.id, title: `确认 ${asset.name} 的接入方式`, priority: "high" }))
+  ];
+  res.json({
+    customer: { id: cid, name: db.prepare("SELECT name FROM platform_customers WHERE id = ?").get(cid)?.name || "" },
+    assets: assets.map(customerAssetHealth),
+    action_items: actionItems,
+    recent_deliverables: deliverables,
+    release_updates: releases
+  });
+});
+
+app.get("/api/customer/assets/:id", requireAuth, (req, res) => {
+  const cid = customerScope(req);
+  if (!cid) return res.status(403).json({ error: "customer role required" });
+  const asset = customerPublishedAsset(req, req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const releases = db.prepare("SELECT version, status, tested_at, released_at, notes FROM platform_mcp_releases WHERE asset_id = ? ORDER BY COALESCE(released_at, tested_at) DESC").all(asset.id);
+  const deliverables = db.prepare("SELECT id, name, type, status, updated_at FROM platform_deliverables WHERE project_id = ? ORDER BY updated_at DESC").all(asset.project_id);
+  const access = db.prepare("SELECT name, type, endpoint, scope, status, environment, expires_at, description FROM platform_access_configs WHERE customer_id = ? AND project_id = ? ORDER BY id LIMIT 1").get(cid, asset.project_id) || null;
+  const recentEvents = db.prepare("SELECT id, status, latency_ms, business_result, trace_id, created_at FROM platform_call_events WHERE asset_id = ? ORDER BY created_at DESC LIMIT 10").all(asset.id);
+  res.json({ asset: customerAssetHealth(asset), releases, access, deliverables, recent_events: recentEvents });
+});
+
+app.post("/api/customer/assets/:id/trial", requireAuth, (req, res) => {
+  const cid = customerScope(req);
+  if (!cid) return res.status(403).json({ error: "customer role required" });
+  const asset = customerPublishedAsset(req, req.params.id);
+  if (!asset) return res.status(404).json({ error: "asset not found" });
+  const source = req.body || {};
+  const params = {
+    vip_code: String(source.vip_code || "").slice(0, 64),
+    order_id: String(source.order_id || "").slice(0, 64)
+  };
+  const tools = decode(asset.tools);
+  const tool = typeof tools[0] === "string" ? { name: tools[0] } : (tools[0] || { name: asset.name });
+  const result = generateMockResult(tool, params);
+  const traceId = makeId("trace");
+  const latency = 80 + Math.floor(Math.random() * 180);
+  db.prepare("INSERT INTO platform_call_events (id, asset_id, caller, status, latency_ms, business_result, trace_id, input_tokens, output_tokens, request_params, response_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+    makeId("evt"), asset.id, req.user.display_name || req.user.username || "customer", "success", latency,
+    "customer_trial", traceId, 0, 0, JSON.stringify(params), JSON.stringify(result)
+  );
+  res.json({ status: "success", latency_ms: latency, trace_id: traceId, summary: result?.message || "trial completed", result });
+});
 // 2.2 客户侧 MCP 资产接入指引
 app.get("/api/customer/assets/:id/access-guide", requireAuth, (req, res) => {
   const cid = customerScope(req);
@@ -4240,13 +4666,15 @@ app.post("/api/workbuddy/assets/:id/execute", async (req, res) => {
 });
 
 // 完整的 WorkBuddy Chat 端点（接收 AI 配置 + 用户消息，自动 Tool Call）
-app.post("/api/workbuddy/chat", async (req, res) => {
-  const { asset_id, message, history, model_config } = req.body || {};
+app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
+  const { asset_id, runtime_id, message, history, model_config } = req.body || {};
   if (!asset_id) return res.status(400).json({ error: "asset_id required" });
   if (!message?.trim()) return res.status(400).json({ error: "message required" });
 
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(asset_id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id);
+  if (!runtime) return res.status(400).json({ error: "请先在 MCP 资产启动 POC 实例，并在智能体联调台连接真实 MCP" });
 
   const tools = decode(asset.tools).filter(t => typeof t === 'object');
   if (!tools.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
@@ -4329,12 +4757,16 @@ ${toolList}
         const tool = tools.find(t => t.name === fnName);
         if (tool) {
           // 模拟执行
-          const mockResult = generateMockResult(tool, fnArgs);
+          const call = await callRuntimeTool({ endpoint: runtime.endpoint, toolName: fnName, args: fnArgs });
           toolCallResults.push({
             tool_name: fnName,
             display_name: tool.display_name || fnName,
             arguments: fnArgs,
-            result: mockResult
+            result: call.result,
+            trace_id: call.trace_id,
+            latency_ms: call.latency_ms,
+            source: "poc_sse",
+            error: call.error
           });
         }
       }
@@ -4440,6 +4872,15 @@ if (fs.existsSync(CLIENT_DIR)) app.use(express.static(CLIENT_DIR));
 
 // ============== 鍚姩 ==============
 runMigrations();
+db.prepare("UPDATE platform_poc_runtime_instances SET status = 'stopped', stopped_at = datetime('now') WHERE status IN ('starting','running')").run();
+pocRuntimeManager = createRuntimeManager({
+  rootDir: path.join(__dirname, "runtime-instances"),
+  onExit: (runtimeId, detail) => {
+    db.prepare("UPDATE platform_poc_runtime_instances SET status = 'failed', last_error = ? WHERE id = ? AND status = 'running'").run(
+      `runtime process exited (${detail.code ?? detail.signal ?? 'unknown'})`, runtimeId
+    );
+  }
+});
 seed();
 app.listen(PORT, () => console.log(`MCP Forge admin server running at http://localhost:${PORT}/admin`));
 

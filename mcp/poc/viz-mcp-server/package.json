@@ -1,0 +1,15 @@
+{
+  "name": "mcp-forge-viz-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP Forge - Data Visualization MCP Server (pure SVG, zero native deps)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test-local.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0"
+  }
+}

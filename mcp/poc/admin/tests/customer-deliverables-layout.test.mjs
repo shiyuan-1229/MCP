@@ -20,5 +20,10 @@ const rowsIndex = section.indexOf('customerDeliverableRows');
 assert.ok(summaryIndex >= 0, 'deliverable summary should exist');
 assert.ok(highlightsIndex > summaryIndex, 'deliverable highlights should come after summary');
 assert.ok(rowsIndex > highlightsIndex, 'deliverable download table should come after highlights');
+assert.match(
+  section,
+  /<div class="content-grid two-col" style="margin-top:20px">\s*<article class="panel">[\s\S]*?<div id="customerDeliverableHighlights" class="card-list"><\/div>\s*<\/article>\s*<\/div>\s*<article class="panel" style="margin-top:20px">[\s\S]*?<tbody id="customerDeliverableRows"><\/tbody>/u,
+  'deliverable download table should appear below the delivery suggestions'
+);
 
 console.log('customer deliverables layout checks passed');

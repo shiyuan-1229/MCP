@@ -23,18 +23,20 @@
         <span>客户侧：查看已交付 MCP、实际调用效果、交付资料和运行说明。</span>
         <span>下方行业账号仅用于展示业务资料如何进入工厂并沉淀为可交付 MCP 资产。</span>
       </div>
-      <label><span>账号</span><input id="loginUser" autocomplete="username" value="admin"></label>
+      <input id="loginUser" type="hidden" autocomplete="username" value="admin">
+      <label class="login-account-select"><span>Client</span><select id="loginUserSelect" autocomplete="username">
+        <option value="admin" data-password="admin123">平台管理员 / 工厂侧</option>
+        <option value="meijia" data-password="store123">美佳零售集团</option>
+        <option value="hzm" data-password="123456">华智制造</option>
+        <option value="xrf" data-password="123456">鑫融金服</option>
+        <option value="ahwy" data-password="123456">安和物业</option>
+        <option value="zxjy" data-password="123456">知行教育</option>
+        <option value="lvcheng" data-password="lv2026">绿城中国</option>
+      </select></label>
+      <p id="loginAccountHint" class="login-account-note">选择客户后会自动填充演示密码，并进入对应客户侧工作台。</p>
       <label><span>密码</span><input id="loginPass" type="password" autocomplete="current-password" value="admin123"></label>
       <button id="loginBtn" type="button" class="primary-btn">进入工作台</button>
       <p id="loginError" class="form-error" role="alert"></p>
-      <div class="quick-accounts" aria-label="示例账号">
-        <button type="button" data-user="admin" data-pass="admin123">平台管理员</button>
-        <button type="button" data-user="meijia" data-pass="store123">美佳零售</button>
-        <button type="button" data-user="hzm" data-pass="123456">华智制造</button>
-        <button type="button" data-user="xrf" data-pass="123456">鑫融金融</button>
-        <button type="button" data-user="ahwy" data-pass="123456">安和物业</button>
-        <button type="button" data-user="zxjy" data-pass="123456">知行教育</button>
-      </div>
     </section>
   </div>
 
@@ -275,10 +277,11 @@
               </select>
               <select id="sandboxAssetSelect" onchange="onSandboxAssetChange()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:200px"></select>
               <button id="sandboxTestBtn" type="button" class="ghost-btn" style="font-size:12px">🛡️ 安全检测</button>
-              <button id="deployWorkBuddyBtn" type="button" class="primary-btn" style="font-size:12px" onclick="deployToWorkBuddy()">🚀 部署到 WorkBuddy</button>
+              <button id="deployWorkBuddyBtn" type="button" class="primary-btn" style="font-size:12px" onclick="connectRealMcp()">🔌 连接真实 MCP</button>
             </div>
             <div id="sandboxTestResult" style="min-height:30px;max-height:280px;overflow-y:auto"></div>
             <div id="workbuddyDeployStatus" style="margin-bottom:10px"></div>
+            <div id="runtimeStatus" class="muted-line" aria-live="polite"></div>
             <div id="agentChatBox" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:0;margin-top:10px">
               <div id="agentMessages" style="max-height:300px;overflow-y:auto;padding:12px;font-size:13px;display:flex;flex-direction:column;gap:8px">
                 <div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产 → 点击「部署到 WorkBuddy」→ 输入问题测试</div>
@@ -470,6 +473,14 @@
       </section>
 
             
+<section id="customer-overview" class="page" data-title="交付总览" data-eyebrow="已交付 MCP、待处理事项与运行状态">
+  <div id="customerOverviewCards" class="metric-grid"></div>
+  <div class="content-grid two-col" style="margin-top:20px">
+    <article class="panel"><div class="panel-head"><h3>待处理事项</h3></div><div id="customerOverviewActions" class="card-list"></div></article>
+    <article class="panel"><div class="panel-head"><h3>最近版本</h3></div><div id="customerOverviewReleases" class="card-list"></div></article>
+  </div>
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>已交付 MCP</h3></div><div id="customerOverviewAssets" class="card-list"></div></article>
+</section>
 <section id="mcp-builder" class="page" data-title="AI 需求生成 MCP" data-eyebrow="顾客用自然语言描述目标，AI 连续对话后自动重组能力并生成目标 MCP">
   <div id="customerBuilderSummary" class="metric-grid"></div>
   <div class="content-grid customer-builder-layout" style="margin-top:20px">
@@ -540,7 +551,7 @@
             <section id="my-usage" class="page" data-title="调用统计" data-eyebrow="近 30 天调用趋势与成功率">
         <div id="customerUsageCards" class="metric-grid"></div>
         <div class="content-grid two-col" style="margin-top:20px">
-          <article class="panel"><div class="panel-head"><h3>近 30 天调用趋势</h3></div><div id="customerUsageTrendBars" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>近 30 天调用趋势</h3><span id="customerUsageLiveStatus" class="badge info">自动刷新</span></div><div id="customerUsageTrendBars" class="card-list"></div></article>
           <article class="panel"><div class="panel-head"><h3>调用观察</h3></div><div id="customerUsageHighlights" class="card-list"></div></article>
         </div>
         <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>最近调用记录</h3></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>MCP 资产</th><th>业务结果</th><th>状态</th><th>耗时</th><th>Trace ID</th></tr></thead><tbody id="customerUsageRows"></tbody></table></div></article>
@@ -558,8 +569,9 @@
         <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>交付建议</h3></div><div id="customerDeliverableHighlights" class="card-list"></div></article>
-          <article class="panel"><div class="panel-head"><h3>交付物下载</h3></div><div class="table-wrap"><table><thead><tr><th>文件</th><th>所属项目</th><th>类型</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
+          
         </div>
+        <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>交付物下载</h3></div><div class="table-wrap"><table><thead><tr><th>文件</th><th>所属项目</th><th>类型</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
       </section>
 
             <section id="my-access" class="page" data-title="接入配置" data-eyebrow="地址、证书、鉴权方式与运行说明">
@@ -588,7 +600,13 @@
         </article>
       </section>
 
-      <div id="accessGuideOverlay" class="modal-overlay" style="display:none">
+      <div id="customerAssetOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-card customer-asset-modal" style="max-width:860px;max-height:90vh;overflow-y:auto">
+    <div class="modal-head"><h3 id="customerAssetDetailTitle">MCP 服务详情</h3><button onclick="closeCustomerAsset()" class="ghost-btn">关闭</button></div>
+    <div id="customerAssetDetailContent" class="modal-body"></div>
+  </div>
+</div>
+<div id="accessGuideOverlay" class="modal-overlay" style="display:none">
         <div class="modal-card" style="max-width:720px;max-height:90vh;overflow-y:auto">
           <div class="modal-head"><h3 id="accessGuideTitle">接入指引</h3><button onclick="closeAccessGuide()" class="ghost-btn">关闭</button></div>
           <div id="accessGuideContent" class="modal-body"></div>

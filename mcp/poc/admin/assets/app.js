@@ -5,7 +5,58 @@ import { renderAll } from './modules/renderers.js';
 
 function list(value) { return Array.isArray(value) ? value : []; }
 
+const loginAccounts = [
+  { username: 'admin', password: 'admin123', hint: '平台管理员进入工厂侧总控台。' },
+  { username: 'meijia', password: 'store123', hint: '美佳零售进入客户交付台。' },
+  { username: 'hzm', password: '123456', hint: '华智制造进入客户交付台。' },
+  { username: 'xrf', password: '123456', hint: '鑫融金服进入客户交付台。' },
+  { username: 'ahwy', password: '123456', hint: '安和物业进入客户交付台。' },
+  { username: 'zxjy', password: '123456', hint: '知行教育进入客户交付台。' },
+  { username: 'lvcheng', password: 'lv2026', hint: '绿城中国进入绿城专属客户端，查看已发布绿城 MCP。' }
+];
+
+const CUSTOMER_LIVE_REFRESH_MS = 5000;
+let customerLiveRefreshTimer = null;
+let customerLiveRefreshInFlight = false;
+
+async function refreshCustomerLiveData() {
+  const livePages = new Set(['customer-overview', 'my-assets', 'my-usage']);
+  if (!isCustomerView() || document.hidden || !livePages.has(state.currentPage) || customerLiveRefreshInFlight) return;
+  customerLiveRefreshInFlight = true;
+  try {
+    const [dashboard, overview, trends, events] = await Promise.all([
+      api('/api/customer/dashboard'),
+      api('/api/customer/overview'),
+      api('/api/customer/usage/trends'),
+      api('/api/platform/call-events')
+    ]);
+    state.customerDashboard = dashboard;
+    state.customerOverview = overview;
+    state.customerTrends = trends;
+    state.assets = Array.isArray(dashboard?.assets) ? dashboard.assets : [];
+    state.events = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
+    state.customerLiveUpdatedAt = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    renderAll();
+  } catch {
+    // Keep the last successful view visible while the next interval retries.
+  } finally {
+    customerLiveRefreshInFlight = false;
+  }
+}
+
+function startCustomerLiveRefresh() {
+  stopCustomerLiveRefresh();
+  if (!isCustomerView()) return;
+  customerLiveRefreshTimer = window.setInterval(refreshCustomerLiveData, CUSTOMER_LIVE_REFRESH_MS);
+}
+
+function stopCustomerLiveRefresh() {
+  if (customerLiveRefreshTimer) window.clearInterval(customerLiveRefreshTimer);
+  customerLiveRefreshTimer = null;
+  customerLiveRefreshInFlight = false;
+}
 function handleUnauthorized() {
+  stopCustomerLiveRefresh();
   localStorage.removeItem('mcp_token');
   state.token = '';
   state.user = null;
@@ -275,8 +326,9 @@ async function acceptBuilderRequestIntoIntake(requestId) {
 
 async function loadAll() {
   if (isCustomerView()) {
-    const [dashboard, trends, events, deliverables, access, billing, builderRequests] = await Promise.all([
+    const [dashboard, overview, trends, events, deliverables, access, billing, builderRequests, candidates, reviews] = await Promise.all([
       api('/api/customer/dashboard'),
+      api('/api/customer/overview'),
       api('/api/customer/usage/trends'),
       api('/api/platform/call-events'),
       api('/api/platform/deliverables'),
@@ -289,6 +341,7 @@ async function loadAll() {
     const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
     Object.assign(state, {
       customerDashboard: dashboard,
+      customerOverview: overview,
       customerTrends: trends,
       assets: Array.isArray(dashboard?.assets) ? dashboard.assets : [],
       events: eventList,
@@ -334,6 +387,7 @@ async function loadAll() {
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
+  const pocRuntimes = await api('/api/platform/poc-runtimes').catch(() => []);
 
   Object.assign(state, {
     summary,
@@ -341,6 +395,7 @@ async function loadAll() {
     projects,
     sources: Array.isArray(sources) ? sources : [],
     assets: Array.isArray(assets) ? assets : [],
+    pocRuntimes: Array.isArray(pocRuntimes) ? pocRuntimes : [],
     releases,
     policies,
     events: eventList,
@@ -390,6 +445,7 @@ async function login() {
 }
 
 async function logout() {
+  stopCustomerLiveRefresh();
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   state.token = '';
   state.user = null;
@@ -1743,6 +1799,46 @@ async function viewAccessGuide(assetId) {
   }
 }
 
+async function openCustomerAsset(assetId) {
+  if (!assetId) return;
+  try {
+    state.customerAssetDetail = await api(`/api/customer/assets/${assetId}`);
+    state.customerTrialResult = null;
+    renderAll();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+function closeCustomerAsset() {
+  state.customerAssetDetail = null;
+  state.customerTrialResult = null;
+  renderAll();
+}
+
+async function runCustomerTrial(assetId) {
+  const vipCode = $('customerTrialVipCode')?.value || '';
+  const orderId = $('customerTrialOrderId')?.value || '';
+  try {
+    const result = await api(`/api/customer/assets/${assetId}/trial`, {
+      method: 'POST',
+      body: JSON.stringify({ vip_code: vipCode, order_id: orderId })
+    });
+    state.customerTrialResult = { assetId, ...result };
+    await loadAll();
+    state.customerAssetDetail = await api(`/api/customer/assets/${assetId}`);
+    renderAll();
+    showToast('在线试调已完成，可在运行与效果页面查看 Trace。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+function openCustomerPage(pageId) {
+  if (!isCustomerView() || !customerNavItems.some(item => item.id === pageId)) return;
+  state.currentPage = pageId;
+  renderAll();
+}
 window.createDataSource = createDataSource;
 window.createPolicy = createPolicy;
 window.editPolicy = editPolicy;
@@ -1790,6 +1886,10 @@ window.editAccessConfig = editAccessConfig;
 window.deleteAccessConfig = deleteAccessConfig;
 window.runAccessTest = runAccessTest;
 window.viewAccessGuide = viewAccessGuide;
+window.openCustomerAsset = openCustomerAsset;
+window.closeCustomerAsset = closeCustomerAsset;
+window.runCustomerTrial = runCustomerTrial;
+window.openCustomerPage = openCustomerPage;
 
 window.createApiKey = createApiKey;
 window.copyApiKey = copyApiKey;
@@ -2625,11 +2725,15 @@ window.refreshDbSource = refreshDbSource;
 window.sendAgentMessage = sendAgentMessage;
 window.runSandboxTest = runSandboxTest;
 window.deployToWorkBuddy = deployToWorkBuddy;
+window.connectRealMcp = connectRealMcp;
+window.startPocRuntime = async id => { await api(`/api/platform/mcp-assets/${id}/poc-runtimes`, { method: 'POST' }); await loadAll(); renderAll(); showToast('POC 实例已启动', 'success'); };
+window.stopPocRuntime = async id => { await api(`/api/platform/poc-runtimes/${id}/stop`, { method: 'POST' }); await loadAll(); renderAll(); showToast('POC 实例已停止', 'success'); };
 window.onSandboxAssetChange = onSandboxAssetChange;
 
 // 智能体联调 — 通过 WorkBuddy Tool Call 协议
 let _agentHistory = [];
 let _workbuddyDeployed = false;
+let _connectedRuntimeId = '';
 
 // WorkBuddy 默认模型（TTKC-AUTO）
 const WORKBUDDY_DEFAULT_MODEL = {
@@ -2685,10 +2789,53 @@ async function deployToWorkBuddy() {
   }
 }
 
+async function connectRealMcp() {
+  const assetSelect = $('sandboxAssetSelect');
+  const statusEl = $('workbuddyDeployStatus');
+  const runtimeEl = $('runtimeStatus');
+  if (!assetSelect?.value) { showToast('请先选择 MCP 资产', 'warning'); return; }
+  statusEl.innerHTML = '<div class="muted-line">正在连接真实 MCP：健康检查、SSE 初始化、Tool 发现...</div>';
+  try {
+    const runtimes = await api('/api/platform/poc-runtimes');
+    const runtime = runtimes.find(item => item.asset_id === assetSelect.value && item.status === 'running');
+    if (!runtime) throw new Error('该资产尚未启动 POC 实例，请先到 MCP 资产页启动');
+    const result = await api(`/api/platform/poc-runtimes/${runtime.id}/connect`, { method: 'POST' });
+    if (!result.ok) throw new Error(result.error?.message || '真实 MCP 连接失败');
+    _connectedRuntimeId = runtime.id;
+    _workbuddyDeployed = true;
+    runtimeEl.textContent = `已连接真实 MCP · ${runtime.endpoint} · 发现 ${result.tools.length} 个 Tool`;
+    statusEl.innerHTML = result.steps.map(step => `<div style="font-size:12px;color:#16a34a">✓ ${escapeHtml(step.name)}：${escapeHtml(step.detail || '成功')}</div>`).join('');
+    $('agentInput').disabled = false;
+    $('agentSendBtn').disabled = false;
+    showToast('真实 MCP 已连接，可开始智能体联调', 'success');
+  } catch (error) {
+    _connectedRuntimeId = '';
+    _workbuddyDeployed = false;
+    statusEl.innerHTML = `<div style="color:#dc2626;font-size:12px">连接失败：${escapeHtml(error.message)}</div>`;
+    showToast(error.message, 'error');
+  }
+}
+
+function syncLoginSelection(forcePassword = true) {
+  const accountSelect = $('loginUserSelect');
+  const legacyUserInput = $('loginUser');
+  const passwordInput = $('loginPass');
+  const hint = $('loginAccountHint');
+  const selected = accountSelect?.selectedOptions?.[0];
+  if (!selected) return;
+  const account = loginAccounts.find(item => item.username === selected.value);
+  if (legacyUserInput) legacyUserInput.value = selected.value;
+  if (passwordInput && (forcePassword || !passwordInput.value)) {
+    passwordInput.value = selected.dataset.password || account?.password || '';
+  }
+  if (hint) hint.textContent = account?.hint || '选择客户后进入对应交付台。';
+}
+
 // 切换资产时重置部署状态
 function onSandboxAssetChange() {
   _agentHistory = [];
   _workbuddyDeployed = false;
+  _connectedRuntimeId = '';
   var statusEl = $('workbuddyDeployStatus');
   if (statusEl) statusEl.innerHTML = '';
   var inputEl = $('agentInput');
@@ -2807,12 +2954,13 @@ async function sendAgentMessage() {
     // 使用 WorkBuddy chat API（OpenAI function calling 协议）
     const resp = await fetch('/api/workbuddy/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
       body: JSON.stringify({
         asset_id: assetSelect.value,
         message: userMsg,
         history: _agentHistory.slice(-10),
-        model_config: WORKBUDDY_DEFAULT_MODEL
+        model_config: WORKBUDDY_DEFAULT_MODEL,
+        runtime_id: _connectedRuntimeId
       })
     });
     const result = await resp.json();
@@ -2937,11 +3085,18 @@ async function bootApp() {
   await loadAll();
   renderAll();
   showApp();
+  startCustomerLiveRefresh();
 }
 
 function bindEvents() {
+  syncLoginSelection(false);
+  $('loginUserSelect')?.addEventListener('change', () => {
+    $('loginError').textContent = '';
+    syncLoginSelection();
+  });
   $('loginBtn').addEventListener('click', login);
   $('logoutBtn').addEventListener('click', logout);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshCustomerLiveData(); });
   $('simulateBtn')?.addEventListener('click', simulate);
   $('sandboxTestBtn')?.addEventListener('click', runSandboxTest);
   $('createDataSourceBtn')?.addEventListener('click', createDataSource);
@@ -2959,14 +3114,6 @@ function bindEvents() {
   $('deliverableDrawerBackdrop')?.addEventListener('click', closeDeliverableDrawer);
   $('knowledgeDrawerClose')?.addEventListener('click', closeKnowledgeDrawer);
   $('knowledgeDrawerBackdrop')?.addEventListener('click', closeKnowledgeDrawer);
-
-  document.querySelectorAll('.quick-accounts button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      $('loginUser').value = btn.dataset.user;
-      $('loginPass').value = btn.dataset.pass;
-      login();
-    });
-  });
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !$('login').classList.contains('hidden')) login();

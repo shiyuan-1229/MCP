@@ -31,8 +31,9 @@ body.customer .admin-only { display: none !important; }
 .brand-row p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .role-hint { display: grid; gap: 6px; background: var(--surface-2); border-radius: 8px; padding: 10px 12px; color: #44506a; font-size: 12px; line-height: 1.5; margin-bottom: 16px; }
 .login-card label { display: grid; gap: 6px; margin-bottom: 12px; color: #334155; font-size: 13px; font-weight: 650; }
-.login-card input, .simulate-box select, .modal-box input, .modal-box select, .modal-box textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; color: var(--ink); }
-.login-card input:focus, .simulate-box select:focus, .modal-box input:focus, .modal-box select:focus, .modal-box textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(53, 88, 214, 0.12); }
+.login-card input, .login-card select, .simulate-box select, .modal-box input, .modal-box select, .modal-box textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; color: var(--ink); }
+.login-card input:focus, .login-card select:focus, .simulate-box select:focus, .modal-box input:focus, .modal-box select:focus, .modal-box textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(53, 88, 214, 0.12); }
+.login-account-note { margin: -2px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .form-error { min-height: 18px; margin: 8px 0 0; color: var(--danger); font-size: 12px; }
 .quick-accounts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
 .quick-accounts button { border: 1px solid var(--line); background: #fff; color: #334155; border-radius: 8px; padding: 8px; font-size: 12px; }
@@ -597,3 +598,21 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
 .control-flow-grid > div { padding: 10px; background: var(--surface-2); border-radius: 8px; min-height: 112px; }
 .control-flow-grid p { margin: 5px 0 0; font-size: 12px; color: #475569; }
 @media (max-width: 900px) { .control-flow-grid { grid-template-columns: 1fr; } }
+
+.customer-overview-asset { display: grid; gap: 10px; }
+.customer-overview-action { display: grid; gap: 10px; }
+.customer-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.customer-detail-section { margin-top: 16px; }
+.customer-detail-list { padding: 0; }
+.customer-trial-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 12px; }
+.customer-trial-form label { display: grid; gap: 6px; flex: 1 1 220px; color: var(--muted); font-size: 12px; }
+.customer-trial-form input { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; color: var(--ink); }
+.customer-trial-result { display: grid; grid-template-columns: auto auto 1fr; gap: 8px 12px; align-items: center; margin-top: 12px; padding: 12px; background: var(--surface-2); border-radius: 8px; }
+.customer-trial-result p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+.customer-asset-modal { width: min(860px, calc(100vw - 32px)); }
+@media (max-width: 760px) {
+  .customer-detail-grid { grid-template-columns: 1fr; }
+  .customer-trial-result { grid-template-columns: 1fr; }
+}.customer-trend-bar .bar { transition: height 220ms ease-out, background 220ms ease-out; }
+.customer-trend-bar.is-zero .bar { width: 8px; min-width: 8px; background: #dce4f0; box-shadow: none; border-radius: 999px; }
+.customer-trend-bar.is-zero strong { min-height: 14px; }

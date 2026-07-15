@@ -15,6 +15,7 @@ export const state = {
   projects: [],
   sources: [],
   assets: [],
+  pocRuntimes: [],
   releases: [],
   policies: [],
   policyChanges: [],
@@ -31,6 +32,10 @@ export const state = {
   knowledgeDetailLoading: false,
   // 阶段二：客户侧数据
   customerDashboard: null,
+  customerOverview: null,
+  customerAssetDetail: null,
+  customerTrialResult: null,
+  customerLiveUpdatedAt: '',
   customerTrends: null,
   accessGuide: null,
   // 客户侧：AI 需求生成 MCP
@@ -156,14 +161,12 @@ export const navItems = [
   { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
 ];
 export const customerNavItems = [
-  { id: 'mcp-builder', label: '\u0041\u0049 \u9700\u6c42\u751f\u6210 MCP', roles: ['customer'] },
+  { id: 'customer-overview', label: '\u4ea4\u4ed8\u603b\u89c8', roles: ['customer'] },
   { id: 'my-assets', label: '\u6211\u7684 MCP \u8d44\u4ea7', roles: ['customer'] },
-  { id: 'my-usage', label: '\u8c03\u7528\u7edf\u8ba1', roles: ['customer'] },
-  { id: 'my-billing', label: '\u8d26\u5355\u7ba1\u7406', roles: ['customer'] },
-  { id: 'my-deliverables', label: '\u4ea4\u4ed8\u7269\u4e0b\u8f7d', roles: ['customer'] },
-  { id: 'my-access', label: '\u63a5\u5165\u914d\u7f6e', roles: ['customer'] }
-];
-
+  { id: 'my-usage', label: '\u8fd0\u884c\u4e0e\u6548\u679c', roles: ['customer'] },
+  { id: 'my-deliverables', label: '\u4ea4\u4ed8\u4e0e\u652f\u6301', roles: ['customer'] },
+  { id: 'my-access', label: '\u63a5\u5165\u914d\u7f6e', roles: ['customer'] },
+  { id: 'my-billing', label: '\u8d26\u5355\u7ba1\u7406', roles: ['customer'] }];
 export function isCustomerView() {
   return state.user?.role === 'customer';
 }
