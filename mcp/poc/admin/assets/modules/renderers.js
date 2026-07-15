@@ -1891,22 +1891,100 @@ function renderCustomerOverview() {
   const assets = list(overview.assets);
   const actions = list(overview.action_items);
   const releases = list(overview.release_updates);
-  renderMetricSummary('customerOverviewCards', [
-    { label: '已交付 MCP', value: assets.length, meta: `${assets.filter(item => item.status === 'published').length} 个处于可用状态` },
-    { label: '稳定运行', value: assets.filter(item => Number(item.success_rate || 0) >= 95).length, meta: '成功率不低于 95%' },
-    { label: '待处理事项', value: actions.length, meta: actions.length ? '请优先完成高优先级事项' : '当前没有待处理事项' },
-    { label: '近期版本', value: releases.length, meta: releases[0]?.released_at || releases[0]?.tested_at || '暂无发布记录' }
-  ]);
-  renderCardList('customerOverviewActions', actions.map(item => {
-    const action = item.type === 'deliverable'
-      ? `<button type="button" class="ghost-btn small" onclick="openCustomerPage('my-deliverables')">查看交付物</button>`
-      : `<button type="button" class="ghost-btn small" onclick="openCustomerAsset('${escapeJs(item.target_id)}')">查看接入说明</button>`;
-    return `<div class="info-card customer-overview-action"><h4>${text(item.title || '待处理事项')}</h4><p>${text(item.priority === 'high' ? '建议优先处理' : '可按项目节奏处理')}</p><div class="customer-action-row">${action}</div></div>`;
-  }), '当前没有待处理事项。');
-  renderCardList('customerOverviewReleases', releases.map(item => `<div class="info-card"><h4>${text(item.asset_name || 'MCP 版本更新')}</h4><p>${text(item.version || '-')} · ${text(item.released_at || item.tested_at || '-')}</p><p class="muted-line">${text(item.notes || '已完成发布')}</p></div>`), '最近没有新的版本更新。');
-  renderCardList('customerOverviewAssets', assets.map(asset => `<div class="info-card customer-overview-asset"><div><h4>${text(displayAssetName(asset.name))}</h4><p>${text(asset.capability || '业务能力待补充')}</p></div><div class="customer-inline-badges">${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || '-')}</span></div><p class="muted-line">成功率 ${text(asset.success_rate ?? 100)}% · 平均延迟 ${text(asset.avg_latency_ms || 0)} ms · ${text(asset.call_count || 0)} 次调用</p><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${escapeJs(asset.id)}')">查看服务详情</button></div></div>`), '当前没有已发布 MCP，请联系交付负责人确认发布状态。');
-}
+  const sourceItems = list(state.deliverables).length ? list(state.deliverables) : list(overview.recent_deliverables);
+  const items = [...sourceItems].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const readyItems = items.filter(item => item.status === 'ready');
+  const latestRelease = releases[0] || null;
+  const projectNames = [...new Set(items.map(item => item.project_name || item.project_id).filter(Boolean))];
+  const deliveryTitle = projectNames.length === 1 ? projectNames[0] : projectNames.length ? `${projectNames.length} 个交付项目` : '当前客户项目';
+  const readyConfig = readyItems.filter(item => item.type === 'config').length;
+  const readyTests = readyItems.filter(item => ['test-report', 'poc-evidence'].includes(item.type)).length;
+  const publishedAssets = assets.filter(item => item.status === 'published').length;
+  const needsAcceptance = readyTests > 0 && publishedAssets > 0;
+  const hero = $('customerDeliveryHero');
 
+  if (hero) {
+    hero.innerHTML = `
+      <div class="customer-delivery-hero-copy">
+        <p class="eyebrow">本次交付 · ${text(deliveryTitle)}</p>
+        <h3>${readyItems.length ? `${readyItems.length} 项资料已就绪，可进入验收` : '正在准备本次交付资料'}</h3>
+        <p class="muted-line">${latestRelease ? `${text(latestRelease.asset_name || 'MCP 服务')} ${text(latestRelease.version || '')} 已同步至交付记录。` : '交付资料、版本发布与接入支持会持续汇总在此。'}</p>
+      </div>
+      <div class="customer-delivery-hero-actions">
+        ${readyItems.length ? `<button type="button" class="primary-btn" onclick="downloadReadyDeliverables()">下载全部就绪资料</button>` : '<span class="badge warning">资料整理中</span>'}
+        <button type="button" class="ghost-btn" onclick="openCustomerPage('my-deliverables')">查看交付与支持</button>
+      </div>`;
+  }
+
+  renderMetricSummary('customerDeliverySummary', [
+    { label: '已交付', value: readyItems.length, meta: '当前可下载的交付资料' },
+    { label: '待确认', value: needsAcceptance ? 1 : 0, meta: needsAcceptance ? '请核验联调与上线结果' : '暂无待确认验收项' },
+    { label: '当前版本', value: latestRelease?.version || '-', meta: latestRelease?.asset_name || '暂无发布版本' },
+    { label: '最近更新', value: items[0]?.updated_at || latestRelease?.released_at || '-', meta: '交付资料或版本的最新留痕' }
+  ]);
+
+  const deliveryStages = [
+    { label: '配置交付', detail: readyConfig ? `${readyConfig} 份配置资料已就绪` : '等待配置包生成', complete: readyConfig > 0 },
+    { label: '联调验证', detail: readyTests ? `${readyTests} 份测试或验收材料已就绪` : '等待联调验证材料', complete: readyTests > 0 },
+    { label: '正式发布', detail: publishedAssets ? `${publishedAssets} 个 MCP 服务已发布` : '等待正式发布', complete: publishedAssets > 0 },
+    { label: '客户验收', detail: needsAcceptance ? '请核验交付材料并反馈验收结果' : '完成前置交付后进入验收', complete: false, active: needsAcceptance }
+  ];
+  const progress = $('customerDeliveryProgress');
+  if (progress) {
+    progress.innerHTML = deliveryStages.map((stage, index) => `
+      <div class="customer-delivery-stage ${stage.complete ? 'is-complete' : ''} ${stage.active ? 'is-active' : ''}">
+        <span class="customer-delivery-stage-index">${stage.complete ? '✓' : index + 1}</span>
+        <div><strong>${stage.label}</strong><p>${stage.detail}</p></div>
+      </div>`).join('');
+  }
+
+  const customerActions = [
+    ...actions.map(item => {
+      const isDeliverable = item.type === 'deliverable';
+      const button = isDeliverable
+        ? `<button type="button" class="ghost-btn small" onclick="downloadDeliverable('${escapeJs(item.target_id || '')}')">下载资料</button>`
+        : `<button type="button" class="ghost-btn small" onclick="openCustomerAsset('${escapeJs(item.target_id || '')}')">查看接入说明</button>`;
+      return `<div class="info-card customer-delivery-action"><div><h4>${text(item.title || '待处理事项')}</h4><p>${text(item.priority === 'high' ? '建议优先处理，避免影响上线或使用。' : '可按项目节奏完成。')}</p></div>${button}</div>`;
+    }),
+    ...(needsAcceptance ? [`<div class="info-card customer-delivery-action"><div><h4>核验联调与验收材料</h4><p>请查阅测试报告和运行说明，完成内部核验后反馈交付负责人。</p></div><button type="button" class="ghost-btn small" onclick="openCustomerPage('my-deliverables')">查看材料</button></div>`] : [])
+  ];
+  renderCardList('customerDeliveryActions', customerActions, '当前没有待处理事项，交付资料会持续在此更新。');
+
+  const groupedPackages = new Map();
+  items.forEach(item => {
+    const key = item.project_id || item.project_name || 'unassigned';
+    if (!groupedPackages.has(key)) groupedPackages.set(key, { name: item.project_name || item.project_id || '未归属项目', id: item.project_id || '', items: [] });
+    groupedPackages.get(key).items.push(item);
+  });
+  const assetByProject = new Map(assets.map(item => [item.project_id, item]));
+  const typeLabels = { config: '配置包', 'test-report': '联调验收报告', 'run-guide': '运行说明', log: '调用日志', 'poc-evidence': 'POC 验收凭证', 'knowledge-base': '知识库导出' };
+  const packageNode = $('customerDeliveryPackages');
+  if (packageNode) {
+    packageNode.innerHTML = groupedPackages.size ? [...groupedPackages.values()].map(group => {
+      const projectAsset = assetByProject.get(group.id);
+      const readyCount = group.items.filter(item => item.status === 'ready').length;
+      return `<article class="customer-delivery-package">
+        <div class="customer-delivery-package-head">
+          <div><h4>${text(group.name)}</h4><p>${readyCount}/${group.items.length} 项资料可下载${projectAsset?.version ? ` · 当前版本 ${text(projectAsset.version)}` : ''}</p></div>
+          <div class="customer-action-row">
+            ${projectAsset ? `<button type="button" class="ghost-btn small" onclick="openCustomerAsset('${escapeJs(projectAsset.id)}')">查看服务</button><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${escapeJs(projectAsset.id)}')">接入配置</button>` : ''}
+          </div>
+        </div>
+        <div class="customer-delivery-file-list">${group.items.map(item => `<div class="customer-delivery-file">
+          <div><strong>${text(typeLabels[item.type] || item.type || '交付资料')}</strong><span>${text(item.name || '-')} · ${text(item.updated_at || '-')}</span></div>
+          <div class="customer-action-row">${badge(item.status || 'draft')}${item.status === 'ready' ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${escapeJs(item.id)}')">下载</button>` : '<span class="muted-line">整理中</span>'}</div>
+        </div>`).join('')}</div>
+      </article>`;
+    }).join('') : '<div class="customer-delivery-empty">当前暂无可展示的交付资料，请等待交付负责人完成归档。</div>';
+  }
+
+  const timelineItems = [
+    ...releases.map(item => ({ date: item.released_at || item.tested_at || '', title: `${item.asset_name || 'MCP 服务'} ${item.version || ''} 已发布`, detail: item.notes || '已完成版本发布', kind: '版本发布' })),
+    ...items.slice(0, 8).map(item => ({ date: item.updated_at || '', title: item.name || '交付资料已更新', detail: `${typeLabels[item.type] || item.type || '交付资料'} · ${displayStatus(item.status || 'draft')}`, kind: '交付资料' }))
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
+  const timeline = $('customerDeliveryTimeline');
+  if (timeline) timeline.innerHTML = timelineItems.length ? timelineItems.map(item => `<div class="customer-delivery-timeline-item"><span class="customer-delivery-timeline-dot"></span><div><p class="eyebrow">${text(item.kind)} · ${text(item.date || '-')}</p><strong>${text(item.title)}</strong><p>${text(item.detail)}</p></div></div>`).join('') : '<div class="customer-delivery-empty">暂无版本发布或交付资料更新记录。</div>';
+}
 function renderCustomerAssetOverlay() {
   const overlay = $('customerAssetOverlay');
   const title = $('customerAssetDetailTitle');
@@ -1922,9 +2000,20 @@ function renderCustomerAssetOverlay() {
   const tools = list(asset.tools).map(tool => typeof tool === 'string' ? tool : tool?.display_name || tool?.name || '-');
   const releases = list(detail.releases);
   const events = list(detail.recent_events);
+  const inputTokens = Number(asset.input_tokens || 0);
+  const outputTokens = Number(asset.output_tokens || 0);
+  const totalTokens = Number(asset.total_tokens ?? inputTokens + outputTokens);
   const isMemberAsset = String(asset.id || '').includes('member');
   const isOrderAsset = String(asset.id || '').includes('order');
   const trial = state.customerTrialResult?.assetId === asset.id ? state.customerTrialResult : null;
+  const eventRows = events.map(item => {
+    let input = Number(item.input_tokens || 0);
+    let output = Number(item.output_tokens || 0);
+    if (!input && !output) {
+      try { const result = JSON.parse(item.business_result || '{}'); input = Number(result.input_tokens || 0); output = Number(result.output_tokens || 0); } catch {}
+    }
+    return `<tr><td>${text(item.created_at || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td>${input.toLocaleString('zh-CN')} / ${output.toLocaleString('zh-CN')} / <strong>${(input + output).toLocaleString('zh-CN')}</strong></td><td>${text(item.business_result || '-')}</td><td><code>${text(item.trace_id || '-')}</code></td></tr>`;
+  });
   title.textContent = `${displayAssetName(asset.name)} 服务详情`;
   overlay.style.display = 'grid';
   content.innerHTML = `
@@ -1932,10 +2021,11 @@ function renderCustomerAssetOverlay() {
       <section class="info-card"><h4>服务能力</h4><p>${text(asset.capability || '-')}</p><p class="muted-line">版本 ${text(asset.version || '-')} · ${text(displayStatus(asset.status || 'published'))}</p></section>
       <section class="info-card"><h4>接入信息</h4><p>环境：${text(detail.access?.environment || '-')}</p><p>鉴权：${text(detail.access?.type || '-')}</p><p>范围：${text(detail.access?.scope || '-')}</p><p class="muted-line">${text(detail.access?.description || '暂无接入说明')}</p></section>
     </div>
+    <section class="info-card customer-detail-section"><h4>累计 Token 消耗</h4><div class="customer-token-summary"><div><span>总 Token</span><strong>${totalTokens.toLocaleString('zh-CN')}</strong></div><div><span>输入</span><strong>${inputTokens.toLocaleString('zh-CN')}</strong></div><div><span>输出</span><strong>${outputTokens.toLocaleString('zh-CN')}</strong></div></div></section>
     <section class="info-card customer-detail-section"><h4>可调用 Tool</h4><p>${text(tools.join(' / ') || '暂无 Tool 清单')}</p></section>
-    <section class="info-card customer-detail-section"><h4>在线试调</h4><p class="muted-line">试调会生成可追溯的 Trace ID，并记录到运行与效果页面。</p><div class="customer-trial-form">${isMemberAsset ? '<label>会员编号<input id="customerTrialVipCode" value="GC10001" maxlength="64"></label>' : ''}${isOrderAsset ? '<label>订单编号<input id="customerTrialOrderId" value="GC-ORDER-20260712" maxlength="64"></label>' : ''}<button type="button" class="primary-btn" onclick="runCustomerTrial('${escapeJs(asset.id)}')">执行在线试调</button></div>${trial ? `<div class="customer-trial-result"><strong>${text(displayStatus(trial.status || 'success'))}</strong><span>${text(trial.latency_ms || 0)} ms</span><code>${text(trial.trace_id || '-')}</code><p>${text(trial.summary || '试调完成')}</p></div>` : ''}</section>
+    <section class="info-card customer-detail-section"><h4>在线试调</h4><p class="muted-line">试调会生成可追踪的 Trace ID，并记录到运行与效果页面。</p><div class="customer-trial-form">${isMemberAsset ? '<label>会员编号<input id="customerTrialVipCode" value="GC10001" maxlength="64"></label>' : ''}${isOrderAsset ? '<label>订单编号<input id="customerTrialOrderId" value="GC-ORDER-20260712" maxlength="64"></label>' : ''}<button type="button" class="primary-btn" onclick="runCustomerTrial('${escapeJs(asset.id)}')">执行在线试调</button></div>${trial ? `<div class="customer-trial-result"><strong>${text(displayStatus(trial.status || 'success'))}</strong><span>${text(trial.latency_ms || 0)} ms</span><code>${text(trial.trace_id || '-')}</code><p>${text(trial.summary || '试调完成')}</p></div>` : ''}</section>
     <section class="customer-detail-section"><h4>版本记录</h4><div class="card-list customer-detail-list">${releases.length ? releases.map(item => `<div class="info-card"><h4>${text(item.version || '-')}</h4><p>${text(item.released_at || item.tested_at || '-')}</p><p class="muted-line">${text(item.notes || '已完成发布')}</p></div>`).join('') : emptyState('暂无版本记录')}</div></section>
-    <section class="customer-detail-section"><h4>最近调用</h4><div class="table-wrap"><table><thead><tr><th>时间</th><th>状态</th><th>耗时</th><th>结果</th><th>Trace ID</th></tr></thead><tbody>${events.length ? events.map(item => `<tr><td>${text(item.created_at || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td>${text(item.business_result || '-')}</td><td><code>${text(item.trace_id || '-')}</code></td></tr>`).join('') : '<tr><td colspan="5" class="muted-line">暂无调用记录</td></tr>'}</tbody></table></div></section>
+    <section class="customer-detail-section"><h4>最近调用</h4><div class="table-wrap"><table><thead><tr><th>时间</th><th>状态</th><th>耗时</th><th>Token（输入 / 输出 / 总）</th><th>结果</th><th>Trace ID</th></tr></thead><tbody>${eventRows.length ? eventRows.join('') : '<tr><td colspan="6" class="muted-line">暂无调用记录</td></tr>'}</tbody></table></div></section>
   `;
 }
 function renderCustomerReleaseTimeline() {
@@ -1953,64 +2043,141 @@ function renderCustomerReleaseTimeline() {
 function renderCustomerDashboard() {
   const dashboard = state.customerDashboard || {};
   const assets = customerAssets();
+  const tokenUsageByAsset = new Map(assets.map(asset => {
+    const input = Number(asset.input_tokens || 0);
+    const output = Number(asset.output_tokens || 0);
+    return [asset.id, { input, output, total: Number(asset.total_tokens ?? input + output) }];
+  }));
   renderMetricSummary('customerDashboardCards', [
     { label: '已交付 MCP', value: dashboard.asset_count || assets.length, meta: `${dashboard.published_count || 0} 个处于可用状态` },
     { label: '近月调用量', value: dashboard.month_calls || 0, meta: '当前自然月累计' },
     { label: '调用成功率', value: `${dashboard.success_rate ?? 100}%`, meta: '按调用事件统计' },
     { label: '当期金额', value: money(dashboard.month_amount || 0), meta: `账单状态：${displayStatus(dashboard.billing_status || 'pending')}` }
   ]);
-  renderCardList('customerAssetCards', assets.map(asset => `<div class="info-card customer-asset-card"><h4>${displayAssetName(asset.name)}</h4><p class="muted-line">${text(asset.capability || '业务能力待补充')}</p><p>${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || 'v1.0.0')}</span></p><div class="customer-inline-badges">${list(asset.tools).map(tool => `<span class="badge info">${text(typeof tool === 'string' ? tool : tool?.name || '-')}</span>`).join(' ') || '<span class="muted-line">暂无 Tool 清单</span>'}</div><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${asset.id}')">查看服务详情</button><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${asset.id}')">查看接入指引</button></div></div>`), '暂时没有可查看的 MCP 资产');
+  renderCardList('customerAssetCards', assets.map(asset => {
+    const usage = tokenUsageByAsset.get(asset.id) || { input: 0, output: 0, total: 0 };
+    return `<div class="info-card customer-asset-card"><h4>${displayAssetName(asset.name)}</h4><p class="muted-line">${text(asset.capability || '业务能力待补充')}</p><p>${badge(asset.status || 'published')} <span class="cap-chip">${text(asset.version || 'v1.0.0')}</span></p><div class="customer-inline-badges">${list(asset.tools).map(tool => `<span class="badge info">${text(typeof tool === 'string' ? tool : tool?.name || '-')}</span>`).join(' ') || '<span class="muted-line">暂无 Tool 清单</span>'}</div><div class="customer-token-usage"><span>累计 Token 消耗</span><strong>${usage.total.toLocaleString('zh-CN')}</strong><small>输入 ${usage.input.toLocaleString('zh-CN')} · 输出 ${usage.output.toLocaleString('zh-CN')}</small></div><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="openCustomerAsset('${escapeJs(asset.id)}')">查看服务详情</button><button type="button" class="ghost-btn small" onclick="viewAccessGuide('${escapeJs(asset.id)}')">查看接入指引</button></div></div>`;
+  }), '暂时没有可查看的 MCP 资产');
   renderCardList('customerQuickActions', [
     `<div class="info-card customer-quick-card"><h4>查看接入指引</h4><p>逐个资产查看地址、鉴权方式和接入约束。</p></div>`,
-    `<div class="info-card customer-quick-card"><h4>下载交付资料</h4><p>配置包、测试报告、日志与复盘会持续沉淀到交付物下载页。</p></div>`,
-    `<div class="info-card customer-quick-card"><h4>关注最近效果</h4><p>调用统计会同步展示近 30 天调用量、成功率和延迟趋势。</p></div>`
+    `<div class="info-card customer-quick-card"><h4>下载交付资料</h4><p>配置包、测试报告、日志与复盘会持续沉淀到交付与支持页面。</p></div>`,
+    `<div class="info-card customer-quick-card"><h4>关注 Token 消耗</h4><p>每个 MCP 的累计输入、输出和总 Token 可在资产卡或服务详情中查看。</p></div>`
   ], '');
-  renderCardList('customerAssetSpotlight', assets.slice(0, 3).map(asset => `<div class="info-card"><h4>${displayAssetName(asset.name)}</h4><p>${text(asset.capability || '-')}</p><p class="muted-line">版本 ${text(asset.version || '-')} \u00b7 ${text(displayStatus(asset.status || 'published'))}</p></div>`), '暂无资产运行焦点');
+  renderCardList('customerAssetSpotlight', assets.slice(0, 3).map(asset => `<div class="info-card"><h4>${displayAssetName(asset.name)}</h4><p>${text(asset.capability || '-')}</p><p class="muted-line">版本 ${text(asset.version || '-')} · ${text(displayStatus(asset.status || 'published'))}</p></div>`), '暂无资产运行焦点');
   renderCustomerReleaseTimeline();
 }
-
 function renderCustomerUsage() {
   const trends = list(state.customerTrends?.trends);
   const events = list(state.events);
+  const assets = customerAssets();
+  const tokenUsageByAsset = new Map(assets.map(asset => {
+    const input = Number(asset.input_tokens || 0);
+    const output = Number(asset.output_tokens || 0);
+    return [asset.id, { input, output, total: Number(asset.total_tokens ?? input + output) }];
+  }));
+  const totalTokens = [...tokenUsageByAsset.values()].reduce((sum, item) => sum + item.total, 0);
   const maxCalls = Math.max(1, ...trends.map(item => Number(item.calls || 0)));
   renderMetricSummary('customerUsageCards', [
     { label: '累计调用量', value: state.customerTrends?.total_calls || 0, meta: '当前客户范围内累计' },
     { label: '平均延迟', value: `${state.customerTrends?.avg_latency || 0} ms`, meta: '按全部调用事件计算' },
     { label: '成功率', value: `${state.customerTrends?.success_rate ?? 100}%`, meta: '近 30 天趋势已纳入统计' },
-    { label: '已使用资产', value: new Set(events.map(item => item.asset_id || item.asset_name)).size, meta: '发生过调用的 MCP 数量' }
+    { label: 'Token 总消耗', value: totalTokens.toLocaleString('zh-CN'), meta: '按各 MCP 全部调用累计' }
   ]);
   const trendBars = trends.slice(-10).map(item => {
     const calls = Number(item.calls || 0);
     const height = calls ? Math.max(22, Math.round(calls / maxCalls * 140)) : 4;
     return `<div class="customer-trend-bar ${calls ? 'has-data' : 'is-zero'}"><strong>${calls || ''}</strong><div class="bar" style="height:${height}px"></div><small>${text(item.date || '-')}</small></div>`;
-  });  const liveStatus = $('customerUsageLiveStatus');
-  if (liveStatus) liveStatus.textContent = state.customerLiveUpdatedAt ? `已更新 ${state.customerLiveUpdatedAt}` : '自动刷新';  const trendNode = $('customerUsageTrendBars');
+  });
+  const liveStatus = $('customerUsageLiveStatus');
+  if (liveStatus) liveStatus.textContent = state.customerLiveUpdatedAt ? `已更新 ${state.customerLiveUpdatedAt}` : '自动刷新';
+  const trendNode = $('customerUsageTrendBars');
   if (trendNode) trendNode.innerHTML = trendBars.length ? `<div class="customer-trend-chart">${trendBars.join('')}</div>` : emptyState('近 30 天还没有调用趋势数据');
-  renderCardList('customerUsageHighlights', [
-    `<div class="info-card"><h4>调用观察</h4><p>近月累计 ${text(state.customerTrends?.total_calls || 0)} 次调用，成功率 ${text(state.customerTrends?.success_rate ?? 100)}%。</p></div>`,
-    `<div class="info-card"><h4>性能观察</h4><p>平均延迟 ${text(state.customerTrends?.avg_latency || 0)} ms，建议持续观察高峰时段变化。</p></div>`,
-    `<div class="info-card"><h4>最近 Trace</h4><p>${text(events[0]?.trace_id || '暂无最近调用')}</p></div>`
-  ], '暂无调用观察');
-  renderSimpleRows('customerUsageRows', events.slice(0, 10).map(item => `<tr><td>${text(item.created_at || '-')}</td><td>${text(item.asset_name || item.asset_id || '-')}</td><td>${text(item.business_result || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.latency_ms ?? '-')}</td><td>${text(item.trace_id || '-')}</td></tr>`), '暂无调用记录', 6);
+  renderCardList('customerUsageHighlights', assets.map(asset => {
+    const usage = tokenUsageByAsset.get(asset.id) || { input: 0, output: 0, total: 0 };
+    return `<div class="info-card customer-token-usage"><h4>${displayAssetName(asset.name)}</h4><strong>${usage.total.toLocaleString('zh-CN')}</strong><p>输入 ${usage.input.toLocaleString('zh-CN')} · 输出 ${usage.output.toLocaleString('zh-CN')}</p></div>`;
+  }), '暂无 MCP Token 消耗记录');
+  renderSimpleRows('customerUsageRows', events.slice(0, 10).map(item => {
+    let input = Number(item.input_tokens || 0);
+    let output = Number(item.output_tokens || 0);
+    if (!input && !output) {
+      try { const result = JSON.parse(item.business_result || '{}'); input = Number(result.input_tokens || 0); output = Number(result.output_tokens || 0); } catch {}
+    }
+    return `<tr><td>${text(item.created_at || '-')}</td><td>${text(item.asset_name || item.asset_id || '-')}</td><td>${text(item.business_result || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td>${input.toLocaleString('zh-CN')} / ${output.toLocaleString('zh-CN')} / <strong>${(input + output).toLocaleString('zh-CN')}</strong></td><td>${text(item.trace_id || '-')}</td></tr>`;
+  }), '暂无调用记录', 7);
 }
-
 function renderCustomerBilling() {
-  const records = adminBilling();
-  const dashboard = state.customerDashboard || {};
+  const records = adminBilling().sort((a, b) =>
+    String(b.period || '').localeCompare(String(a.period || ''))
+  );
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const record = records.find(item => String(item.period || '').startsWith(currentMonth)) || records[0] || null;
   const summary = $('customerBillingSummary');
-  if (summary) {
-    summary.innerHTML = `<div class="panel-head"><h3>当期账单摘要</h3></div><div class="customer-bill-body"><p>当期金额：<strong>${money(dashboard.month_amount || 0)}</strong></p><p>账单状态：${badge(dashboard.billing_status || 'pending')}</p><p>账单条目：${text(records.length)}</p></div>`;
-  }
-  renderCardList('customerBillingHighlights', [
-    `<div class="info-card"><h4>账单观察</h4><p>当前账期已累计 ${money(dashboard.month_amount || 0)}，可在本页查看历史明细。</p></div>`,
-    `<div class="info-card"><h4>确认状态</h4><p>${text(displayStatus(dashboard.billing_status || 'pending'))}</p></div>`,
-    `<div class="info-card"><h4>最近账期</h4><p>${text(records[0]?.period || '暂无账单记录')}</p></div>`
-  ], '暂无账单观察');
-  const listNode = $('customerBillingList');
-  if (!listNode) return;
-  listNode.innerHTML = records.length ? records.slice(0, 6).map(item => `<article class="panel customer-bill-panel"><div class="panel-head"><h3>${text(item.item || '账单条目')}</h3><span>${badge(item.status || 'pending')}</span></div><div class="customer-bill-body"><p>账期：${text(item.period || '-')}</p><p>金额：${money(item.amount || 0)}</p><p>计费类型：${text(item.billing_type || '-')}</p><p>调用量：${text(item.usage_count || item.calls || '-')}</p></div></article>`).join('') : emptyState('暂无账单记录');
-}
 
+  if (!record) {
+    if (summary) summary.innerHTML = `<div class="panel-head"><h3>本期账单</h3></div><div class="customer-billing-empty">当前没有可查看的账单记录。</div>`;
+    renderCardList('customerBillingFeeBreakdown', [], '暂无费用明细');
+    const quota = $('customerBillingUsageQuota');
+    if (quota) quota.innerHTML = '<div class="customer-billing-empty">暂无调用额度数据。</div>';
+    renderSimpleRows('customerBillingHistoryRows', [], '暂无历史账单', 6);
+    return;
+  }
+
+  const tierLimits = { enterprise: 50000, professional: 10000, standard: 3000, basic: 1000 };
+  const limit = tierLimits[record.tier] || 10000;
+  const usage = Number(record.usage_count || record.calls || 0);
+  const remaining = Math.max(0, limit - usage);
+  const usagePercent = Math.min(100, Math.round(usage / Math.max(1, limit) * 100));
+  const dueDate = /^\d{4}-\d{2}$/.test(String(record.period || '')) ? `${record.period}-28` : '-';
+  const subscription = Number(record.base_amount ?? record.amount ?? record.total_amount ?? 0);
+  const overage = Number(record.overage_amount || 0);
+  const total = Number(record.amount ?? record.total_amount ?? subscription + overage);
+  const typeLabel = { subscription: '订阅服务', addon: '增值服务', usage: '按量调用' }[record.billing_type] || record.billing_type || '服务费用';
+
+  if (summary) {
+    summary.innerHTML = `
+      <div class="customer-billing-hero">
+        <div>
+          <p class="eyebrow">本期账单 · ${text(record.period || '-')}</p>
+          <div class="customer-billing-amount">${money(total)}</div>
+          <p class="muted-line">${text(record.item || '账单条目')} · 到期日 ${text(dueDate)}</p>
+        </div>
+        <div class="customer-billing-hero-actions">
+          <span>${badge(record.status || 'pending')}</span>
+          <button type="button" class="primary-btn" onclick="exportBillingStatement('${record.id}')">导出对账单</button>
+        </div>
+      </div>`;
+  }
+
+  renderCardList('customerBillingFeeBreakdown', [
+    `<div class="customer-charge-row"><span>订阅服务</span><strong>${money(subscription)}</strong></div>`,
+    `<div class="customer-charge-row"><span>超额调用</span><strong>${money(overage)}</strong></div>`,
+    `<div class="customer-charge-row total"><span>应付合计</span><strong>${money(total)}</strong></div>`,
+    `<div class="customer-charge-note">${text(record.notes || `${typeLabel}，账期内调用 ${usage.toLocaleString('zh-CN')} 次。`)}</div>`
+  ], '暂无费用明细');
+
+  const quotaNode = $('customerBillingUsageQuota');
+  if (quotaNode) quotaNode.innerHTML = `
+    <div class="customer-quota-main">
+      <div><strong>${usage.toLocaleString('zh-CN')}</strong><span> / ${limit.toLocaleString('zh-CN')} 次</span></div>
+      <span>${usagePercent}%</span>
+    </div>
+    <div class="customer-quota-track"><span style="width:${usagePercent}%"></span></div>
+    <p class="muted-line">本期剩余 ${remaining.toLocaleString('zh-CN')} 次调用。${usagePercent >= 80 ? '已接近额度上限，请关注使用量。' : '当前使用量处于正常范围。'}</p>`;
+
+  renderSimpleRows(
+    'customerBillingHistoryRows',
+    records.map(item => `<tr>
+      <td>${text(item.period || '-')}</td>
+      <td>${text(item.item || '-')}</td>
+      <td>${money(item.amount || item.total_amount || 0)}</td>
+      <td>${text(item.usage_count || item.calls || 0)}</td>
+      <td>${badge(item.status || 'pending')}</td>
+      <td><button type="button" class="ghost-btn small" onclick="exportBillingStatement('${item.id}')">导出</button></td>
+    </tr>`),
+    '暂无历史账单',
+    6
+  );
+}
 function renderCustomerDeliverables() {
   const items = list(state.deliverables);
   renderMetricSummary('customerDeliverableSummary', [

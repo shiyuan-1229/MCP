@@ -12,7 +12,7 @@ const [html, app, state, renderers] = await Promise.all([
   readFile(path.join(adminRoot, 'assets', 'modules', 'renderers.js'), 'utf8')
 ]);
 
-for (const id of ['customer-overview', 'customerOverviewCards', 'customerOverviewActions', 'customerOverviewAssets', 'customerOverviewReleases', 'customerAssetOverlay', 'customerAssetDetailContent']) {
+for (const id of ['customer-overview', 'customerDeliveryHero', 'customerDeliverySummary', 'customerDeliveryProgress', 'customerDeliveryActions', 'customerDeliveryPackages', 'customerDeliveryTimeline', 'customerAssetOverlay', 'customerAssetDetailContent']) {
   assert.match(html, new RegExp(`id="${id}"`, 'u'));
 }
 assert.match(state, /id: 'customer-overview'/u);

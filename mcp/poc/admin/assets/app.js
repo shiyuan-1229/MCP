@@ -1834,6 +1834,15 @@ async function runCustomerTrial(assetId) {
   }
 }
 
+function downloadReadyDeliverables() {
+  const items = Array.isArray(state.deliverables) ? state.deliverables : [];
+  const readyItems = items.filter(item => item.status === 'ready');
+  if (!readyItems.length) { showToast('当前没有可下载的交付资料。', 'warning'); return; }
+  showToast(`正在准备下载 ${readyItems.length} 份交付资料。`, 'warning');
+  readyItems.forEach((item, index) => {
+    window.setTimeout(() => downloadDeliverable(item.id), index * 300);
+  });
+}
 function openCustomerPage(pageId) {
   if (!isCustomerView() || !customerNavItems.some(item => item.id === pageId)) return;
   state.currentPage = pageId;
@@ -1889,6 +1898,7 @@ window.viewAccessGuide = viewAccessGuide;
 window.openCustomerAsset = openCustomerAsset;
 window.closeCustomerAsset = closeCustomerAsset;
 window.runCustomerTrial = runCustomerTrial;
+window.downloadReadyDeliverables = downloadReadyDeliverables;
 window.openCustomerPage = openCustomerPage;
 
 window.createApiKey = createApiKey;

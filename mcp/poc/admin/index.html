@@ -473,15 +473,16 @@
       </section>
 
             
-<section id="customer-overview" class="page" data-title="交付总览" data-eyebrow="已交付 MCP、待处理事项与运行状态">
-  <div id="customerOverviewCards" class="metric-grid"></div>
+<section id="customer-overview" class="page" data-title="交付总览" data-eyebrow="本次交付、验收进度与运行支持">
+  <article id="customerDeliveryHero" class="panel customer-delivery-hero"></article>
+  <div id="customerDeliverySummary" class="metric-grid" style="margin-top:14px"></div>
   <div class="content-grid two-col" style="margin-top:20px">
-    <article class="panel"><div class="panel-head"><h3>待处理事项</h3></div><div id="customerOverviewActions" class="card-list"></div></article>
-    <article class="panel"><div class="panel-head"><h3>最近版本</h3></div><div id="customerOverviewReleases" class="card-list"></div></article>
+    <article class="panel"><div class="panel-head"><h3>交付进度</h3><small class="muted-line">从资料交付到客户验收</small></div><div id="customerDeliveryProgress" class="customer-delivery-stages"></div></article>
+    <article class="panel"><div class="panel-head"><h3>客户待办</h3><small class="muted-line">请按优先级完成确认</small></div><div id="customerDeliveryActions" class="card-list"></div></article>
   </div>
-  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>已交付 MCP</h3></div><div id="customerOverviewAssets" class="card-list"></div></article>
-</section>
-<section id="mcp-builder" class="page" data-title="AI 需求生成 MCP" data-eyebrow="顾客用自然语言描述目标，AI 连续对话后自动重组能力并生成目标 MCP">
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>本次交付内容</h3><small class="muted-line">按项目归组，可直接下载或查看接入信息</small></div><div id="customerDeliveryPackages" class="customer-delivery-packages"></div></article>
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>最近更新</h3><small class="muted-line">版本发布与交付资料留痕</small></div><div id="customerDeliveryTimeline" class="customer-delivery-timeline"></div></article>
+</section><section id="mcp-builder" class="page" data-title="AI 需求生成 MCP" data-eyebrow="顾客用自然语言描述目标，AI 连续对话后自动重组能力并生成目标 MCP">
   <div id="customerBuilderSummary" class="metric-grid"></div>
   <div class="content-grid customer-builder-layout" style="margin-top:20px">
     <article class="panel customer-builder-chat-panel">
@@ -552,18 +553,19 @@
         <div id="customerUsageCards" class="metric-grid"></div>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>近 30 天调用趋势</h3><span id="customerUsageLiveStatus" class="badge info">自动刷新</span></div><div id="customerUsageTrendBars" class="card-list"></div></article>
-          <article class="panel"><div class="panel-head"><h3>调用观察</h3></div><div id="customerUsageHighlights" class="card-list"></div></article>
+          <article class="panel"><div class="panel-head"><h3>各 MCP Token 消耗</h3></div><div id="customerUsageHighlights" class="card-list"></div></article>
         </div>
-        <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>最近调用记录</h3></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>MCP 资产</th><th>业务结果</th><th>状态</th><th>耗时</th><th>Trace ID</th></tr></thead><tbody id="customerUsageRows"></tbody></table></div></article>
+        <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>最近调用记录</h3></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>MCP 资产</th><th>业务结果</th><th>状态</th><th>耗时</th><th>Token 消耗</th><th>Trace ID</th></tr></thead><tbody id="customerUsageRows"></tbody></table></div></article>
       </section>
 
-            <section id="my-billing" class="page" data-title="账单管理" data-eyebrow="当期账单与历史明细">
-        <div id="customerBillingSummary" class="panel"></div>
-        <div class="content-grid two-col" style="margin-top:20px">
-          <article class="panel"><div class="panel-head"><h3>账单观察</h3></div><div id="customerBillingHighlights" class="card-list"></div></article>
-          <div id="customerBillingList"></div>
-        </div>
-      </section>
+            <section id="my-billing" class="page" data-title="账单管理" data-eyebrow="本期费用、调用额度与历史对账">
+  <div id="customerBillingSummary" class="panel"></div>
+  <div class="content-grid two-col" style="margin-top:20px">
+    <article class="panel"><div class="panel-head"><h3>费用明细</h3></div><div id="customerBillingFeeBreakdown" class="card-list"></div></article>
+    <article class="panel"><div class="panel-head"><h3>调用与额度</h3></div><div id="customerBillingUsageQuota" class="customer-billing-quota"></div></article>
+  </div>
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>历史账单</h3></div><div class="table-wrap"><table><thead><tr><th>账期</th><th>账单条目</th><th>金额</th><th>调用量</th><th>状态</th><th>操作</th></tr></thead><tbody id="customerBillingHistoryRows"></tbody></table></div></article>
+</section>
 
             <section id="my-deliverables" class="page" data-title="交付物下载" data-eyebrow="配置包、报告、日志与复盘">
         <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article>

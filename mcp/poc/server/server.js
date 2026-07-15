@@ -4420,7 +4420,7 @@ app.get("/api/customer/dashboard", requireAuth, (req, res) => {
     month_amount: monthAmount,
     billing_status: billing[0]?.status || "pending",
     latest_release: latestRelease ? { version: latestRelease.version, asset_name: latestRelease.asset_name, released_at: latestRelease.released_at || latestRelease.tested_at } : null,
-    assets: assets.map(a => ({ ...a, tools: decode(a.tools) }))
+    assets: assets.map(customerAssetHealth)
   });
 });
 
@@ -4430,9 +4430,11 @@ function customerPublishedAsset(req, assetId) {
 
 function customerAssetHealth(asset) {
   const stats = db.prepare("SELECT COUNT(*) AS total, AVG(latency_ms) AS avg_latency, SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success FROM platform_call_events WHERE asset_id = ?").get(asset.id);
+  const tokenUsage = db.prepare("SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens FROM platform_call_events WHERE asset_id = ?").get(asset.id);
   const release = db.prepare("SELECT version, released_at, tested_at, notes FROM platform_mcp_releases WHERE asset_id = ? ORDER BY COALESCE(released_at, tested_at) DESC LIMIT 1").get(asset.id);
   return {
     id: asset.id,
+    project_id: asset.project_id,
     name: asset.name,
     capability: asset.capability,
     version: release?.version || asset.version || "-",
@@ -4441,6 +4443,9 @@ function customerAssetHealth(asset) {
     success_rate: stats?.total ? Math.round((stats.success || 0) / stats.total * 100) : 100,
     avg_latency_ms: Math.round(stats?.avg_latency || 0),
     call_count: stats?.total || 0,
+    input_tokens: tokenUsage?.input_tokens || 0,
+    output_tokens: tokenUsage?.output_tokens || 0,
+    total_tokens: (tokenUsage?.input_tokens || 0) + (tokenUsage?.output_tokens || 0),
     latest_release_at: release?.released_at || release?.tested_at || null
   };
 }
@@ -4477,7 +4482,7 @@ app.get("/api/customer/assets/:id", requireAuth, (req, res) => {
   const releases = db.prepare("SELECT version, status, tested_at, released_at, notes FROM platform_mcp_releases WHERE asset_id = ? ORDER BY COALESCE(released_at, tested_at) DESC").all(asset.id);
   const deliverables = db.prepare("SELECT id, name, type, status, updated_at FROM platform_deliverables WHERE project_id = ? ORDER BY updated_at DESC").all(asset.project_id);
   const access = db.prepare("SELECT name, type, endpoint, scope, status, environment, expires_at, description FROM platform_access_configs WHERE customer_id = ? AND project_id = ? ORDER BY id LIMIT 1").get(cid, asset.project_id) || null;
-  const recentEvents = db.prepare("SELECT id, status, latency_ms, business_result, trace_id, created_at FROM platform_call_events WHERE asset_id = ? ORDER BY created_at DESC LIMIT 10").all(asset.id);
+  const recentEvents = db.prepare("SELECT id, status, latency_ms, business_result, trace_id, input_tokens, output_tokens, created_at FROM platform_call_events WHERE asset_id = ? ORDER BY created_at DESC LIMIT 10").all(asset.id);
   res.json({ asset: customerAssetHealth(asset), releases, access, deliverables, recent_events: recentEvents });
 });
 

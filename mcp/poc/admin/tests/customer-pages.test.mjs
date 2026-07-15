@@ -16,7 +16,9 @@ for (const id of [
   'customerReleaseTimeline',
   'customerUsageTrendBars',
   'customerUsageHighlights',
-  'customerBillingHighlights',
+  'customerBillingFeeBreakdown',
+  'customerBillingUsageQuota',
+  'customerBillingHistoryRows',
   'customerDeliverableSummary',
   'customerDeliverableHighlights',
   'customerAccessSummary',
@@ -29,13 +31,14 @@ for (const label of [
   '资产运行焦点',
   '最近交付版本',
   '近 30 天调用趋势',
-  '调用观察',
-  '账单观察',
+  '各 MCP Token 消耗',
+  '费用明细',
+  '调用与额度',
+  '历史账单',
   '交付资料总览',
   '交付建议',
   '运行配置总览',
-  '使用前须知'
-]) {
+  '使用前须知']) {
   assert.match(html, new RegExp(label, 'u'));
 }
 
@@ -44,7 +47,9 @@ for (const token of [
   'customerReleaseTimeline',
   'customerUsageTrendBars',
   'customerUsageHighlights',
-  'customerBillingHighlights',
+  'customerBillingFeeBreakdown',
+  'customerBillingUsageQuota',
+  'customerBillingHistoryRows',
   'customerDeliverableSummary',
   'customerDeliverableHighlights',
   'customerAccessSummary',
