@@ -792,7 +792,7 @@ window.confirmMcpCompositionFromUI = async function(candidateId) {
   const reason = reasonInput?.value?.trim() || '人工确认 MCP 组成';
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   // 读取勾选的 Tool
-  const checks = document.querySelectorAll('.mcp-tool-check-' + candidateId.replace(/[^a-zA-Z0-9_-]/g, ''));
+  const checks = document.querySelectorAll('input[type="checkbox"][data-candidate="' + candidateId + '"]');
   const selectedIndices = [];
   checks.forEach(check => { if (check.checked) selectedIndices.push(parseInt(check.dataset.idx)); });
   if (!selectedIndices.length) {
@@ -825,6 +825,114 @@ window.assembleCandidateMcpFromUI = async function(candidateId) {
   } catch (error) {
     showToast(error.message, 'error');
   }
+};
+
+// WorkBuddy 对话测试弹窗
+window.openWorkBuddyChat = function(assetId, runtimeId) {
+  const asset = list(state.assets).find(a => a.id === assetId);
+  if (!asset) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.zIndex = '10000';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:680px;max-height:85vh;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div>
+          <h3 style="margin:0">🤖 WorkBuddy 对话测试</h3>
+          <p class="muted-line" style="margin:4px 0 0;font-size:12px">${escapeHtml(asset.name || '-')} · ${list(asset.tools).length} 个 Tool · 通过 POC Runtime 真实调用</p>
+        </div>
+        <button type="button" class="ghost-btn" data-action="close">关闭</button>
+      </div>
+      <div id="wbChatMessages" style="flex:1;overflow-y:auto;padding:14px;background:var(--surface-2);border-radius:8px;margin-bottom:14px;min-height:300px;max-height:400px"></div>
+      <div style="display:flex;gap:8px">
+        <input id="wbChatInput" placeholder="输入问题，如：帮我查询会员积分余额" style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:8px;font-size:13px" onkeydown="if(event.key==='Enter')document.getElementById('wbSendBtn').click()">
+        <button type="button" class="primary-btn" id="wbSendBtn">发送</button>
+      </div>
+    </div>`;
+
+  const messagesEl = () => document.getElementById('wbChatMessages');
+  const inputEl = () => document.getElementById('wbChatInput');
+  let chatHistory = [];
+
+  // 初始消息
+  messagesEl().innerHTML = '<div style="text-align:center;padding:20px"><span class="muted-line">输入问题开始对话，AI 会自动调用 MCP Tool 并返回真实结果</span></div>';
+
+  async function sendMessage() {
+    const msg = inputEl().value.trim();
+    if (!msg) return;
+    inputEl().value = '';
+    inputEl().disabled = true;
+    document.getElementById('wbSendBtn').disabled = true;
+    document.getElementById('wbSendBtn').textContent = '思考中...';
+
+    // 渲染用户消息
+    const userDiv = document.createElement('div');
+    userDiv.style.cssText = 'margin-bottom:12px;text-align:right';
+    userDiv.innerHTML = '<div style="display:inline-block;max-width:80%;padding:10px 14px;background:var(--primary);color:#fff;border-radius:12px 12px 4px 12px;font-size:13px">' + escapeHtml(msg) + '</div>';
+    messagesEl().appendChild(userDiv);
+    messagesEl().scrollTop = messagesEl().scrollHeight;
+
+    // 渲染 loading
+    const loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = 'margin-bottom:12px';
+    loadingDiv.innerHTML = '<div style="display:inline-block;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:13px;color:#94a3b8">⏳ AI 正在分析并调用工具...</div>';
+    messagesEl().appendChild(loadingDiv);
+    messagesEl().scrollTop = messagesEl().scrollHeight;
+
+    try {
+      const result = await api('/api/workbuddy/chat', {
+        method: 'POST',
+        body: JSON.stringify({ asset_id: assetId, runtime_id: runtimeId || '', message: msg, history: chatHistory })
+      });
+
+      chatHistory.push({ role: 'user', content: msg }, { role: 'assistant', content: result.reply });
+
+      loadingDiv.remove();
+
+      // 渲染 AI 回复
+      const aiDiv = document.createElement('div');
+      aiDiv.style.cssText = 'margin-bottom:12px';
+      let toolHtml = '';
+      if (result.tool_calls && result.tool_calls.length) {
+        toolHtml = '<div style="margin-top:8px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px">';
+        toolHtml += '<strong>🔧 调用的 Tool：</strong><br>';
+        result.tool_calls.forEach(tc => {
+          toolHtml += '· <strong>' + escapeHtml(tc.display_name || tc.tool_name) + '</strong>';
+          if (tc.source === 'mock') toolHtml += ' <span style="color:#f59e0b">(模拟)</span>';
+          else if (tc.source === 'poc_sse') toolHtml += ' <span style="color:#10b981">(真实调用)</span>';
+          if (tc.latency_ms) toolHtml += ' · ' + tc.latency_ms + 'ms';
+          if (tc.error) toolHtml += ' · <span style="color:#dc2626">错误: ' + escapeHtml(tc.error) + '</span>';
+          toolHtml += '<br>';
+        });
+        toolHtml += '</div>';
+      }
+      aiDiv.innerHTML = '<div style="display:inline-block;max-width:85%;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:12px 12px 12px 4px;font-size:13px;line-height:1.6">' + escapeHtml(result.reply || '').replace(/\n/g, '<br>') + toolHtml + '</div>';
+      messagesEl().appendChild(aiDiv);
+      messagesEl().scrollTop = messagesEl().scrollHeight;
+    } catch (error) {
+      loadingDiv.remove();
+      const errDiv = document.createElement('div');
+      errDiv.style.cssText = 'margin-bottom:12px';
+      errDiv.innerHTML = '<div style="display:inline-block;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:12px;font-size:13px;color:#dc2626">❌ ' + escapeHtml(error.message) + '</div>';
+      messagesEl().appendChild(errDiv);
+    }
+
+    inputEl().disabled = false;
+    document.getElementById('wbSendBtn').disabled = false;
+    document.getElementById('wbSendBtn').textContent = '发送';
+    inputEl().focus();
+  }
+
+  overlay.addEventListener('click', event => {
+    if (event.target?.dataset?.action === 'close' || event.target === overlay) {
+      document.body.removeChild(overlay);
+    }
+    if (event.target?.id === 'wbSendBtn') sendMessage();
+  });
+
+  document.body.appendChild(overlay);
+  setTimeout(() => inputEl().focus(), 100);
 };
 
 window.assembleCandidateMcp = async function(candidateId) {
@@ -1015,7 +1123,7 @@ function renderMcpComposePage() {
       const name = tool.name || tool.display_name || '-';
       const visChip = tool.visibility === 'public' ? '🌐' : '🔒';
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
-        '<input type="checkbox" class="mcp-tool-check-' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
+        '<input type="checkbox" data-candidate="' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
         '<strong style="font-size:13px">' + text(name) + '</strong>' +
         '<code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' +
         '<span style="font-size:11px">' + visChip + '</span>' +
@@ -1131,7 +1239,7 @@ function renderAssets() {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="muted-line" style="font-size:11px">v${text(asset.version || '0.1.0')}</span>
-            ${runtime ? `<span class="badge success">POC 运行中</span><code style="font-size:10px">${text(runtime.endpoint || '')}</code><button type="button" class="ghost-btn small" onclick="stopPocRuntime('${runtime.id}')">停止 POC</button>` : asset.status === 'published' ? `<button type="button" class="primary-btn small" onclick="startPocRuntime('${asset.id}')">启动 POC</button>` : ''}
+            ${runtime ? `<span class="badge success">POC 运行中</span><code style="font-size:10px">${text(runtime.endpoint || '')}</code><button type="button" class="ghost-btn small" onclick="stopPocRuntime('${runtime.id}')">停止 POC</button><button type="button" class="primary-btn small" onclick="openWorkBuddyChat('${asset.id}','${runtime.id}')">🤖 WorkBuddy 对话测试</button>` : `<button type="button" class="primary-btn small" onclick="startPocRuntime('${asset.id}')">启动 POC 运行时</button>`}
             <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
           </div>
         </div>`;
@@ -2983,9 +3091,13 @@ export function renderReviewWorkbench() {
         html += '</div>';
       });
       html += '</div></div>';
+      // 已决定的候选也提供操作按钮
+      html += '<div class="row-actions" style="padding:0 16px 16px">';
       if (selected.manual_screen_decision === 'approve') {
-        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div>';
+        html += '<button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button>';
       }
+      html += '<button type="button" class="ghost-btn small" onclick="resetCandidateScreen(\'' + escapeJs(selected.id) + '\')">重新审核</button>';
+      html += '</div>';
     } else {
       const riskBadge = selected.risk_level === 'high' ? '<span class="badge danger">高风险</span>' : selected.risk_level === 'medium' ? '<span class="badge warning">中风险</span>' : '<span class="badge success">低风险</span>';
       html += riskBadge + '</div>';

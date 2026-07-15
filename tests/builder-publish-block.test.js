@@ -7,7 +7,7 @@ const { pathToFileURL } = require('node:url');
 
 (async () => {
   // 动态加载 better-sqlite3（从 mcp/poc/demo-server/node_modules，native binding 兼容当前 Node）
-  const Database = require(path.resolve(__dirname, '..', 'mcp/poc/demo-server/node_modules/better-sqlite3'));
+  const Database = require(path.resolve(__dirname, '..', 'mcp/poc/server/node_modules/better-sqlite3'));
 
   const db = new Database(':memory:');
 

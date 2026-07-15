@@ -1981,6 +1981,16 @@ function openAiRecognizeModal(sourceId) {
       btn.textContent = '⏳ AI 正在扫描...';
       hint.innerHTML = '<span style="color:#b46b06">正在分析数据，请稍候（约 20-40 秒）...</span>';
 
+      // 从数据源获取样本内容
+      let sampleContent = '';
+      if (source.sample_ddl) {
+        sampleContent = source.sample_ddl;
+      } else {
+        // 尝试从 AI 分析缓存中获取
+        const cacheSource = (state.sources || []).find(s => s.id === sourceId);
+        if (cacheSource?.sample_ddl) sampleContent = cacheSource.sample_ddl;
+      }
+
       try {
         if (source.is_local_builder_source) {
           const spec = runLocalBuilderRecognition(source, sampleContent);
@@ -1998,7 +2008,7 @@ function openAiRecognizeModal(sourceId) {
 
         const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
           method: 'POST',
-          body: JSON.stringify({ use_ai: useAI, sample_content: sampleContent, description: sampleContent })
+          body: JSON.stringify({ use_ai: true, sample_content: sampleContent || source.sample_ddl || '', description: sampleContent || '' })
         });
 
         await loadAll();
@@ -2787,12 +2797,8 @@ let _agentHistory = [];
 let _workbuddyDeployed = false;
 let _connectedRuntimeId = '';
 
-// WorkBuddy 默认模型（TTKC-AUTO）
-const WORKBUDDY_DEFAULT_MODEL = {
-  url: 'https://necair.ttoto.net',
-  apiKey: 'sk-x_DrW2qi6bFG4QyJfw3WJA',
-  model: 'TTKC-AUTO'
-};
+// 模型凭据只保留在服务端 .env；浏览器端不传递 API Key，避免泄露给企业用户。
+const WORKBUDDY_DEFAULT_MODEL = {};
 
 // 部署 MCP 资产到 WorkBuddy
 async function deployToWorkBuddy() {

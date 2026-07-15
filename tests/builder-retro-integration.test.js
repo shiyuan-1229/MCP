@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 // 用 better-sqlite3 内存库 + 直接调 repository 来验证
-const Database = require(path.resolve('mcp/poc/demo-server/node_modules/better-sqlite3'));
+const Database = require(path.resolve('mcp/poc/server/node_modules/better-sqlite3'));
 
 const repoUrl = pathToFileURL(path.resolve('mcp/poc/server/modules/governance/repository.mjs')).href;
 

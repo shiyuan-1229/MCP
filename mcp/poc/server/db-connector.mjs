@@ -17,6 +17,7 @@ export async function testConnection(config) {
       user,
       password,
       database,
+      charset: 'utf8mb4',
       connectTimeout: 8000
     });
     const [rows] = await conn.execute('SELECT 1 AS ok');

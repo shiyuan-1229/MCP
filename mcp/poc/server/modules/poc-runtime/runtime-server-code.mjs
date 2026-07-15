@@ -28,22 +28,34 @@ function makeTraceId() {
 }
 
 function executeMockConnector(toolName, args) {
-  if (toolName !== "sales_top_products") {
-    throw new Error("当前 POC 仅支持 sales_top_products 只读 Tool");
+  const tool = TOOLS.find(item => item.name === toolName);
+  if (!tool) {
+    throw new Error("Tool is not exposed by this POC runtime");
   }
-  const topN = Math.min(Math.max(Number(args.top_n) || 10, 1), 20);
-  const products = ["鲜牛奶", "美式咖啡", "希腊酸奶", "矿泉水", "三明治", "能量饮料", "水果杯", "全麦面包", "茉莉绿茶", "便当"];
+  if (toolName === "sales_top_products") {
+    const topN = Math.min(Math.max(Number(args.top_n) || 10, 1), 20);
+    const products = ["鲜牛奶", "美式咖啡", "希腊酸奶", "矿泉水", "三明治", "能量饮料", "水果杯", "全麦面包", "茉莉绿茶", "便当"];
+    return {
+      connector: "mock",
+      mode: "read_only",
+      date_range: args.date_range || "month",
+      store_id: args.store_id || "all",
+      rows: Array.from({ length: topN }, (_, index) => ({
+        rank: index + 1,
+        product: products[index % products.length],
+        revenue: 9800 - index * 520,
+        quantity: 420 - index * 19,
+        contribution: (18 - index * 0.9).toFixed(1) + "%"
+      }))
+    };
+  }
   return {
     connector: "mock",
-    date_range: args.date_range || "month",
-    store_id: args.store_id || "all",
-    rows: Array.from({ length: topN }, (_, index) => ({
-      rank: index + 1,
-      product: products[index % products.length],
-      revenue: 9800 - index * 520,
-      quantity: 420 - index * 19,
-      contribution: (18 - index * 0.9).toFixed(1) + "%"
-    }))
+    mode: "read_only",
+    tool_name: tool.name,
+    accepted_arguments: args,
+    message: "POC mock execution completed; no external system or data was changed",
+    records: [{ status: "mocked", tool: tool.name }]
   };
 }
 

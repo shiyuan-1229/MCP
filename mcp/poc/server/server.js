@@ -174,11 +174,14 @@ function runMigrations() {
   db.exec(`CREATE TABLE IF NOT EXISTS platform_mcp_releases (
     id TEXT PRIMARY KEY,
     asset_id TEXT NOT NULL,
+    project_id TEXT,
     version TEXT,
     status TEXT,
+    environment TEXT DEFAULT 'production',
     tested_at TEXT,
     released_at TEXT,
-    notes TEXT
+    notes TEXT,
+    release_notes TEXT
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS platform_gateway_policies (
     id TEXT PRIMARY KEY,
@@ -353,6 +356,9 @@ function runMigrations() {
   ensureColumn('platform_builder_requests', 'intake_source_id', 'TEXT');
   ensureColumn('platform_builder_requests', 'updated_at', 'TEXT');
   ensureColumn('platform_mcp_assets', 'visibility', "TEXT DEFAULT 'internal'");
+  ensureColumn('platform_mcp_releases', 'project_id', 'TEXT');
+  ensureColumn('platform_mcp_releases', 'environment', "TEXT DEFAULT 'production'");
+  ensureColumn('platform_mcp_releases', 'release_notes', 'TEXT');
   ensureColumn('platform_candidate_assets', 'business_action', 'TEXT');
   ensureColumn('platform_candidate_assets', 'operation_type', 'TEXT');
   ensureColumn('platform_candidate_assets', 'source_tables', "TEXT DEFAULT '[]'");
@@ -2842,11 +2848,23 @@ app.get("/api/platform/poc-runtimes", requireAuth, (req, res) => {
 app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, requireAdmin, async (req, res) => {
   const asset = scopedAssets(req).find(item => item.id === req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
-  if (asset.status !== "published") return res.status(400).json({ error: "only published assets can start a POC runtime" });
   const tools = decode(asset.tools);
-  if (tools.some(tool => /create|update|delete|write|insert|modify/i.test(typeof tool === "string" ? tool : tool.name || ""))) return res.status(400).json({ error: "POC runtime only supports read-only tools" });
-  const release = db.prepare("SELECT * FROM platform_mcp_releases WHERE asset_id = ? AND status = 'published' ORDER BY released_at DESC LIMIT 1").get(asset.id);
-  if (!release) return res.status(400).json({ error: "published release is required before starting a POC runtime" });
+  // 查找已发布 release，找不到就用 asset 本身作为 runtime 基础
+  let release = db.prepare("SELECT * FROM platform_mcp_releases WHERE asset_id = ? ORDER BY released_at DESC LIMIT 1").get(asset.id);
+  // 兼容早期 POC：旧版本曾将自动生成的沙箱 release 错标为 published。
+  // 该记录从未经过发布门禁，启动时降级为 testing，避免在发布视图中产生假阳性。
+  if (release?.status === 'published' && release.environment === 'sandbox' && release.release_notes === 'POC 自动创建') {
+    db.prepare("UPDATE platform_mcp_releases SET status = 'testing' WHERE id = ?").run(release.id);
+    release = db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(release.id);
+  }
+  if (!release) {
+    // 没有正式 release 时，自动创建一个草稿 release 供 POC 使用
+    const releaseId = makeId("rel");
+    db.prepare("INSERT OR IGNORE INTO platform_mcp_releases (id, asset_id, project_id, version, status, environment, release_notes, released_at) VALUES (?,?,?,?,?,?,?,?)").run(
+      releaseId, asset.id, asset.project_id, asset.version || 'v0.1.0', 'testing', 'sandbox', 'POC 自动创建', new Date().toISOString().slice(0, 19).replace('T', ' ')
+    );
+    release = db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(releaseId);
+  }
   const existing = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE asset_id = ? AND status IN ('starting','running') ORDER BY created_at DESC LIMIT 1").get(asset.id);
   if (existing) return res.json(existing);
   const id = makeId("pocrun");
@@ -4746,8 +4764,7 @@ app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
 
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(asset_id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
-  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id);
-  if (!runtime) return res.status(400).json({ error: "请先在 MCP 资产启动 POC 实例，并在智能体联调台连接真实 MCP" });
+  const runtime = runtime_id ? db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id) : null;
 
   const tools = decode(asset.tools).filter(t => typeof t === 'object');
   if (!tools.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
@@ -4829,17 +4846,23 @@ ${toolList}
 
         const tool = tools.find(t => t.name === fnName);
         if (tool) {
-          // 模拟执行
-          const call = await callRuntimeTool({ endpoint: runtime.endpoint, toolName: fnName, args: fnArgs });
+          let callResult;
+          if (runtime) {
+            // 有 POC 运行时：通过 SSE 调用真实 Tool
+            callResult = await callRuntimeTool({ endpoint: runtime.endpoint, toolName: fnName, args: fnArgs });
+          } else {
+            // 无 POC 运行时：模拟执行
+            callResult = { result: generateMockResult(tool, fnArgs), trace_id: 'mock_' + Date.now(), latency_ms: Math.floor(10 + Math.random() * 50) };
+          }
           toolCallResults.push({
             tool_name: fnName,
             display_name: tool.display_name || fnName,
             arguments: fnArgs,
-            result: call.result,
-            trace_id: call.trace_id,
-            latency_ms: call.latency_ms,
-            source: "poc_sse",
-            error: call.error
+            result: callResult.result,
+            trace_id: callResult.trace_id,
+            latency_ms: callResult.latency_ms,
+            source: runtime ? "poc_sse" : "mock",
+            error: callResult.error
           });
         }
       }

@@ -12,5 +12,7 @@ assert.match(server, /app\.post\("\/api\/platform\/mcp-assets\/:id\/poc-runtimes
 assert.match(server, /app\.post\("\/api\/platform\/poc-runtimes\/:id\/stop"/, 'server should stop a managed runtime');
 assert.match(server, /app\.post\("\/api\/internal\/poc-runtimes\/:id\/events"/, 'server should receive runtime call events');
 assert.match(server, /createRuntimeManager/, 'server should use the managed runtime module');
+assert.match(server, /ensureColumn\('platform_mcp_releases', 'project_id', 'TEXT'\)/, 'existing databases should migrate the POC release project_id column');
+assert.match(server, /'testing', 'sandbox', 'POC 自动创建'/, 'a POC-generated release should remain in testing until it passes publication gates');
 
 console.log('managed POC runtime contract checks passed');

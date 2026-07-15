@@ -17,6 +17,8 @@ test("generates an asset-specific SSE server with Trace event reporting", () => 
   assert.match(code, /app\.get\("\/sse"/);
   assert.match(code, /app\.get\("\/health"/);
   assert.match(code, /sales_top_products/);
+  assert.match(code, /const tool = TOOLS\.find\(item => item\.name === toolName\)/);
+  assert.doesNotMatch(code, /toolName !== "sales_top_products"/);
   assert.match(code, /trace_poc_/);
   assert.match(code, /POC_EVENT_URL/);
 });
