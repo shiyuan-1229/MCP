@@ -2713,8 +2713,22 @@ function navigateToPage(pageId, focus = {}) {
   renderAll();
 }
 
+function persistMonitoringIssueStatuses() {
+  try { localStorage.setItem('mcp_monitoring_issue_statuses', JSON.stringify(state.monitoringIssueStatuses || {})); } catch {}
+}
+
+function markMonitoringIssueStatus(issueKey, status) {
+  if (!issueKey) return;
+  state.monitoringIssueStatuses = {
+    ...(state.monitoringIssueStatuses || {}),
+    [issueKey]: { status, updated_at: new Date().toISOString() }
+  };
+  persistMonitoringIssueStatuses();
+  renderAll();
+  showToast(`异常已标记为${status}`, status === '已恢复' ? 'success' : 'info');
+}
 function setMonitoringFilter(key, value) {
-  if (!state.monitoringFilters) state.monitoringFilters = { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h' };
+  if (!state.monitoringFilters) state.monitoringFilters = { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h', query: '' };
   if (!Object.prototype.hasOwnProperty.call(state.monitoringFilters, key)) return;
   state.monitoringFilters[key] = value;
   renderAll();
@@ -3116,6 +3130,7 @@ window.jumpToPublish = jumpToPublish;
 window.jumpToPage = jumpToPage;
 window.navigateToPage = navigateToPage;
 window.setMonitoringFilter = setMonitoringFilter;
+window.markMonitoringIssueStatus = markMonitoringIssueStatus;
 
 async function bootApp() {
   if (!state.user) state.user = await api('/auth/me');

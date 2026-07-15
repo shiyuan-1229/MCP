@@ -107,8 +107,10 @@ export const state = {
     status: 'all',
     assetId: 'all',
     toolName: 'all',
-    timeRange: '24h'
+    timeRange: '24h',
+    query: ''
   },
+  monitoringIssueStatuses: readStoredJson('mcp_monitoring_issue_statuses', {}),
   monitoringFocusId: null,
   billingFilters: {
     customer: 'all',

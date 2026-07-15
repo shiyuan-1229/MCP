@@ -346,8 +346,6 @@ function renderSummary() {
 
 function renderIntake() {
   const items = list(state.sources);
-  const builderRequests = list(state.builderRequests);
-
   const stepBar = $('intakeStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(1);
 
@@ -363,21 +361,6 @@ function renderIntake() {
     }
   }
 
-  const builderPanel = $('builderRequestPanel');
-  if (builderPanel) builderPanel.style.display = isCustomerView() ? 'none' : '';
-
-  renderSimpleRows('builderRequestRows', builderRequests.map(item => {
-    const tools = list(item.result?.tools);
-    const toolPreview = tools.length
-      ? `${tools.slice(0, 3).map(tool => `<span class="badge info">${text(tool?.name || tool?.display_name || '-')}</span>`).join('')}${tools.length > 3 ? ` <span class="muted-line">+${tools.length - 3}</span>` : ''}`
-      : '<span class="muted-line">No Tools</span>';
-    const requestStatus = item.intake_source_id ? 'accepted' : (item.status || 'submitted');
-    const summary = item.result?.summary || item.latest_prompt || item.prompt || '-';
-    const actions = item.intake_source_id
-      ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="triggerRecognition('${item.intake_source_id}')">开始识别</button></div>`
-      : `<button type="button" class="primary-btn small" onclick="acceptBuilderRequestIntoIntake('${item.id}')">转入资料接入</button>`;
-    return `<tr><td><strong>${text(item.customer_name || '-')}</strong><div class="muted-line">${text(item.project_name || '未分配项目')}</div></td><td><div style="max-width:360px"><strong>${text(item.result?.name || '目标 MCP')}</strong><p class="muted-line" style="margin:4px 0 0">${text(summary)}</p></div></td><td><div style="display:flex;flex-wrap:wrap;gap:6px">${toolPreview}</div></td><td>${badge(requestStatus)}</td><td>${text(item.created_at || '-')}</td><td>${actions}</td></tr>`;
-  }), '暂无客户提交的 AI 需求。', 6);
   // 填充企业筛选器
   const filter = $('intakeCustomerFilter');
   if (filter) {
@@ -1424,57 +1407,151 @@ function governanceFailureEvents() {
   }));
 }
 
+function monitoringIssueKey(event) {
+  return [event?._type || classifyCallEvent(event), event?.asset_id || event?.asset_name || 'unknown-mcp', event?._tool || eventToolName(event), event?.customer_id || event?.customer_name || 'unknown-customer'].join('|');
+}
+
+function monitoringBucketLabel(type) {
+  const labels = { '401': '授权失败', '403': '权限不足', '400': '字段校验', timeout: '响应超时', '5xx': '上游异常', error: '调用异常', success: '成功' };
+  return labels[type] || type || '调用异常';
+}
+
+function monitoringIssueStatus(key) {
+  return state.monitoringIssueStatuses?.[key]?.status || '待处理';
+}
+
+function monitoringIssueStatusBadge(status) {
+  const classes = { '待处理': 'danger', '处理中': 'warning', '已恢复': 'success' };
+  return `<span class="badge ${classes[status] || 'info'}">${text(status)}</span>`;
+}
+
+function monitoringNextAction(type) {
+  if (['401', '403'].includes(type)) return { label: '去授权治理', action: "navigateToPage('governance')" };
+  if (type === '400') return { label: '看 Tool 边界', action: "navigateToPage('tooling')" };
+  if (type === 'timeout' || type === '5xx') return { label: '查接入健康', action: "navigateToPage('governance')" };
+  return { label: '打开诊断', action: '' };
+}
+
+function monitoringImpactText(events) {
+  const customers = new Set(events.map(item => item.customer_name || item.customer_id).filter(Boolean));
+  const projects = new Set(events.map(item => item.project_name || item.project_id).filter(Boolean));
+  const assets = new Set(events.map(item => item.asset_name || item.asset_id).filter(Boolean));
+  return `${customers.size || 1} 客户 / ${projects.size || 1} 项目 / ${assets.size || 1} MCP`;
+}
+
+function renderMonitoringTrend(events) {
+  const node = $('monitoringTrend');
+  if (!node) return;
+  const now = Date.now();
+  const bucketCount = 12;
+  const bucketMs = 2 * 60 * 60 * 1000;
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({ label: `${(bucketCount - index) * 2}h`, count: 0 }));
+  events.filter(item => item._type !== 'success').forEach(item => {
+    const created = new Date(item.created_at).getTime();
+    if (!created || now - created > bucketCount * bucketMs) return;
+    const slot = bucketCount - 1 - Math.floor((now - created) / bucketMs);
+    if (buckets[slot]) buckets[slot].count += 1;
+  });
+  const max = Math.max(1, ...buckets.map(item => item.count));
+  node.innerHTML = `<div class="monitoring-trend-bars">${buckets.map(item => `<div class="monitoring-trend-bar" title="${text(item.count)} 次异常"><span style="height:${Math.max(8, Math.round(item.count / max * 72))}px"></span><small>${text(item.label)}</small></div>`).join('')}</div>`;
+}
+
 function renderMonitoringPage() {
   if (isCustomerView()) return;
-  const filters = state.monitoringFilters || { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h' };
+  const defaultFilters = { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h', query: '' };
+  const filters = { ...defaultFilters, ...(state.monitoringFilters || {}) };
   const events = [...list(state.events), ...governanceFailureEvents()].map(item => {
     let inputTokens = Number(item.input_tokens) || 0;
     let outputTokens = Number(item.output_tokens) || 0;
     if (!inputTokens && !outputTokens) {
       try { const result = JSON.parse(item.business_result || '{}'); inputTokens = Number(result.input_tokens) || 0; outputTokens = Number(result.output_tokens) || 0; } catch {}
     }
-    return { ...item, _input: inputTokens, _output: outputTokens, _total: inputTokens + outputTokens, _type: classifyCallEvent(item), _tool: eventToolName(item) };
+    const normalized = { ...item, _input: inputTokens, _output: outputTokens, _total: inputTokens + outputTokens, _type: classifyCallEvent(item), _tool: eventToolName(item) };
+    normalized._issueKey = monitoringIssueKey(normalized);
+    return normalized;
   });
   const cutoff = filters.timeRange === '7d' ? Date.now() - 7 * 86400000 : filters.timeRange === '24h' ? Date.now() - 86400000 : 0;
+  const query = String(filters.query || '').trim().toLowerCase();
   const filtered = events.filter(item => {
     const created = new Date(item.created_at).getTime();
     const inRange = !created || !cutoff || created >= cutoff;
-    return inRange && (filters.status === 'all' || item._type === filters.status) && (filters.assetId === 'all' || item.asset_id === filters.assetId) && (filters.toolName === 'all' || item._tool === filters.toolName);
+    const haystack = `${item.trace_id || ''} ${item.asset_name || ''} ${item.asset_id || ''} ${item._tool || ''} ${item.customer_name || ''} ${item.project_name || ''}`.toLowerCase();
+    return inRange
+      && (filters.status === 'all' || item._type === filters.status)
+      && (filters.assetId === 'all' || item.asset_id === filters.assetId)
+      && (filters.toolName === 'all' || item._tool === filters.toolName)
+      && (!query || haystack.includes(query));
   });
   const errors = filtered.filter(item => item._type !== 'success');
   const successes = filtered.filter(item => item._type === 'success');
-  const avgLatency = filtered.length ? Math.round(filtered.reduce((sum, item) => sum + Number(item.latency_ms || 0), 0) / filtered.length) : 0;
+  const affectedCustomers = new Set(errors.map(item => item.customer_name || item.customer_id).filter(Boolean));
+  const affectedCustomerCount = affectedCustomers.size || (errors.length ? 1 : 0);
+  const sortedLatency = filtered.map(item => Number(item.latency_ms || 0)).sort((a, b) => a - b);
+  const p95 = sortedLatency.length ? sortedLatency[Math.min(sortedLatency.length - 1, Math.floor(sortedLatency.length * 0.95))] : 0;
   renderMetricSummary('monitoringSummary', [
-    { label: '总调用量', value: filtered.length, meta: filters.timeRange === 'all' ? '全部记录' : '最近 ' + (filters.timeRange === '7d' ? '7 天' : '24 小时') },
-    { label: '成功率', value: (filtered.length ? Math.round(successes.length / filtered.length * 100) : 0) + '%', meta: '按调用事件统计' },
-    { label: '异常调用', value: errors.length, meta: errors.length ? '先处理第一条异常' : '当前没有异常' },
-    { label: '平均耗时', value: avgLatency + ' ms', meta: avgLatency > 300 ? '偏慢，建议检查上游' : '当前正常' }
+    { label: '24h 成功率', value: (filtered.length ? Math.round(successes.length / filtered.length * 100) : 0) + '%', meta: `${filtered.length} 条调用样本` },
+    { label: '异常调用', value: errors.length, meta: errors.length ? '按问题分组处置' : '当前没有异常' },
+    { label: '影响范围', value: `${affectedCustomerCount} 客户`, meta: monitoringImpactText(errors.length ? errors : filtered) },
+    { label: 'P95 耗时', value: `${p95} ms`, meta: p95 > 500 ? '建议排查上游耗时' : '延迟处于可接受范围' }
   ]);
 
   const filterNode = $('monitoringFilters');
   if (filterNode) {
     const assetOptions = [...new Map(list(state.assets).map(asset => [asset.id, asset])).values()].map(asset => `<option value="${escapeJs(asset.id)}" ${filters.assetId === asset.id ? 'selected' : ''}>${text(asset.name || asset.id || '-')}</option>`).join('');
     const toolOptions = [...new Set(events.map(item => item._tool).filter(Boolean))].map(tool => `<option value="${escapeJs(tool)}" ${filters.toolName === tool ? 'selected' : ''}>${text(tool)}</option>`).join('');
-    filterNode.innerHTML = `<div class="filter-summary"><span>显示 ${filtered.length} 条调用，异常优先</span><div class="filter-row"><select onchange="setMonitoringFilter('status', this.value)"><option value="all">全部类型</option><option value="401" ${filters.status === '401' ? 'selected' : ''}>401 授权失败</option><option value="403" ${filters.status === '403' ? 'selected' : ''}>403 权限不足</option><option value="400" ${filters.status === '400' ? 'selected' : ''}>字段校验失败</option><option value="timeout" ${filters.status === 'timeout' ? 'selected' : ''}>响应超时</option><option value="5xx" ${filters.status === '5xx' ? 'selected' : ''}>上游异常</option><option value="success" ${filters.status === 'success' ? 'selected' : ''}>成功</option></select><select onchange="setMonitoringFilter('assetId', this.value)"><option value="all">全部 MCP</option>${assetOptions}</select><select onchange="setMonitoringFilter('toolName', this.value)"><option value="all">全部 Tool</option>${toolOptions}</select><select onchange="setMonitoringFilter('timeRange', this.value)"><option value="24h" ${filters.timeRange === '24h' ? 'selected' : ''}>最近 24 小时</option><option value="7d" ${filters.timeRange === '7d' ? 'selected' : ''}>最近 7 天</option><option value="all" ${filters.timeRange === 'all' ? 'selected' : ''}>全部记录</option></select></div></div>`;
+    filterNode.innerHTML = `<div class="filter-summary"><span>显示 ${filtered.length} 条调用，${errors.length} 条异常，按影响范围聚合</span><div class="filter-row"><select onchange="setMonitoringFilter('status', this.value)"><option value="all">全部类型</option><option value="401" ${filters.status === '401' ? 'selected' : ''}>401 授权失败</option><option value="403" ${filters.status === '403' ? 'selected' : ''}>403 权限不足</option><option value="400" ${filters.status === '400' ? 'selected' : ''}>字段校验失败</option><option value="timeout" ${filters.status === 'timeout' ? 'selected' : ''}>响应超时</option><option value="5xx" ${filters.status === '5xx' ? 'selected' : ''}>上游异常</option><option value="success" ${filters.status === 'success' ? 'selected' : ''}>成功</option></select><select onchange="setMonitoringFilter('assetId', this.value)"><option value="all">全部 MCP</option>${assetOptions}</select><select onchange="setMonitoringFilter('toolName', this.value)"><option value="all">全部 Tool</option>${toolOptions}</select><select onchange="setMonitoringFilter('timeRange', this.value)"><option value="24h" ${filters.timeRange === '24h' ? 'selected' : ''}>最近 24 小时</option><option value="7d" ${filters.timeRange === '7d' ? 'selected' : ''}>最近 7 天</option><option value="all" ${filters.timeRange === 'all' ? 'selected' : ''}>全部记录</option></select></div></div>`;
   }
 
   const focus = state.monitoringFocusId ? events.find(item => (item.id || item.trace_id) === state.monitoringFocusId) : null;
   const focusBanner = $('monitoringFocusBanner');
   if (focusBanner) {
     focusBanner.classList.toggle('hidden', !focus);
-    if (focus) focusBanner.innerHTML = `<div><strong>当前聚焦异常</strong><span>${text(focus._tool)} · ${callTypeBadge(focus._type)} · Trace ID ${text(focus.trace_id || '-')}</span></div><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(focus.id || focus.trace_id)}')">打开诊断</button>`;
+    if (focus) focusBanner.innerHTML = `<div><strong>当前聚焦 Trace</strong><span>${text(focus._tool)} · ${callTypeBadge(focus._type)} · ${text(focus.trace_id || '-')}</span></div><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(focus.id || focus.trace_id)}')">打开诊断</button>`;
   }
 
-  const rowHtml = item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || item.asset_id || '-')}</div></td><td><code>${text(item._tool)}</code>${String(item.business_result || '').startsWith('poc_sse:') ? '<span class="badge success" style="margin-left:4px">真实 MCP</span>' : ''}</td><td>${text(item.caller || '-')}</td><td>${callTypeBadge(item._type)}</td><td>${badge(item.status || item._type)}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><div class="row-actions"><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">诊断</button>${['401', '403'].includes(item._type) ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('governance')">去授权</button>` : item._type === '400' ? `<button type="button" class="ghost-btn small" onclick="navigateToPage('tooling')">看 Tool</button>` : ''}</div></td></tr>`;
-  renderSimpleRows('monitoringRows', errors.map(rowHtml), '暂无异常调用。可以先到“测试发布”执行一次沙箱测试。', 9);
-  renderSimpleRows('monitoringSuccessRows', successes.slice(0, 5).map(item => `<tr data-event-id="${escapeJs(item.id || item.trace_id)}"><td>${text(item.created_at || '-')}</td><td>${text(item.customer_name || '-')}<div class="muted-line">${text(item.project_name || item.asset_name || '-')}</div></td><td><code>${text(item._tool)}</code></td><td>${text(item.response_summary || item.business_result || '-')}</td><td>${text(item.latency_ms ?? '-')} ms</td><td><code>${text(item.trace_id || '-')}</code></td><td><button type="button" class="ghost-btn small" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')">详情</button></td></tr>`), '暂无成功调用记录。先完成一次沙箱测试后，这里会显示正常调用。', 7);
-  if (state.monitoringFocusId && typeof document !== 'undefined') {
-    const row = document.querySelector(`#monitoringRows tr[data-event-id="${escapeJs(state.monitoringFocusId)}"]`) || document.querySelector(`#monitoringSuccessRows tr[data-event-id="${escapeJs(state.monitoringFocusId)}"]`);
-    row?.classList.add('focus-row');
-    row?.scrollIntoView({ block: 'nearest' });
+  const grouped = new Map();
+  errors.forEach(item => {
+    const key = item._issueKey;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  });
+  const groups = [...grouped.entries()].map(([key, groupEvents]) => {
+    const latest = [...groupEvents].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+    return { key, events: groupEvents, latest, status: monitoringIssueStatus(key) };
+  }).sort((a, b) => {
+    const priority = { '待处理': 0, '处理中': 1, '已恢复': 2 };
+    return (priority[a.status] ?? 9) - (priority[b.status] ?? 9) || b.events.length - a.events.length;
+  });
+  const issueNode = $('monitoringRows');
+  if (issueNode) {
+    issueNode.innerHTML = groups.length ? groups.map(group => {
+      const latest = group.latest;
+      const next = monitoringNextAction(latest._type);
+      const affectedTools = new Set(group.events.map(item => item._tool).filter(Boolean));
+      const latestId = latest.id || latest.trace_id || '';
+      return `<article class="monitoring-issue-card status-${group.status}">
+        <div class="monitoring-issue-main">
+          <div class="monitoring-issue-title"><strong>${monitoringBucketLabel(latest._type)} · ${text(latest.asset_name || latest.asset_id || '未知 MCP')}</strong>${monitoringIssueStatusBadge(group.status)}</div>
+          <p>${text(latest.customer_name || '未知客户')} / ${text(latest.project_name || '未分配项目')} · ${affectedTools.size} 个 Tool · ${group.events.length} 次</p>
+          <div class="monitoring-impact"><span>影响范围：${monitoringImpactText(group.events)}</span><span>最近：${text(latest.created_at || '-')}</span><span>Trace：<code>${text(latest.trace_id || '-')}</code></span></div>
+        </div>
+        <div class="monitoring-issue-actions">
+          <button type="button" class="primary-btn small" onclick="openUsageDrawer('${escapeJs(latestId)}')">Trace 诊断</button>
+          <button type="button" class="ghost-btn small" onclick="copyUsageTrace('${escapeJs(latest.trace_id || '')}')">复制 Trace</button>
+          <button type="button" class="ghost-btn small" onclick="exportUsageEvent('${escapeJs(latestId)}')">导出报告</button>
+          ${next.action ? `<button type="button" class="ghost-btn small" onclick="${next.action}">${text(next.label)}</button>` : ''}
+          <select aria-label="处理状态" onchange="markMonitoringIssueStatus('${escapeJs(group.key)}', this.value)"><option value="待处理" ${group.status === '待处理' ? 'selected' : ''}>待处理</option><option value="处理中" ${group.status === '处理中' ? 'selected' : ''}>处理中</option><option value="已恢复" ${group.status === '已恢复' ? 'selected' : ''}>已恢复</option></select>
+        </div>
+      </article>`;
+    }).join('') : '<div class="empty-state">暂无异常调用。可以先到“测试发布”执行一次沙箱测试。</div>';
+  }
+
+  renderMonitoringTrend(filtered);
+  const successNode = $('monitoringSuccessRows');
+  if (successNode) {
+    successNode.innerHTML = successes.slice(0, 5).map(item => `<button type="button" class="monitoring-success-item" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')"><strong>${text(item.asset_name || item.asset_id || '-')}</strong><span>${text(item._tool)} · ${text(item.latency_ms ?? '-')} ms</span><code>${text(item.trace_id || '-')}</code></button>`).join('') || '<div class="empty-state">暂无成功调用记录。</div>';
   }
 }
-
 function renderAccess() {
   const allAccess = list(state.access);
   const blocked = allAccess.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error');
@@ -1695,37 +1772,45 @@ function renderPublishDrawer() {
 }
 
 function renderUsageDrawer() {
-  const event = list(state.events).find(item => (item.id || item.trace_id) === state.selectedUsageEventId);
-  let inputTok = Number(event?.input_tokens) || 0;
-  let outputTok = Number(event?.output_tokens) || 0;
-  if (!inputTok && !outputTok) {
-    try { const br = JSON.parse(event?.business_result || '{}'); inputTok = br.input_tokens || 0; outputTok = br.output_tokens || 0; } catch {}
-  }
-  let reqParams = event?.request_params || '';
-  try { reqParams = JSON.stringify(JSON.parse(reqParams), null, 2); } catch {}
-  const respSummary = event?.response_summary || event?.business_result || '-';
-  const body = `<div class="drawer-panel">
-    <h4>调用概况</h4>
-    <p><strong>Trace ID</strong>：<code style="font-size:12px;background:#f0f9ff;padding:2px 8px;border-radius:4px;color:#0369a1">${text(event?.trace_id || '-')}</code></p>
-    <p>调用方：${text(event?.caller || '-')}</p>
-    <p>状态：${badge(event?.status || 'draft')}</p>
-    <p>业务结果：${text(event?.business_result || '-')}</p>
-    <p>耗时：<span style="color:${(event?.latency_ms||0) > 300 ? '#dc2626' : '#16a34a'}">${text(event?.latency_ms ?? '-')} ms</span></p>
+  const allEvents = [...list(state.events), ...governanceFailureEvents()].map(item => {
+    let inputTokens = Number(item.input_tokens) || 0;
+    let outputTokens = Number(item.output_tokens) || 0;
+    if (!inputTokens && !outputTokens) {
+      try { const br = JSON.parse(item.business_result || '{}'); inputTokens = Number(br.input_tokens) || 0; outputTokens = Number(br.output_tokens) || 0; } catch {}
+    }
+    const normalized = { ...item, _input: inputTokens, _output: outputTokens, _total: inputTokens + outputTokens, _type: classifyCallEvent(item), _tool: eventToolName(item) };
+    normalized._issueKey = monitoringIssueKey(normalized);
+    return normalized;
+  });
+  const event = allEvents.find(item => (item.id || item.trace_id) === state.selectedUsageEventId);
+  const reqParams = maskCallText(event?.request_params || event?.request_body || event?.input || '');
+  const respSummary = maskCallText(event?.response_summary || event?.business_result || '-');
+  const next = monitoringNextAction(event?._type);
+  const status = event ? monitoringIssueStatus(event._issueKey) : '待处理';
+  const pathSteps = [
+    { label: '调用方', value: event?.caller || '-' },
+    { label: '网关鉴权', value: ['401', '403'].includes(event?._type) ? '未通过' : '通过' },
+    { label: 'Tool 参数', value: event?._type === '400' ? '需修正' : '已接收' },
+    { label: '上游接口', value: ['timeout', '5xx'].includes(event?._type) ? '需排查' : '已响应' },
+    { label: '响应结果', value: event?._type === 'success' ? '成功' : monitoringBucketLabel(event?._type) }
+  ];
+  const body = `<div class="drawer-panel monitoring-diagnosis-head">
+    <h4>Trace 诊断</h4>
+    <p><strong>Trace ID</strong>：<code>${text(event?.trace_id || '-')}</code></p>
+    <p>${text(event?.customer_name || '-')} / ${text(event?.project_name || event?.asset_name || '-')} · ${callTypeBadge(event?._type || 'error')} · ${monitoringIssueStatusBadge(status)}</p>
   </div>
-  <div class="drawer-panel">
-    <h4>Token 用量</h4>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-      <div class="info-card" style="padding:10px;text-align:center"><p style="font-size:11px;color:#64748b;margin:0">输入</p><p style="font-size:20px;font-weight:700;color:#2563eb;margin:2px 0 0">${inputTok}</p></div>
-      <div class="info-card" style="padding:10px;text-align:center"><p style="font-size:11px;color:#64748b;margin:0">输出</p><p style="font-size:20px;font-weight:700;color:#16a34a;margin:2px 0 0">${outputTok}</p></div>
-      <div class="info-card" style="padding:10px;text-align:center"><p style="font-size:11px;color:#64748b;margin:0">总计</p><p style="font-size:20px;font-weight:700;color:#7c3aed;margin:2px 0 0">${inputTok + outputTok}</p></div>
-    </div>
-  </div>
-  ${reqParams ? `<div class="drawer-panel"><h4>请求参数</h4><pre style="background:#1e293b;color:#e2e8f0;padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;max-height:200px">${escapeHtml(reqParams)}</pre></div>` : ''}
-  <div class="drawer-panel"><h4>响应摘要</h4><div style="background:#f8fafc;padding:10px;border-radius:8px;font-size:12px;max-height:150px;overflow-y:auto"><code>${escapeHtml(respSummary)}</code></div></div>
-  <div class="drawer-panel"><h4>操作</h4><div style="display:flex;gap:8px"><button type="button" class="ghost-btn small" onclick="exportUsageEvent('${(event?.id || event?.trace_id || '')}')">导出调用报告</button></div></div>`;
-  renderDrawer('usageDrawer', 'usageDrawerBackdrop', 'usageDrawerTitle', 'usageDrawerContent', Boolean(state.usageDrawerOpen && event), event?.asset_name || '调用详情', body);
+  <div class="drawer-panel"><h4>诊断链路</h4><div class="monitoring-diagnosis-path">${pathSteps.map(step => `<div><span>${text(step.label)}</span><strong>${text(step.value)}</strong></div>`).join('')}</div></div>
+  <div class="drawer-panel"><h4>Token 与耗时</h4><div class="monitoring-token-grid"><div><span>输入</span><strong>${event?._input || 0}</strong></div><div><span>输出</span><strong>${event?._output || 0}</strong></div><div><span>总计</span><strong>${event?._total || 0}</strong></div><div><span>耗时</span><strong>${text(event?.latency_ms ?? '-')} ms</strong></div></div></div>
+  <div class="drawer-panel"><h4>请求摘要</h4><pre>${escapeHtml(reqParams || '暂无请求参数')}</pre></div>
+  <div class="drawer-panel"><h4>响应摘要</h4><pre>${escapeHtml(respSummary)}</pre></div>
+  <div class="drawer-panel"><h4>下一步动作</h4><div class="row-actions">
+    <button type="button" class="ghost-btn small" onclick="copyUsageTrace('${escapeJs(event?.trace_id || '')}')">复制 Trace ID</button>
+    <button type="button" class="ghost-btn small" onclick="exportUsageEvent('${escapeJs(event?.id || event?.trace_id || '')}')">导出诊断报告</button>
+    ${next.action ? `<button type="button" class="primary-btn small" onclick="${next.action}">${text(next.label)}</button>` : ''}
+    ${event?._issueKey ? `<button type="button" class="ghost-btn small" onclick="markMonitoringIssueStatus('${escapeJs(event._issueKey)}', '处理中')">标记处理中</button><button type="button" class="ghost-btn small" onclick="markMonitoringIssueStatus('${escapeJs(event._issueKey)}', '已恢复')">标记已恢复</button>` : ''}
+  </div></div>`;
+  renderDrawer('usageDrawer', 'usageDrawerBackdrop', 'usageDrawerTitle', 'usageDrawerContent', Boolean(state.usageDrawerOpen && event), event?.asset_name || '调用诊断', body);
 }
-
 function renderBillingDrawer() {
   const record = adminBilling().find(item => item.id === state.selectedBillingId);
   renderDrawer('billingDrawer', 'billingDrawerBackdrop', 'billingDrawerTitle', 'billingDrawerContent', Boolean(state.billingDrawerOpen && record), record?.item || '账单详情', `<div class="drawer-panel"><h4>账单摘要</h4><p>客户：${text(record?.customer_name || '-')}</p><p>账期：${text(record?.period || '-')}</p><p>金额：${money(record?.amount || 0)}</p><p>状态：${text(displayStatus(record?.status || 'pending'))}</p><p>备注：${text(record?.note || record?.notes || '暂无备注')}</p></div><div class="drawer-panel"><h4>操作</h4><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ghost-btn small" onclick="openBillingAdjustmentModal('${record?.id}')">调整</button><button type="button" class="ghost-btn small" onclick="exportBillingStatement('${record?.id}')">导出</button></div></div>`);

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>MCP Forge - 企业 MCP 打造工作台</title>
-  <link rel="stylesheet" href="/admin/assets/styles.css?v=55"></head>
+  <link rel="stylesheet" href="/admin/assets/styles.css?v=57"></head>
 <body>
   <div id="login" class="login-shell">
     <section class="login-card" aria-labelledby="loginTitle">
@@ -88,15 +88,6 @@
 
       <section id="intake" class="page" data-title="资料接入" data-eyebrow="步骤 1：上传业务资料触发 AI 识别 &#183; 支持文件上传、DDL 粘贴、数据库直连 &#183; 识别结果进入候选业务能力">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <div id="builderRequestPanel" class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>&#23458;&#25143; AI &#38656;&#27714;&#27744;</h3><small class="muted-line">&#39038;&#23458;&#25552;&#20132;&#30340;&#30446;&#26631; MCP &#38656;&#27714;&#20250;&#20808;&#36827;&#20837;&#36825;&#37324;&#65292;&#20877;&#30001;&#31649;&#29702;&#21592;&#36716;&#20837;&#36164;&#26009;&#25509;&#20837;</small></div>
-          <div class="table-wrap">
-            <table class="intake-table">
-              <thead><tr><th>&#23458;&#25143;</th><th>&#38656;&#27714;&#27010;&#35272;</th><th>&#24314;&#35758; Tool</th><th>&#29366;&#24577;</th><th>&#25552;&#20132;&#26102;&#38388;</th><th>&#25805;&#20316;</th></tr></thead>
-              <tbody id="builderRequestRows"></tbody>
-            </table>
-          </div>
-        </div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><select id="intakeCustomerFilter" onchange="filterIntakeByCustomer()" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px"><option value="">全部企业</option></select><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>
           <div id="batchActionBar" style="display:none;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -316,38 +307,31 @@
           </div>
         </article>
       </section>
-
-
       <section id="monitoring" class="page" data-title="调用监控" data-eyebrow="步骤 11：异常优先 &#183; Trace ID &#183; Tool 调用诊断">
-        <article class="panel p0-page-intro">
+        <article class="panel monitoring-command-center">
           <div>
-            <p class="eyebrow">P0 · 再定位异常</p>
-            <h2>调用监控与诊断</h2>
-            <p class="muted-line">先看失败调用，再看具体 Tool、调用方和 Trace ID。401/403 直接去治理统计处理接入凭证，400 直接回到 Tool 映射。</p>
+            <p class="eyebrow">异常处置工作台</p>
+            <h2>按问题聚合调用异常</h2>
+            <p class="muted-line">先定位影响范围，再打开 Trace 诊断。401/403 走授权治理，400 回到 Tool 边界，超时和 5xx 优先排查上游接口。</p>
           </div>
-          <div class="p0-next-action"><strong>建议动作</strong><span>先处理第一条异常，再确认成功调用</span><button type="button" class="primary-btn small" onclick="document.getElementById('monitoringRows')?.scrollIntoView({ behavior: 'smooth', block: 'center' })">查看异常</button></div>
+          <div class="monitoring-search-box">
+            <label for="monitoringSearchInput">Trace / MCP / Tool / 客户</label>
+            <input id="monitoringSearchInput" placeholder="输入关键词快速定位" oninput="setMonitoringFilter('query', this.value)">
+          </div>
         </article>
         <div id="monitoringSummary" class="metric-grid"></div>
         <div id="monitoringFocusBanner" class="p0-focus-banner hidden"></div>
-        <article class="panel">
-          <div class="panel-head"><div><h3>异常调用</h3><small class="muted-line">异常优先，点击诊断查看请求摘要、响应摘要和下一步动作</small></div><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
-          <div id="monitoringFilters" class="project-controls"></div>
-          <div class="table-wrap">
-            <table class="p0-table">
-              <thead><tr><th>时间</th><th>MCP / 项目</th><th>Tool</th><th>调用方</th><th>错误类型</th><th>状态</th><th>耗时</th><th>Trace ID</th><th>操作</th></tr></thead>
-              <tbody id="monitoringRows"></tbody>
-            </table>
-          </div>
-        </article>
-        <article class="panel" style="margin-top:14px">
-          <div class="panel-head"><div><h3>最近成功调用</h3><small class="muted-line">用来证明人工修正后的 Tool 仍可正常工作</small></div></div>
-          <div class="table-wrap">
-            <table class="p0-table compact">
-              <thead><tr><th>时间</th><th>MCP / 项目</th><th>Tool</th><th>业务结果</th><th>耗时</th><th>Trace ID</th><th>操作</th></tr></thead>
-              <tbody id="monitoringSuccessRows"></tbody>
-            </table>
-          </div>
-        </article>
+        <div class="monitoring-workspace">
+          <article class="panel monitoring-issue-panel">
+            <div class="panel-head"><div><h3>异常分组</h3><small class="muted-line">按错误类型、MCP、Tool、客户聚合，避免日志刷屏</small></div><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div>
+            <div id="monitoringFilters" class="project-controls"></div>
+            <div id="monitoringRows" class="monitoring-issue-list"></div>
+          </article>
+          <aside class="monitoring-side-stack">
+            <article class="panel"><div class="panel-head"><h3>24 小时异常趋势</h3></div><div id="monitoringTrend" class="monitoring-trend"></div></article>
+            <article class="panel"><div class="panel-head"><h3>最近成功样本</h3><small class="muted-line">用于确认修复后恢复正常</small></div><div id="monitoringSuccessRows" class="monitoring-success-list"></div></article>
+          </aside>
+        </div>
       </section>
       <section id="governance" class="page" data-title="治理统计" data-eyebrow="步骤 12：网关策略 &#183; 接入台账 &#183; 调用成效 &#183; 审计日志">
         <div id="accessBlockBanner" class="p0-focus-banner hidden" style="margin-bottom:14px"></div>
@@ -670,7 +654,7 @@
   </aside>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script type="module" src="/admin/assets/app.js?v=55"></script></body>
+  <script type="module" src="/admin/assets/app.js?v=57"></script></body>
 </html>
 
 
