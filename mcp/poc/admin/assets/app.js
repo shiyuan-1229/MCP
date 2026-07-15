@@ -2277,7 +2277,7 @@ async function confirmOpenapiSpec(specId) {
         }
       });
 
-      state.currentPage = 'tooling';
+      state.currentPage = 'candidates';
       renderAll();
       showToast(`OpenAPI 草案已确认，已生成 ${list(asset.tools).length} 个 MCP Tool。`, 'success');
       return;
@@ -2285,15 +2285,15 @@ async function confirmOpenapiSpec(specId) {
 
     const result = await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
     await loadAll();
-    // 自动跳转到 Tool 映射页
-    state.currentPage = 'tooling';
+    // 自动跳转到候选业务能力页
+    state.currentPage = 'candidates';
     renderAll();
     // 查找关联的资产
     const spec = (state.openapiSpecs || []).find(s => s.id === specId);
     const sourceId = spec?.source_id;
     const asset = (state.assets || []).find(a => a.id === `mcp_ai_${sourceId}`);
     const toolCount = asset ? list(asset.tools).length : 0;
-    showToast(`OpenAPI 已确认，自动生成 ${toolCount} 个 MCP Tool，已进入 Tool 映射。`, 'success');
+    showToast(`OpenAPI 已确认，自动生成 ${toolCount} 个 MCP Tool，已进入候选业务能力。`, 'success');
   } catch (error) { showToast(error.message, 'error'); }
 }
 
@@ -2694,7 +2694,7 @@ function setMonitoringFilter(key, value) {
 
 // 步骤条点击跳转（被 renderers.js 中 step-item onclick 调用）
 function jumpToPage(pageId) {
-  const allPages = ['summary', 'intake', 'recognition', 'tooling', 'review', 'assets', 'publish', 'delivery', 'monitoring'];
+  const allPages = ['summary', 'intake', 'recognition', 'candidates', 'review', 'tooling', 'tool-draft', 'mcp-compose', 'assets', 'publish', 'delivery', 'monitoring', 'governance', 'settings'];
   if (!allPages.includes(pageId)) return;
   // 检查权限
   if (state.user?.role !== 'admin') return;

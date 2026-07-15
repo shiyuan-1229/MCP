@@ -19,6 +19,7 @@ import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 import { GOVERNANCE_DEMO_SCENARIOS } from "./modules/governance/demo-scenarios.mjs";
 import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
 import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
+import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema } from "./db-connector.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -90,6 +91,8 @@ function getCandidatePublishReadiness(candidate) {
 }
 
 function ensureColumn(table, name, definition) {
+  const tableExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+  if (!tableExists) return;
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!columns.some(column => column.name === name)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
@@ -489,6 +492,27 @@ function runMigrations() {
     built_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  // 建表后补列（兼容旧数据库）
+  ensureColumn('platform_candidate_assets', 'business_action', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'operation_type', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'source_tables', "TEXT DEFAULT '[]'");
+  ensureColumn('platform_candidate_assets', 'source_endpoints', "TEXT DEFAULT '[]'");
+  ensureColumn('platform_candidate_assets', 'suggested_group', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'grouping_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'boundary_rule', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'permission_scope', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'human_confirmed', 'INTEGER DEFAULT 0');
+  ensureColumn('platform_candidate_assets', 'tool_boundary_status', "TEXT DEFAULT 'pending'");
+  ensureColumn('platform_candidate_assets', 'tool_confirmation_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_draft_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_id', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'tool_draft_id', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'tool_draft_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_composition_status', "TEXT DEFAULT 'not_started'");
+  ensureColumn('platform_candidate_assets', 'mcp_composition_reason', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_composition_by', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_composition_at', 'TEXT');
 
   // 审核任务
   db.exec(`CREATE TABLE IF NOT EXISTS platform_review_tasks (
@@ -2090,6 +2114,7 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
   if (!source) return res.status(404).json({ error: "data source not found" });
 
   const useAI = req.body?.use_ai !== false; // 默认使用 AI
+  const customInstructions = req.body?.custom_instructions || req.body?.customInstructions || '';
   let sampleContent = req.body?.sample_content || req.body?.description || '';
 
   // 优先使用数据源本身已存储的 sample_ddl
@@ -3444,6 +3469,49 @@ app.post("/api/platform/governance/candidates/:id/manual-screen", requireAuth, (
     manual_screen_by: by,
     modified_fields
   });
+
+  // 如果 action = modify，保存修改的字段到候选记录
+  if (action === 'modify' && modified_fields && modified_fields.length) {
+    const allowedFields = {
+      business_domain: 'business_domain',
+      business_action: 'business_action',
+      operation_type: 'operation_type',
+      permission_scope: 'permission_scope',
+      grouping_reason: 'grouping_reason',
+      name: 'name'
+    };
+    const updates = [];
+    const params = [];
+    for (const mf of modified_fields) {
+      if (mf.field && allowedFields[mf.field] && mf.value !== undefined) {
+        updates.push(`${allowedFields[mf.field]} = ?`);
+        params.push(mf.value);
+      }
+    }
+    if (updates.length) {
+      params.push(candidate.id);
+      db.prepare(`UPDATE platform_candidate_assets SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    }
+  }
+});
+
+// 更新候选业务能力字段（供修改后重审、Tool 编辑等使用）
+app.put("/api/platform/governance/candidates/:id", requireAuth, requireAdmin, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+  const allowedFields = ['business_domain', 'business_action', 'operation_type', 'permission_scope', 'grouping_reason', 'name'];
+  const updates = [];
+  const params = [];
+  for (const field of allowedFields) {
+    if (req.body?.[field] !== undefined) {
+      updates.push(`${field} = ?`);
+      params.push(String(req.body[field]));
+    }
+  }
+  if (!updates.length) return res.status(400).json({ error: "no updatable fields provided" });
+  params.push(candidate.id);
+  db.prepare(`UPDATE platform_candidate_assets SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  res.json({ ok: true, candidate: governanceRepo.getCandidate(candidate.id) });
 });
 
 // 发布前人工验收清单

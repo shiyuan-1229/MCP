@@ -133,21 +133,23 @@ function renderStepBar(currentStep) {
   const steps = [
     { n: 1, label: '资料接入', page: 'intake' },
     { n: 2, label: 'AI 识别结果', page: 'recognition' },
-    { n: 3, label: '候选业务能力', page: 'review' },
+    { n: 3, label: '候选业务能力', page: 'candidates' },
     { n: 4, label: '候选接口人工初筛', page: 'review' },
     { n: 5, label: '人工确认 Tool 边界', page: 'tooling' },
-    { n: 6, label: '生成 Tool 草稿', page: 'tooling' },
-    { n: 7, label: '人工确认 MCP 组成', page: 'tooling' },
+    { n: 6, label: '生成 Tool 草稿', page: 'tool-draft' },
+    { n: 7, label: '人工确认 MCP 组成', page: 'mcp-compose' },
     { n: 8, label: '生成 MCP 草稿', page: 'assets' },
-    { n: 9, label: '发布前验收', page: 'publish' },
-    { n: 10, label: '正式发布', page: 'publish' }
+    { n: 9, label: '测试发布', page: 'publish' },
+    { n: 10, label: '交付管理', page: 'delivery' },
+    { n: 11, label: '调用监控', page: 'monitoring' },
+    { n: 12, label: '治理统计', page: 'governance' }
   ];
   return `<div class="step-bar">${steps.map(s => `
     <div class="step-item ${s.n <= currentStep ? 'done' : ''} ${s.n === currentStep ? 'current' : ''}" onclick="jumpToPage('${s.page}')">
       <span class="step-num">${s.n <= currentStep ? '\u2705' : s.n}</span>
       <span class="step-text">${s.label}</span>
     </div>
-    ${s.n < 10 ? '<span class="step-arrow">\u2192</span>' : ''}
+    ${s.n < 12 ? '<span class="step-arrow">\u2192</span>' : ''}
   `).join('')}</div>`;
 }
 
@@ -183,18 +185,18 @@ function renderLegacySummary() {
       { label: '减少重复工作', value: `${metrics.repeated_work_reduction}%`, meta: 'AI 识别后由人工聚焦关键差异' },
       { label: '当前可发布 MCP', value: metrics.publishable_mcps, meta: '已完成所有治理门禁' }
     ]);
-    const completed = ['资料接入', 'AI 识别结果', '候选业务能力', '人工初筛', 'Tool 边界确认', 'Tool 草稿', 'MCP 组成确认', 'MCP 草稿', '发布前验收', '正式发布'];
-    const governanceFlowRoutes = ['intake', 'recognition', 'review', 'review', 'tooling', 'tooling', 'assets', 'assets', 'publish', 'publish'];
+    const completed = ['资料接入', 'AI 识别结果', '候选业务能力', '候选接口人工初筛', '人工确认 Tool 边界', '生成 Tool 草稿', '人工确认 MCP 组成', '生成 MCP 草稿', '测试发布', '交付管理', '调用监控', '治理统计'];
+    const governanceFlowRoutes = ['intake', 'recognition', 'candidates', 'review', 'tooling', 'tool-draft', 'mcp-compose', 'assets', 'publish', 'delivery', 'monitoring', 'governance'];
     renderMetricSummary('governanceFlowBoard', completed.map((label, index) => ({
       label,
       value: index < 8 ? '已确认' : index === 8 ? '待验收' : '已发布',
-      meta: index === 5 ? `${demo.toolDrafts.length} 个 Tool 草稿，前往 Tool 映射` : index === 7 ? `${demo.mcpDrafts.length} 个 MCP 草稿，前往 MCP 资产` : '点击前往对应工作台',
+      meta: index === 5 ? `${demo.toolDrafts.length} 个 Tool 草稿，前往生成 Tool 草稿` : index === 7 ? `${demo.mcpDrafts.length} 个 MCP 草稿，前往 MCP 资产` : '点击前往对应工作台',
       page: governanceFlowRoutes[index]
     })));
 
     renderCardList('governanceActionBoard', [
       `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('review')"><h4>处理高风险审核</h4><p>${metrics.risk_items_intercepted} 个敏感字段或写操作需要人工审核</p></div>`,
-      `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('tooling')"><h4>确认 Tool 草稿</h4><p>${demo.toolDrafts.length} 个草稿等待确认业务边界</p></div>`,
+      `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('tooling')"><h4>确认 Tool 边界</h4><p>${demo.toolDrafts.length} 个候选等待确认 Tool 边界</p></div>`,
       `<div class="info-card" style="cursor:pointer" onclick="jumpToPage('publish')"><h4>验收并发布 MCP</h4><p>${metrics.publishable_mcps} 个 MCP 已具备发布条件</p></div>`
     ], '当前没有待处理事项');
 
@@ -600,43 +602,74 @@ function jsonList(value) {
 function renderToolingCandidates() {
   const root = $('toolingCandidateBoard');
   if (!root) return;
-  const candidates = list(state.candidates);
-  root.classList.toggle('is-empty', !candidates.length);
+  const allCandidates = list(state.candidates);
+  // 显示所有初筛通过（approve）的候选，包括已走完流程的
+  const candidates = allCandidates.filter(c => c.manual_screen_decision === 'approve');
   if (!candidates.length) {
-    root.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">资料确认后，AI 结果会先出现在这里。确认候选和 Tool 边界后，才会出现 MCP 草稿。</p></article>';
+    root.innerHTML = '<article class="panel"><strong>暂无待确认 Tool 边界的候选</strong><p class="muted-line">请先在「候选接口人工初筛」中通过审核。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'review\')">去候选接口人工初筛 →</button></div></article>';
     return;
   }
 
   root.innerHTML = candidates.map(candidate => {
-    const tables = jsonList(candidate.source_tables);
-    const endpoints = jsonList(candidate.source_endpoints);
-    const hits = jsonList(candidate.sensitive_hits);
     const aiTools = jsonList(candidate.ai_tools_snapshot);
-    const humanTools = jsonList(candidate.human_tools_snapshot);
-    const screenApproved = candidate.manual_screen_decision === 'approve';
     const toolConfirmed = candidate.tool_boundary_status === 'confirmed';
-    const toolDraft = candidate.tool_draft_status === 'draft';
-    const mcpCompositionConfirmed = candidate.mcp_composition_status === 'confirmed';
-    const mcpDraft = candidate.mcp_draft_status === 'draft';
-    const status = mcpDraft ? 'MCP 草稿已生成' : toolConfirmed ? 'Tool 边界已确认' : screenApproved ? '待确认 Tool 边界' : '待人工初筛';
-    const statusClass = mcpDraft || toolConfirmed ? 'success' : screenApproved ? 'warning' : 'info';
-    const toolNames = (toolConfirmed ? humanTools : aiTools).map(tool => typeof tool === 'string' ? tool : (tool.name || tool.display_name || '未命名 Tool'));
-    const controls = !screenApproved
-      ? '<button type="button" class="primary-btn small" onclick="confirmCandidateScreen(\'' + escapeJs(candidate.id) + '\')">确认候选业务能力</button>'
-      : !toolConfirmed
-        ? '<button type="button" class="primary-btn small" onclick="confirmCandidateTool(\'' + escapeJs(candidate.id) + '\')">确认 Tool 边界</button>'
-        : !mcpDraft
-          ? '<button type="button" class="primary-btn small" onclick="assembleCandidateMcp(\'' + escapeJs(candidate.id) + '\')">组装 MCP 草稿</button>'
-          : '<span class="badge success">等待发布前验收</span>';
-    return '<article class="panel control-flow-candidate">' +
-      '<div class="panel-head"><div><span class="eyebrow">AI 候选业务能力</span><h3>' + text(candidate.name || '-') + '</h3><p class="muted-line">不是正式 Tool，也不是已发布 MCP</p></div><span class="badge ' + statusClass + '">' + status + '</span></div>' +
-      '<div class="control-flow-grid">' +
-        '<div><strong>来源证据</strong><p>表：' + text(tables.join('、') || '未识别') + '</p><p>接口：' + text(endpoints.join('、') || '未识别') + '</p></div>' +
-        '<div><strong>AI 建议与理由</strong><p>业务域：' + text(candidate.business_domain || '-') + '</p><p>业务动作：' + text(candidate.business_action || '-') + '</p><p>读写类型：' + text(candidate.operation_type || '-') + ' · 权限：' + text(candidate.permission_scope || '-') + '</p><p>分组理由：' + text(candidate.grouping_reason || '-') + '</p><p>边界规则：' + text(candidate.boundary_rule || '-') + '</p></div>' +
-        '<div><strong>人工最终边界</strong><label class="muted-line">Tool 名称（可删减、合并或拆分）<input id="toolNames_' + escapeJs(candidate.id) + '" value="' + escapeHtml(toolNames.join(', ')) + '" placeholder="例如：query_order, query_order_status" style="width:100%;margin-top:4px"></label><p>敏感字段：' + text(hits.map(hit => typeof hit === 'string' ? hit : (hit.label || hit.field || '')).join('、') || '未命中') + '</p><label class="muted-line">确认理由<input id="toolReason_' + escapeJs(candidate.id) + '" value="' + escapeHtml(candidate.tool_confirmation_reason || '人工确认：AI 建议与业务边界一致') + '" style="width:100%;margin-top:4px"></label></div>' +
-      '</div><div class="row-actions" style="margin-top:12px">' + controls + '</div></article>';
+    const statusBadge = toolConfirmed ? '<span class="badge success">Tool 边界已确认</span>' : '<span class="badge warning">待确认 Tool 边界</span>';
+
+    // 每个 Tool 一个可编辑行
+    const toolRowsHtml = aiTools.map((tool, index) => {
+      if (typeof tool !== 'object' || tool === null) return '';
+      const vis = tool.visibility === 'public' ? 'public' : 'internal';
+      const visLabel = vis === 'public' ? '🌐 公开' : '🔒 内部';
+      return '<div style="padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:8px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+          '<input type="checkbox" class="tool-keep-check" data-idx="' + index + '" checked style="cursor:pointer">' +
+          '<input class="tool-name-input" data-idx="' + index + '" value="' + escapeHtml(tool.name || '') + '" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px">' +
+          '<select class="tool-vis-select" data-idx="' + index + '" style="padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px">' +
+            '<option value="internal"' + (vis === 'internal' ? ' selected' : '') + '>🔒 内部</option>' +
+            '<option value="public"' + (vis === 'public' ? ' selected' : '') + '>🌐 公开</option>' +
+          '</select>' +
+        '</div>' +
+        '<input class="tool-desc-input" data-idx="' + index + '" value="' + escapeHtml(tool.display_name + ' - ' + (tool.description || '')) + '" placeholder="Tool 描述" style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:11px;color:#64748b;box-sizing:border-box">' +
+        (tool.sensitivity_reason ? '<p style="margin:4px 0 0;font-size:10px;color:#dc2626">⚠️ ' + text(tool.sensitivity_reason) + '</p>' : '') +
+      '</div>';
+    }).join('');
+
+    return '<article class="panel" style="margin-bottom:14px">' +
+      '<div class="panel-head"><div><span class="eyebrow">候选业务能力</span><h3>' + text(candidate.name || '-') + '</h3></div>' + statusBadge + '</div>' +
+      '<div id="toolEditList_' + escapeJs(candidate.id) + '" style="padding:14px;display:grid;gap:8px' + (toolConfirmed ? ';opacity:0.6;pointer-events:none' : '') + '">' +
+        '<p style="font-size:12px;font-weight:650;color:#64748b;margin:0">' + (toolConfirmed ? '已确认的 Tool 列表' : '编辑 Tool：勾选保留、修改名称、切换公开/内部，或取消勾选删除') + '</p>' +
+        toolRowsHtml +
+      '</div>' +
+      (!toolConfirmed ?
+        '<div style="padding:0 14px 10px"><button type="button" class="ghost-btn small" onclick="addNewToolRow(\'' + escapeJs(candidate.id) + '\')">+ 添加新 Tool</button></div>' +
+        '<div style="padding:0 14px 10px"><label style="font-size:12px;color:#64748b;font-weight:650;display:block;margin-bottom:4px">确认理由</label>' +
+          '<input id="toolReason_' + escapeJs(candidate.id) + '" value="' + escapeHtml(candidate.tool_confirmation_reason || '人工确认：AI 建议与业务边界一致') + '" placeholder="填写确认理由" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>' +
+        '<div class="row-actions" style="padding:0 14px 14px"><button type="button" class="primary-btn small" onclick="confirmCandidateTool(\'' + escapeJs(candidate.id) + '\')">确认 Tool 边界</button></div>'
+      : '<div class="row-actions" style="padding:0 14px 14px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'tool-draft\')">去生成 Tool 草稿 →</button></div>') +
+    '</article>';
   }).join('');
 }
+
+window.addNewToolRow = function(candidateId) {
+  const container = $('toolEditList_' + candidateId);
+  if (!container) return;
+  const idx = 'new_' + Date.now();
+  const div = document.createElement('div');
+  div.style.cssText = 'padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px';
+  div.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<input type="checkbox" class="tool-keep-check" data-idx="' + idx + '" checked style="cursor:pointer">' +
+      '<span class="badge success" style="font-size:10px">新增</span>' +
+      '<input class="tool-name-input" data-idx="' + idx + '" value="" placeholder="新 Tool 名称（如 create_order）" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px">' +
+      '<select class="tool-vis-select" data-idx="' + idx + '" style="padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px">' +
+        '<option value="internal" selected>🔒 内部</option>' +
+        '<option value="public">🌐 公开</option>' +
+      '</select>' +
+    '</div>' +
+    '<input class="tool-desc-input" data-idx="' + idx + '" value="" placeholder="Tool 描述" style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:11px;color:#64748b;box-sizing:border-box">';
+  container.appendChild(div);
+};
 
 window.confirmCandidateScreen = async function(candidateId) {
   try {
@@ -651,14 +684,80 @@ window.confirmCandidateScreen = async function(candidateId) {
   }
 };
 
+window.candidateScreenDecision = async function(candidateId, action) {
+  const reasonInput = $('screenReason_' + candidateId);
+  const reason = reasonInput?.value?.trim() || (
+    action === 'approve' ? '人工确认候选可信' :
+    action === 'reject' ? 'AI 识别有误，标记为误识别' :
+    'AI 识别有偏差，需要修改后重新审核'
+  );
+  const body = { action, reason };
+
+  // modify 模式：收集编辑过的字段
+  if (action === 'modify') {
+    const modified_fields = [];
+    const fields = ['name', 'business_domain', 'business_action', 'operation_type', 'permission_scope', 'grouping_reason'];
+    for (const field of fields) {
+      const input = $('editField_' + candidateId + '_' + field);
+      if (input && input.value.trim()) {
+        modified_fields.push({ field, value: input.value.trim() });
+      }
+    }
+    body.modified_fields = modified_fields;
+  }
+
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/manual-screen', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    await window.refreshData();
+    if (action === 'approve') {
+      showToast('候选已通过初筛，请前往「人工确认 Tool 边界」。', 'success');
+    } else if (action === 'reject') {
+      showToast('候选已标记为误识别。', 'warning');
+    } else {
+      showToast('候选已修改并标记为重审。修改后的字段已保存。', 'success');
+    }
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
 window.confirmCandidateTool = async function(candidateId) {
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   const reason = $('toolReason_' + candidateId)?.value?.trim();
-  const aiTools = jsonList(candidate?.ai_tools_snapshot);
-  const editedNames = ($('toolNames_' + candidateId)?.value || '').split(',').map(name => name.trim()).filter(Boolean);
-  const humanTools = editedNames.map(name => aiTools.find(tool => (typeof tool === 'object' ? tool.name : tool) === name) || { name, description: '人工新增或拆分的 Tool' });
+  if (!reason) {
+    showToast('请填写确认理由。', 'warning');
+    return;
+  }
+
+  // 从 DOM 读取编辑后的 Tool 列表
+  const container = $('toolEditList_' + candidateId);
+  const humanTools = [];
+  if (container) {
+    container.querySelectorAll('.tool-keep-check').forEach(check => {
+      if (!check.checked) return; // 未勾选 = 删除
+      const idx = check.dataset.idx;
+      const nameInput = container.querySelector('.tool-name-input[data-idx="' + idx + '"]');
+      const visSelect = container.querySelector('.tool-vis-select[data-idx="' + idx + '"]');
+      const descInput = container.querySelector('.tool-desc-input[data-idx="' + idx + '"]');
+      const name = nameInput?.value?.trim();
+      if (!name) return;
+      const aiTools = jsonList(candidate?.ai_tools_snapshot);
+      const original = aiTools[parseInt(idx)] || {};
+      humanTools.push({
+        name,
+        display_name: name,
+        description: descInput?.value?.trim() || original.description || '人工确认的 Tool',
+        visibility: visSelect?.value || 'internal',
+        inputSchema: original.inputSchema || { type: 'object', properties: {}, required: [] }
+      });
+    });
+  }
+
   if (!humanTools.length) {
-    showToast('请至少保留一个 Tool 名称。', 'warning');
+    showToast('请至少保留一个 Tool。', 'warning');
     return;
   }
   if (!reason) {
@@ -705,6 +804,46 @@ window.confirmCandidateMcpComposition = async function(candidateId) {
   }
 };
 
+window.confirmMcpCompositionFromUI = async function(candidateId) {
+  const reasonInput = $('mcpReason_' + candidateId);
+  const reason = reasonInput?.value?.trim() || '人工确认 MCP 组成';
+  const candidate = list(state.candidates).find(item => item.id === candidateId);
+  // 读取勾选的 Tool
+  const checks = document.querySelectorAll('.mcp-tool-check-' + candidateId.replace(/[^a-zA-Z0-9_-]/g, ''));
+  const selectedIndices = [];
+  checks.forEach(check => { if (check.checked) selectedIndices.push(parseInt(check.dataset.idx)); });
+  if (!selectedIndices.length) {
+    showToast('请至少选择一个 Tool。', 'warning');
+    return;
+  }
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/confirm-mcp-composition', {
+      method: 'POST',
+      body: JSON.stringify({ tool_draft_ids: [candidate?.tool_draft_id], reason })
+    });
+    await window.refreshData();
+    showToast('MCP 组成已确认，现在可以组装 MCP 草稿。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
+window.assembleCandidateMcpFromUI = async function(candidateId) {
+  const nameInput = $('mcpName_' + candidateId);
+  const candidate = list(state.candidates).find(item => item.id === candidateId);
+  const name = nameInput?.value?.trim() || (candidate?.name || '业务能力') + ' MCP';
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/assemble-mcp', {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    });
+    await window.refreshData();
+    showToast('MCP 草稿已生成，请进入测试发布。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
 window.assembleCandidateMcp = async function(candidateId) {
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   if (candidate?.tool_boundary_status === 'confirmed' && candidate?.tool_draft_status !== 'draft') {
@@ -726,151 +865,225 @@ window.assembleCandidateMcp = async function(candidateId) {
     showToast(error.message, 'error');
   }
 };
-function renderTooling() {
-  renderToolingCandidates();
-  const allAssets = list(state.assets);
-  const policies = list(state.policies);
-
-  // 企业筛选器
-  const filter = $('toolingCustomerFilter');
-  if (filter) {
-    const currentVal = filter.value;
-    const customerIds = [...new Set(allAssets.map(a => a.customer_id).filter(Boolean))];
-    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
-      const cname = allAssets.find(a => a.customer_id === cid)?.customer_name || cid;
-      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
-    }).join('');
-    if (currentVal) filter.value = currentVal;
+// ============================================================
+// 3. 候选业务能力 — AI 从资料中提取的业务能力候选（只读展示）
+// ============================================================
+function renderCandidatesPage() {
+  const stepBar = $('candidatesStepBar');
+  if (stepBar) stepBar.innerHTML = renderStepBar(3);
+  const root = $('candidatesBoard');
+  if (!root) return;
+  const candidates = list(state.candidates);
+  if (!candidates.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 →</button></div></article>';
+    return;
   }
-
-  const selectedCustomer = filter?.value || '';
-  const assets = selectedCustomer ? allAssets.filter(a => a.customer_id === selectedCustomer) : allAssets;
-  const allTools = assets.reduce((sum, asset) => sum + list(asset.tools).length, 0);
-  const confirmedSpecs = list(state.openapiSpecs).filter(item => item.status === 'confirmed').length;
-
-  // 步骤条
-  const stepBar = $('toolingStepBar');
-  if (stepBar) stepBar.innerHTML = renderStepBar(5);
-
-  renderMetricSummary('toolingSummary', [
-    { label: 'OpenAPI 草案（已确认）', value: confirmedSpecs, meta: '已确认，可进入 Tool 映射阶段' },
-    { label: '已映射 MCP Tool', value: allTools, meta: '全部资产汇总' },
-    { label: 'MCP 资产', value: assets.length, meta: '已完成 Tool 装配' },
-    { label: '安全规则', value: policies.length, meta: '认证/限流/脱敏' }
-  ]);
-
-  // Tool 映射清单 — 按企业分组
-  const toolListEl = $('toolMappingList');
-  if (toolListEl) {
-    const grouped = {};
-    assets.forEach(asset => {
-      const cname = asset.customer_name || asset.project_name || '其他';
-      if (!grouped[cname]) grouped[cname] = [];
-      grouped[cname].push(asset);
-    });
-
-    let html = '';
-    const cnames = Object.keys(grouped);
-    if (!cnames.length) {
-      html = emptyState('暂无已确认 Tool。请先在接口识别页确认 OpenAPI 草案，再到这里查看 AI 候选并人工确认 Tool 边界。');
+  root.innerHTML = candidates.map(candidate => {
+    const aiTools = jsonList(candidate.ai_tools_snapshot);
+    const hits = jsonList(candidate.sensitive_hits);
+    const screenDecided = candidate.manual_screen_decision && candidate.manual_screen_decision !== 'pending';
+    let statusBadge;
+    if (candidate.mcp_draft_status === 'draft') {
+      statusBadge = '<span class="badge success">已生成 MCP 草稿</span>';
+    } else if (candidate.tool_boundary_status === 'confirmed') {
+      statusBadge = '<span class="badge success">Tool 边界已确认</span>';
+    } else if (screenDecided && candidate.manual_screen_decision === 'approve') {
+      statusBadge = '<span class="badge warning">已通过初筛</span>';
+    } else if (screenDecided && candidate.manual_screen_decision === 'reject') {
+      statusBadge = '<span class="badge danger">已拒绝</span>';
+    } else if (screenDecided && candidate.manual_screen_decision === 'modify') {
+      statusBadge = '<span class="badge warning">修改后重审</span>';
     } else {
-      cnames.forEach(cname => {
-        html += `<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;padding:6px 10px;background:var(--surface-2);border-radius:4px">🏢 ${escapeHtml(cname)}</div>`;
-        html += grouped[cname].map(asset => {
-    const tools = list(asset.tools);
-    const policy = policies.find(p => p.project_id === asset.project_id);
-    const maskingRules = parseRuleList(policy?.masking_rules);
-    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
-    const isAIGenerated = aiTools.length > 0;
-    const isPublic = asset.visibility === 'public';
-    const visBadge = isPublic
-      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
-      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
-    return `<div class="info-card" style="padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
-        <div><h4 style="margin:0">${displayAssetName(asset.name)}</h4><p class="muted-line" style="margin:4px 0 0">${text(asset.capability || '-')}</p></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${badge(asset.status || 'draft')}<span class="cap-chip">${text(asset.version || '-')}</span>${isAIGenerated ? '<span class="badge info" style="font-size:10px">AI 生成</span>' : ''}${visBadge}</div>
-      </div>
-      <div style="margin:8px 0;padding:8px 12px;background:${isPublic ? '#f0fdf4' : '#fffbeb'};border:1px solid ${isPublic ? '#bbf7d0' : '#fde68a'};border-radius:8px;display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:14px">${isPublic ? '🌐' : '🔒'}</span>
-          <div>
-            <strong style="font-size:13px">${isPublic ? '公开资产' : '内部资产'}</strong>
-            <span style="font-size:11px;color:#64748b;margin-left:6px">${isPublic ? '对外可用，Agent 可直接调用' : '含敏感数据，仅限内部调用'}</span>
-          </div>
-        </div>
-        <button type="button" class="${isPublic ? 'ghost-btn' : 'primary-btn'} small" onclick="toggleAssetVisibility('${asset.id}', '${isPublic ? 'internal' : 'public'}')">${isPublic ? '切换为内部' : '切换为公开'}</button>
-      </div>
-      <div style="margin:10px 0;padding:10px;background:var(--surface-2);border-radius:8px">
-        <p class="muted-line" style="margin:0 0 6px;font-weight:650">MCP Tools（${tools.length}）</p>
-        ${tools.length ? tools.map(tool => {
-          if (typeof tool === 'object' && tool !== null) {
-            // AI 生成的完整 tool 对象
-            const params = tool.inputSchema?.properties || {};
-            const required = tool.inputSchema?.required || [];
-            const paramList = Object.keys(params);
-            const toolVis = tool.visibility === 'public' ? 'public' : 'internal';
-            const visChip = toolVis === 'public'
-              ? '<span class="badge success" style="font-size:10px;padding:1px 6px">🌐 公开</span>'
-              : '<span class="badge warning" style="font-size:10px;padding:1px 6px">🔒 内部</span>';
-            return `<div style="padding:8px 0;border-top:1px solid var(--line)">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span class="badge success" style="font-size:11px">${text(tool.category || asset.category || '未分类')}</span>
-                <strong style="font-size:13px">${text(tool.display_name || tool.name)}</strong>
-                <code style="font-size:11px;color:var(--primary)">${text(tool.name)}</code>
-                ${visChip}
-                <span style="font-size:10px;color:#a16207;background:#fef3c7;padding:1px 6px;border-radius:3px">AI 推荐</span>
-              </div>
-              <p style="margin:3px 0 0;font-size:12px;color:#64748b">${text(tool.description || '')}</p>
-              ${tool.sensitivity_reason ? `<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ${text(tool.sensitivity_reason)}</p>` : ''}
-              ${paramList.length ? `<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：${paramList.map(p => `<code style="margin-right:6px">${p}${required.includes(p) ? ' *' : ''}</code>`).join('')}</div>` : '<div style="margin-top:4px;font-size:11px;color:#94a3b8">无参数</div>'}
-            </div>`;
-          }
-          const toolName = typeof tool === 'string' ? tool : tool?.name || '-';
-          return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="badge info">${text(toolName)}</span><span class="muted-line">operationId: ${text(toolName)}</span></div>`;
-        }).join('') : '<span class="muted-line">暂无 Tool</span>'}
-      </div>
-      ${policy ? `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--line);border-radius:8px">
-        <p class="muted-line" style="margin:0 0 6px;font-weight:650">安全规则</p>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px"><span class="badge warning">${text(policy.auth_mode || '-')}</span><span class="badge info">${text(policy.rate_limit || '-')}</span></div>
-        <p class="muted-line" style="margin:4px 0 0">脱敏字段：${maskingRules.length ? text(maskingRules.join(' / ')) : '无'}</p>
-      </div>` : '<p class="muted-line" style="margin:8px 0 0">尚未配置安全规则</p>'}
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="ghost-btn small" onclick="jumpToAssets('${asset.id}')">查看资产详情</button>
-        <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
-      </div>
-    </div>`;
-        }).join('');
-        html += `</div>`;
-      });
+      statusBadge = '<span class="badge info">待人工初筛</span>';
     }
-    toolListEl.innerHTML = html;
-  }
+    return '<article class="panel" style="margin-bottom:14px;cursor:pointer" onclick="enterCandidateReview(\'' + escapeJs(candidate.id) + '\')" onkeydown="if(event.key===\'Enter\')enterCandidateReview(\'' + escapeJs(candidate.id) + '\')" tabindex="0">' +
+      '<div class="panel-head"><div><span class="eyebrow">候选业务能力</span><h3>' + text(candidate.name || '-') + '</h3></div>' + statusBadge + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;padding:14px 16px">' +
+        '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">业务域</span><p style="margin:4px 0 0;font-size:13px">' + text(candidate.business_domain || '-') + '</p></div>' +
+        '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">接口数量</span><p style="margin:4px 0 0;font-size:13px">' + aiTools.length + ' 个</p></div>' +
+        '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">风险等级</span><p style="margin:4px 0 0;font-size:13px">' + text(candidate.risk_level || '-') + '</p></div>' +
+      '</div>' +
+      (hits.length ? '<div style="padding:0 16px 8px"><span style="font-size:11px;color:#f59e0b">⚠️ 敏感字段：' + text(hits.map(hit => typeof hit === 'string' ? hit : (hit.label || hit.field || '')).join('、')) + '</span></div>' : '') +
+      '<div style="padding:0 16px 14px"><span style="font-size:12px;color:var(--primary)">点击查看接口详情并审核 →</span></div>' +
+    '</article>';
+  }).join('');
 }
 
 // ============================================================
-// 5. MCP 资产 — 资产列表
+// 6. 生成 Tool 草稿 — Tool 边界确认后生成草稿
+// ============================================================
+function renderToolDraftPage() {
+  const stepBar = $('toolDraftStepBar');
+  if (stepBar) stepBar.innerHTML = renderStepBar(6);
+  const root = $('toolDraftBoard');
+  if (!root) return;
+  const candidates = list(state.candidates);
+  const ready = candidates.filter(c => c.tool_boundary_status === 'confirmed' && c.tool_draft_status !== 'draft');
+  const done = candidates.filter(c => c.tool_draft_status === 'draft');
+  if (!candidates.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无 Tool 草稿</strong><p class="muted-line">请先在「人工确认 Tool 边界」页面完成 Tool 边界确认，确认后将在此生成 Tool 草稿。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div></article>';
+    return;
+  }
+  if (!ready.length && !done.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无待处理的 Tool 草稿</strong><p class="muted-line">请先在「人工确认 Tool 边界」页面完成 Tool 边界确认。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div></article>';
+    return;
+  }
+
+  let html = '';
+
+  // 汇总表格
+  html += '<article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>Tool 草稿总览</h3><small class="muted-line">按业务能力分组，共 ' + (ready.length + done.length) + ' 个候选</small></div>';
+  html += '<div class="table-wrap"><table><thead><tr><th>业务能力</th><th>Tool 名称</th><th>可见性</th><th>草稿状态</th><th>操作</th></tr></thead><tbody>';
+  [...ready, ...done].forEach(candidate => {
+    const isReady = candidate.tool_draft_status !== 'draft';
+    const humanTools = jsonList(candidate.human_tools_snapshot);
+    const toolCount = humanTools.length;
+    const toolSummary = toolCount + ' 个 Tool';
+    const visCounts = humanTools.filter(t => typeof t === 'object').reduce((acc, t) => {
+      if (t.visibility === 'public') acc.public++; else acc.internal++;
+      return acc;
+    }, { public: 0, internal: 0 });
+    const visText = (visCounts.public ? '🌐 公开 ' + visCounts.public : '') + (visCounts.internal ? (visCounts.public ? ' · ' : '') + '🔒 内部 ' + visCounts.internal : '') || '-';
+    const statusBadge = isReady ? '<span class="badge warning">待生成</span>' : (candidate.mcp_composition_status === 'confirmed' ? '<span class="badge success">MCP 已确认</span>' : '<span class="badge success">草稿就绪</span>');
+    const actionBtn = isReady
+      ? '<button type="button" class="primary-btn tiny" onclick="createCandidateToolDraft(\'' + escapeJs(candidate.id) + '\')">生成</button>'
+      : '<button type="button" class="ghost-btn tiny" onclick="jumpToPage(\'mcp-compose\')">去 MCP 组成 →</button>';
+    html += '<tr><td><strong>' + text(candidate.name || '-') + '</strong></td><td>' + toolSummary + '</td><td style="white-space:normal">' + visText + '</td><td>' + statusBadge + '</td><td>' + actionBtn + '</td></tr>';
+  });
+  html += '</tbody></table></div></article>';
+
+  // 按业务能力分组展示 Tool 详情
+  html += '<article class="panel"><div class="panel-head"><h3>Tool 详情（按业务能力）</h3></div><div style="padding:14px">';
+  [...ready, ...done].forEach(candidate => {
+    const isReady = candidate.tool_draft_status !== 'draft';
+    const humanTools = jsonList(candidate.human_tools_snapshot);
+    html += '<div style="margin-bottom:16px;padding:14px;background:var(--surface-2);border-radius:8px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+    html += '<div><strong style="font-size:14px">' + text(candidate.name || '-') + '</strong><span style="margin-left:8px;font-size:12px;color:#94a3b8">' + text(candidate.business_domain || '-') + '</span></div>';
+    html += isReady ? '<span class="badge warning">待生成草稿</span>' : '<span class="badge success">草稿就绪</span>';
+    html += '</div>';
+    html += '<div style="display:grid;gap:6px">';
+    humanTools.forEach(tool => {
+      if (typeof tool !== 'object' || tool === null) return;
+      const visChip = tool.visibility === 'public' ? '<span class="badge success" style="font-size:10px">公开</span>' : '<span class="badge warning" style="font-size:10px">内部</span>';
+      const params = tool.inputSchema?.properties || {};
+      const required = tool.inputSchema?.required || [];
+      const paramList = Object.keys(params);
+      html += '<div style="padding:10px;background:var(--surface);border:1px solid var(--line);border-radius:6px">';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+      html += '<strong style="font-size:13px">' + text(tool.display_name || tool.name || '-') + '</strong>';
+      html += '<code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>';
+      html += visChip;
+      html += '</div>';
+      html += '<p style="margin:4px 0 0;font-size:12px;color:#64748b">' + text(tool.description || '') + '</p>';
+      if (paramList.length) {
+        html += '<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：' + paramList.map(p => '<code style="margin-right:6px">' + escapeHtml(p) + (required.includes(p) ? ' *' : '') + '</code>').join('') + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    if (!isReady) {
+      html += '<div class="muted-line" style="margin-top:8px;font-size:12px">确认理由：' + text(candidate.tool_confirmation_reason || '-') + '</div>';
+    }
+    html += '<div class="row-actions" style="margin-top:10px">';
+    if (isReady) {
+      html += '<button type="button" class="primary-btn small" onclick="createCandidateToolDraft(\'' + escapeJs(candidate.id) + '\')">⚡ 生成 Tool 草稿</button>';
+    } else {
+      html += '<button type="button" class="ghost-btn small" onclick="jumpToPage(\'mcp-compose\')">去确认 MCP 组成 →</button>';
+    }
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div></article>';
+
+  root.innerHTML = html;
+}
+
+// ============================================================
+// 7. 人工确认 MCP 组成 — 选择 Tool 组合为 MCP
+// ============================================================
+function renderMcpComposePage() {
+  const stepBar = $('mcpComposeStepBar');
+  if (stepBar) stepBar.innerHTML = renderStepBar(7);
+  const root = $('mcpComposeBoard');
+  if (!root) return;
+  const candidates = list(state.candidates);
+  // 显示所有已生成 Tool 草稿的候选，包括已组装 MCP 的
+  const ready = candidates.filter(c => c.tool_draft_status === 'draft');
+  if (!candidates.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无 MCP 组成候选</strong><p class="muted-line">请先生成 Tool 草稿，然后在此确认 MCP 由哪些 Tool 组成。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'tool-draft\')">去生成 Tool 草稿 →</button></div></article>';
+    return;
+  }
+  if (!ready.length) {
+    root.innerHTML = '<article class="panel"><strong>暂无 Tool 草稿</strong><p class="muted-line">请先在「生成 Tool 草稿」页面生成 Tool 草稿。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'tool-draft\')">去生成 Tool 草稿 →</button></div></article>';
+    return;
+  }
+  root.innerHTML = ready.map(candidate => {
+    const humanTools = jsonList(candidate.human_tools_snapshot);
+    const compositionConfirmed = candidate.mcp_composition_status === 'confirmed';
+    // Tool 选择列表（可勾选/取消）
+    const toolCheckHtml = humanTools.map((tool, idx) => {
+      if (typeof tool !== 'object') return '';
+      const name = tool.name || tool.display_name || '-';
+      const visChip = tool.visibility === 'public' ? '🌐' : '🔒';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
+        '<input type="checkbox" class="mcp-tool-check-' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
+        '<strong style="font-size:13px">' + text(name) + '</strong>' +
+        '<code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' +
+        '<span style="font-size:11px">' + visChip + '</span>' +
+        '<p style="margin:0;font-size:11px;color:#64748b;flex:1">' + text(tool.description || '') + '</p>' +
+      '</div>';
+    }).join('');
+
+    if (!compositionConfirmed) {
+      return '<article class="panel" style="margin-bottom:14px">' +
+        '<div class="panel-head"><div><span class="eyebrow">MCP 组成确认</span><h3>' + text(candidate.name || '-') + '</h3></div><span class="badge warning">待确认组成</span></div>' +
+        '<div style="padding:14px 16px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px">' +
+          '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">业务域</span><p style="margin:4px 0 0;font-size:13px">' + text(candidate.business_domain || '-') + '</p></div>' +
+          '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">权限范围</span><p style="margin:4px 0 0;font-size:13px">' + text(candidate.permission_scope || '-') + '</p></div>' +
+        '</div>' +
+        '<div style="padding:12px;background:var(--surface-2);border-radius:8px"><strong style="font-size:12px;color:#64748b">勾选要包含在 MCP 中的 Tool</strong>' + toolCheckHtml + '</div></div>' +
+        '<div style="padding:0 16px 10px">' +
+          '<label style="font-size:12px;color:#64748b;font-weight:650;display:block;margin-bottom:4px">MCP 名称</label>' +
+          '<input id="mcpName_' + escapeJs(candidate.id) + '" value="' + escapeHtml((candidate.name || '') + ' MCP') + '" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px">' +
+          '<label style="font-size:12px;color:#64748b;font-weight:650;display:block;margin-bottom:4px">确认理由</label>' +
+          '<input id="mcpReason_' + escapeJs(candidate.id) + '" placeholder="例如：按订单查询场景组合只读 Tool" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box">' +
+        '</div>' +
+        '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="confirmMcpCompositionFromUI(\'' + escapeJs(candidate.id) + '\')">确认 MCP 组成</button></div>' +
+      '</article>';
+    } else {
+      return '<article class="panel" style="margin-bottom:14px">' +
+        '<div class="panel-head"><div><span class="eyebrow">MCP 组成确认</span><h3>' + text(candidate.name || '-') + '</h3></div><span class="badge success">组成已确认</span></div>' +
+        '<div style="padding:14px 16px">' +
+          '<div style="padding:12px;background:var(--surface-2);border-radius:8px"><strong style="font-size:12px;color:#64748b">包含的 Tool</strong>' + toolCheckHtml + '</div>' +
+          '<p class="muted-line" style="margin-top:10px">确认理由：' + text(candidate.mcp_composition_reason || '-') + '</p>' +
+        '</div>' +
+        '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="assembleCandidateMcpFromUI(\'' + escapeJs(candidate.id) + '\')">📦 组装 MCP 草稿</button></div>' +
+      '</article>';
+    }
+  }).join('');
+}
+
+function renderTooling() {
+  renderToolingCandidates();
+  const stepBar = $('toolingStepBar');
+  if (stepBar) stepBar.innerHTML = renderStepBar(5);
+}
+
+// ============================================================
+// 8. MCP 资产 — 步骤 8：生成 MCP 草稿
 // ============================================================
 function renderAssets() {
-  // 步骤条
   const stepBar = $('assetsStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(8);
 
-  renderSimpleRows('assetRows', list(state.assets).map(asset => {
-    const tools = list(asset.tools);
-    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
-    const aiBadge = aiTools.length ? '<span class="badge info" style="font-size:10px;margin-left:4px">AI</span>' : '';
-    const visBadge = asset.visibility === 'public'
-      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
-      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
-    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td></tr>`;
-  }), '暂无 MCP 资产', 6);
-
-  // 复用建议与复盘汇总
-  renderReuseSuggestions();
-  renderRetroSummaryBoard();
-
   const assets = list(state.assets);
+  const policies = list(state.policies);
 
   // 企业筛选器
   const filter = $('assetsCustomerFilter');
@@ -886,76 +1099,67 @@ function renderAssets() {
   const selectedCustomer = filter?.value || '';
   const filteredAssets = selectedCustomer ? assets.filter(a => a.customer_id === selectedCustomer) : assets;
 
-  // 左侧：Tool 库（汇总所有 Tool，去重）
-  const toolLib = $('assetsToolLibrary');
-  if (toolLib) {
-    const toolMap = {};
-    filteredAssets.forEach(asset => {
-      list(asset.tools).forEach(t => {
-        if (typeof t === 'object' && t.name && !toolMap[t.name]) {
-          toolMap[t.name] = { ...t, assetName: asset.name, assetId: asset.id };
-        }
-      });
-    });
-    const tools = Object.values(toolMap);
-    toolLib.innerHTML = tools.length ? tools.map(tool => {
-      const visChip = tool.visibility === 'public'
-        ? '<span class="badge success" style="font-size:9px">🌐</span>'
-        : '<span class="badge warning" style="font-size:9px">🔒</span>';
-      return `<div class="info-card" style="padding:10px;display:flex;gap:8px;align-items:start">
-        <input type="checkbox" class="tool-lib-check" value="${escapeHtml(tool.name)}" style="margin-top:3px;cursor:pointer">
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <strong style="font-size:12px">${text(tool.display_name || tool.name)}</strong>
-            <code style="font-size:10px;color:var(--primary)">${text(tool.name)}</code>
-            ${visChip}
-          </div>
-          <p style="margin:2px 0 0;font-size:11px;color:#64748b">${text(tool.description || '')}</p>
-        </div>
-      </div>`;
-    }).join('') : emptyState('暂无 Tool');
-  }
+  renderSimpleRows('assetRows', filteredAssets.map(asset => {
+    const tools = list(asset.tools);
+    const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
+    const aiBadge = aiTools.length ? '<span class="badge info" style="font-size:10px;margin-left:4px">AI</span>' : '';
+    const visBadge = asset.visibility === 'public'
+      ? '<span class="badge success" style="font-size:10px">🌐 公开</span>'
+      : '<span class="badge warning" style="font-size:10px">🔒 内部</span>';
+    return `<tr><td><strong>${displayAssetName(asset.name)}</strong>${aiBadge}</td><td>${badge(asset.status || 'draft')}</td><td>${text(asset.version || '-')}</td><td>${text(asset.source_name || asset.source_id || '-')}</td><td>${text(asset.project_name || asset.project_id || '-')}</td><td>${visBadge}</td><td><span class="badge info">${tools.length}</span></td></tr>`;
+  }), '暂无 MCP 资产', 7);
 
-  // 右侧：MCP 资产列表
+  // MCP 资产详情卡片
   const mcpList = $('assetsMcpList');
   if (mcpList) {
     if (!filteredAssets.length) {
-      mcpList.innerHTML = emptyState('暂无 MCP 资产');
+      mcpList.innerHTML = emptyState('暂无 MCP 资产。请先完成候选初筛和 Tool 边界确认，然后组装 MCP 草稿。');
     } else {
       mcpList.innerHTML = filteredAssets.map(asset => {
         const tools = list(asset.tools);
         const runtime = list(state.pocRuntimes).find(item => item.asset_id === asset.id && ['starting', 'running'].includes(item.status));
-        const isNew = (asset.name || '').includes('[NEW]');
-        const visBadge = asset.visibility === 'public' ? '🌐 公开' : '🔒 内部';
-        return `<div class="info-card" style="padding:12px;${isNew ? 'border:2px solid #7c3aed' : ''}">
-          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <input type="checkbox" class="mcp-check" value="${asset.id}" style="cursor:pointer">
-              <strong style="font-size:14px">${displayAssetName(asset.name)}</strong>
-              ${isNew ? '<span class="badge info" style="font-size:9px">NEW</span>' : ''}
-              ${badge(asset.status || 'draft')}
-              <span class="badge ${asset.visibility === 'public' ? 'success' : 'warning'}" style="font-size:9px">${visBadge}</span>
-            </div>
+        const isPublic = asset.visibility === 'public';
+        const visBadge = isPublic ? '🌐 公开' : '🔒 内部';
+        return `<div class="info-card" style="padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
+            <div><strong style="font-size:14px">${displayAssetName(asset.name)}</strong><p class="muted-line" style="margin:4px 0 0;font-size:12px">${text(asset.capability || '-')}</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${badge(asset.status || 'draft')}<span class="badge ${isPublic ? 'success' : 'warning'}" style="font-size:9px">${visBadge}</span></div>
           </div>
-          <p class="muted-line" style="margin:0 0 6px;font-size:12px">${text(asset.capability || '-')}</p>
-          <div style="padding:8px;background:var(--surface-2);border-radius:6px;margin-bottom:6px">
-            <span class="muted-line" style="font-size:11px;font-weight:600">Tools (${tools.length})：</span>
-            ${tools.map(t => {
-              const tn = typeof t === 'object' ? t.name : t;
-              const td = typeof t === 'object' ? (t.display_name || t.description || '') : '';
-              return `<span class="badge info" style="font-size:10px;margin:2px" title="${escapeHtml(td)}">${escapeHtml(tn)}</span>`;
-            }).join('')}
+          <div style="margin:8px 0;padding:10px;background:var(--surface-2);border-radius:8px">
+            <p class="muted-line" style="margin:0 0 6px;font-size:11px;font-weight:650">MCP Tools（${tools.length}）</p>
+            ${tools.length ? tools.map(tool => {
+              if (typeof tool === 'object' && tool !== null) {
+                const toolVis = tool.visibility === 'public' ? '🌐' : '🔒';
+                const params = tool.inputSchema?.properties || {};
+                const required = tool.inputSchema?.required || [];
+                const paramList = Object.keys(params);
+                return `<div style="padding:6px 0;border-top:1px solid var(--line)">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <strong style="font-size:13px">${text(tool.display_name || tool.name)}</strong>
+                    <code style="font-size:11px;color:var(--primary)">${text(tool.name)}</code>
+                    <span style="font-size:11px">${toolVis}</span>
+                  </div>
+                  <p style="margin:3px 0 0;font-size:12px;color:#64748b">${text(tool.description || '')}</p>
+                  ${paramList.length ? `<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：${paramList.map(p => `<code style="margin-right:6px">${p}${required.includes(p) ? ' *' : ''}</code>`).join('')}</div>` : ''}
+                </div>`;
+              }
+              return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="badge info">${text(typeof tool === 'string' ? tool : tool?.name || '-')}</span></div>`;
+            }).join('') : '<span class="muted-line">暂无 Tool</span>'}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="muted-line" style="font-size:11px">v${text(asset.version || '0.1.0')}</span>
             ${runtime ? `<span class="badge success">POC 运行中</span><code style="font-size:10px">${text(runtime.endpoint || '')}</code><button type="button" class="ghost-btn small" onclick="stopPocRuntime('${runtime.id}')">停止 POC</button>` : asset.status === 'published' ? `<button type="button" class="primary-btn small" onclick="startPocRuntime('${asset.id}')">启动 POC</button>` : ''}
-            <button type="button" class="ghost-btn small" onclick="editAsset('${asset.id}')">编辑</button>
-            <button type="button" class="ghost-btn small" style="color:#dc2626" onclick="deleteSingleAsset('${asset.id}')">删除</button>
+            <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
           </div>
         </div>`;
       }).join('');
     }
-  }}
+  }
+
+  // 复用建议与复盘汇总
+  renderReuseSuggestions();
+  renderRetroSummaryBoard();
+}
 
 // 渲染复用建议：直接复用 / 复制后改造 / 建议新建
 function renderReuseSuggestions() {
@@ -2501,7 +2705,10 @@ export function renderAll() {
   renderSummary();
   renderIntake();
   renderRecognition();
+  renderCandidatesPage();
   renderTooling();
+  renderToolDraftPage();
+  renderMcpComposePage();
   renderAssets();
   renderPublish();
   renderDeliverables();
@@ -2660,156 +2867,150 @@ function renderReviewExamples() {
 export function renderReviewWorkbench() {
   const stepBar = $('reviewStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(4);
-  renderReviewExamples();
-  const allReviews = window.__state?.reviews || [];
-  const reviews = sortReviewsByPriority(
-    allReviews.filter(r => !currentReviewStage || r.review_stage === currentReviewStage)
-  );
 
-  // ===== 区块1：今天要处理什么（引导提示） =====
-  const guideEl = document.getElementById('reviewTodayGuide');
-  if (guideEl) {
-    const openReviews = allReviews.filter(r => r.status === 'open');
-    const dualCount = openReviews.filter(r => r.review_type === 'dual_review').length;
-    const highRiskCandidates = (window.__state?.candidates || []).filter(c => c.risk_level === 'high').length;
-    const stageInfo = REVIEW_STAGE_GUIDE[currentReviewStage];
+  const screenRoot = $('candidateScreenBoard');
+  if (!screenRoot) return;
 
-    if (openReviews.length === 0) {
-      guideEl.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--success-bg, #e8f5e9);border-radius:8px;border-left:3px solid #4caf50">
-          <span style="font-size:20px">&#10003;</span>
-          <div>
-            <strong style="font-size:13px">当前没有待处理任务</strong>
-            <p class="muted-line" style="margin:2px 0 0;font-size:12px">所有审核任务已完成。${stageInfo ? stageInfo.next : ''}。</p>
-          </div>
-        </div>`;
-    } else {
-      const urgentItems = [];
-      if (dualCount > 0) urgentItems.push(`<strong style="color:var(--danger)">${dualCount} 条双人审核</strong>（涉及高风险变更，需优先处理）`);
-      if (highRiskCandidates > 0) urgentItems.push(`<strong>${highRiskCandidates} 个高风险候选</strong>需要关注`);
-      const urgentHtml = urgentItems.length > 0
-        ? `<div style="margin-top:6px">${urgentItems.join('，')}</div>`
-        : '';
-
-      guideEl.innerHTML = `
-        <div style="padding:14px 16px;background:var(--warning-bg, #fff3e0);border-radius:8px;border-left:3px solid #ff9800">
-          <strong style="font-size:13px">${stageInfo?.action || '审核任务'}</strong>
-          <p class="muted-line" style="margin:4px 0 0;font-size:12px">
-            当前有 <strong>${openReviews.length}</strong> 条待处理任务。${stageInfo?.next || ''}
-          </p>
-          ${urgentHtml}
-        </div>`;
-    }
-  }
-
-  // ===== 区块2：阶段统计 + 队列 =====
-  const stageCounts = {};
-  for (const s of ['candidate_review', 'tool_review', 'publish_acceptance']) {
-    const items = allReviews.filter(r => r.review_stage === s);
-    stageCounts[s] = { total: items.length, open: items.filter(r => r.status === 'open').length };
-  }
-
-  const summaryEl = document.getElementById('reviewStageSummary');
-  if (summaryEl) {
-    summaryEl.innerHTML = `
-      ${Object.entries(stageCounts).map(([stage, counts]) => `
-        <div class="metric-card ${currentReviewStage === stage ? 'active' : ''}" style="${currentReviewStage === stage ? 'border-color:var(--primary)' : ''}cursor:pointer" onclick="switchReviewStageTab('${stage}')">
-          <span class="metric-label">${REVIEW_STAGE_LABELS[stage] || stage}</span>
-          <strong>${counts.open}</strong>
-          <span class="muted-line">${counts.open} 待处理 / ${counts.total} 总计</span>
-        </div>
-      `).join('')}
-    `;
-  }
-
-  // 审核任务列表（按优先级排序）
-  const tbody = document.getElementById('reviewTaskRows');
-  if (tbody) {
-    if (!reviews.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px" class="muted-line">当前阶段暂无审核任务</td></tr>';
-    } else {
-      tbody.innerHTML = reviews.map(r => {
-        const candidate = (window.__state?.candidates || []).find(c => c.id === r.candidate_id);
-        const candidateName = candidate?.name || r.candidate_id || '-';
-        const riskBadge = candidate?.risk_level === 'high'
-          ? '<span class="tag" style="background:var(--danger);color:#fff">高风险</span>'
-          : candidate?.risk_level === 'medium'
-            ? '<span class="tag" style="background:var(--warning);color:#fff">中风险</span>'
-            : '';
-        const dualBadge = r.review_type === 'dual_review'
-          ? '<span class="tag" style="background:#6c5ce7;color:#fff">双人</span>'
-          : '';
-        const statusBadge = r.status === 'open'
-          ? '<span class="status-badge pending">待审核</span>'
-          : r.decision === 'approve'
-            ? '<span class="status-badge approved">已通过</span>'
-            : r.decision === 'reject'
-              ? '<span class="status-badge rejected">已拒绝</span>'
-              : '<span class="status-badge">已处理</span>';
-        const actions = r.status === 'open'
-          ? `<button class="primary-btn tiny" onclick="reviewDecision('${r.id}','approve')">通过</button>
-             <button class="ghost-btn tiny" onclick="reviewDecision('${r.id}','modify')">修改</button>
-             <button class="danger-btn tiny" onclick="reviewDecision('${r.id}','reject')">拒绝</button>`
-          : '<span class="muted-line">-</span>';
-        return `<tr>
-          <td>${candidateName} ${riskBadge} ${dualBadge}</td>
-          <td><span class="tag">${REVIEW_STAGE_LABELS[r.review_stage] || r.review_stage || '候选审核'}</span></td>
-          <td>${r.review_type || '-'}</td>
-          <td title="${(r.review_reason || '').replace(/"/g, '&quot;')}">${(r.review_reason || '').slice(0, 60)}${(r.review_reason || '').length > 60 ? '...' : ''}</td>
-          <td>${r.assignee_role || '-'}</td>
-          <td>${statusBadge}</td>
-          <td><div style="display:flex;gap:4px">${actions}</div></td>
-        </tr>`;
-      }).join('');
-    }
-  }
-
-  // 发布门禁看板
-  renderPublishGateBoard();
-}
-
-function renderPublishGateBoard() {
-  const candidates = window.__state?.candidates || [];
-  const reviews = window.__state?.reviews || [];
-  const board = document.getElementById('publishGateBoard');
-  if (!board) return;
-
-  if (!candidates.length) {
-    board.innerHTML = '<p class="muted-line" style="grid-column:1/-1">暂无候选资产</p>';
+  const allCandidates = list(state.candidates);
+  if (!allCandidates.length) {
+    screenRoot.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
+      '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 -></button></div></article>';
     return;
   }
 
-  board.innerHTML = candidates.slice(0, 12).map(c => {
-    const tasks = reviews.filter(r => r.candidate_id === c.id);
-    const openCount = tasks.filter(t => t.status === 'open').length;
-    const rejectedCount = tasks.filter(t => t.decision === 'reject').length;
+  const selected = state.selectedCandidateId
+    ? allCandidates.find(c => c.id === state.selectedCandidateId)
+    : null;
+  const pendingCandidates = allCandidates.filter(c => !c.manual_screen_decision || c.manual_screen_decision === 'pending');
 
-    const gate1Class = openCount === 0 ? 'pass' : 'block';
-    const gate1Text = openCount === 0 ? '通过' : `${openCount} 个待处理`;
+  let html = '';
+  html += '<div style="margin-bottom:14px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'candidates\')">← 返回候选业务能力</button></div>';
 
-    const gate2Class = c.manual_screen_decision === 'reject' ? 'block' : c.manual_screen_decision === 'approve' ? 'pass' : 'pending';
-    const gate2Text = c.manual_screen_decision === 'reject' ? '已驳回' : c.manual_screen_decision === 'approve' ? '已通过' : '待初筛';
+  if (selected) {
+    const aiTools = jsonList(selected.ai_tools_snapshot);
+    const hits = jsonList(selected.sensitive_hits);
+    const screenDecided = selected.manual_screen_decision && selected.manual_screen_decision !== 'pending';
 
-    const gate3Class = c.acceptance_passed ? 'pass' : 'pending';
-    const gate3Text = c.acceptance_passed ? '已验收' : '未验收';
+    html += '<article class="panel" style="margin-bottom:14px">';
+    html += '<div class="panel-head"><div><span class="eyebrow">候选业务能力</span><h3>' + text(selected.name || '-') + '</h3></div>';
 
-    const allPass = openCount === 0 && c.manual_screen_decision !== 'reject' && c.acceptance_passed;
-    const overallClass = allPass ? 'gate-pass' : 'gate-block';
+    if (screenDecided) {
+      const dt = selected.manual_screen_decision === 'approve' ? '已通过' : selected.manual_screen_decision === 'reject' ? '已拒绝' : '修改后重审';
+      const dc = selected.manual_screen_decision === 'approve' ? 'success' : selected.manual_screen_decision === 'reject' ? 'danger' : 'warning';
+      html += '<span class="badge ' + dc + '">' + dt + '</span></div>';
+      // 业务信息
+      html += '<div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+      html += '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">业务域</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.business_domain || '-') + '</p>';
+      html += '<span style="font-size:11px;color:#94a3b8;font-weight:650;display:block;margin-top:8px">读写类型</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.operation_type || '-') + '</p></div>';
+      html += '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">审核理由</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.manual_screen_reason || '-') + '</p></div>';
+      html += '</div>';
+      // 接口列表
+      html += '<div style="margin:0 16px 14px"><p style="font-size:12px;font-weight:650;color:#64748b;margin:0 0 8px">包含接口（' + aiTools.length + '）</p><div style="padding:14px;background:var(--surface-2);border-radius:8px">';
+      aiTools.forEach(tool => {
+        if (typeof tool !== 'object' || tool === null) return;
+        const visChip = tool.visibility === 'public' ? '<span class="badge success" style="font-size:10px">公开</span>' : '<span class="badge warning" style="font-size:10px">内部</span>';
+        const params = tool.inputSchema?.properties || {};
+        const required = tool.inputSchema?.required || [];
+        const paramList = Object.keys(params);
+        html += '<div style="padding:10px 0;border-top:1px solid var(--line)">';
+        html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:14px">' + text(tool.display_name || tool.name || '-') + '</strong><code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' + visChip + '</div>';
+        html += '<p style="margin:4px 0 0;font-size:12px;color:#64748b">' + text(tool.description || '') + '</p>';
+        if (tool.sensitivity_reason) html += '<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ' + text(tool.sensitivity_reason) + '</p>';
+        if (paramList.length) html += '<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：' + paramList.map(p => '<code style="margin-right:6px">' + escapeHtml(p) + (required.includes(p) ? ' *' : '') + '</code>').join('') + '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+      if (selected.manual_screen_decision === 'approve') {
+        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div>';
+      }
+    } else {
+      const riskBadge = selected.risk_level === 'high' ? '<span class="badge danger">高风险</span>' : selected.risk_level === 'medium' ? '<span class="badge warning">中风险</span>' : '<span class="badge success">低风险</span>';
+      html += riskBadge + '</div>';
+      // AI 识别信息（只读）
+      html += '<div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+      html += '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">业务域</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.business_domain || '-') + '</p>';
+      html += '<span style="font-size:11px;color:#94a3b8;font-weight:650;display:block;margin-top:8px">读写类型</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.operation_type || '-') + '</p></div>';
+      html += '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">权限范围</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.permission_scope || '-') + '</p>';
+      html += '<span style="font-size:11px;color:#94a3b8;font-weight:650;display:block;margin-top:8px">分组理由</span><p style="margin:4px 0 0;font-size:13px">' + text(selected.grouping_reason || '-') + '</p></div>';
+      html += '</div>';
+      if (hits.length) {
+        html += '<div style="margin:0 16px 10px;padding:10px 14px;background:#fef3c7;border-radius:8px;border-left:3px solid #f59e0b"><strong style="font-size:12px">⚠️ 敏感字段命中：</strong><span style="font-size:12px">' + text(hits.map(hit => typeof hit === 'string' ? hit : (hit.label || hit.field || '')).join('、')) + '</span></div>';
+      }
+      // 接口列表
+      html += '<div style="margin:0 16px 14px"><p style="font-size:12px;font-weight:650;color:#64748b;margin:0 0 8px">包含接口（' + aiTools.length + '）</p><div style="padding:14px;background:var(--surface-2);border-radius:8px">';
+      aiTools.forEach(tool => {
+        if (typeof tool !== 'object' || tool === null) return;
+        const visChip = tool.visibility === 'public' ? '<span class="badge success" style="font-size:10px">公开</span>' : '<span class="badge warning" style="font-size:10px">内部</span>';
+        const params = tool.inputSchema?.properties || {};
+        const required = tool.inputSchema?.required || [];
+        const paramList = Object.keys(params);
+        html += '<div style="padding:10px 0;border-top:1px solid var(--line)">';
+        html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:14px">' + text(tool.display_name || tool.name || '-') + '</strong><code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' + visChip + '</div>';
+        html += '<p style="margin:4px 0 0;font-size:12px;color:#64748b">' + text(tool.description || '') + '</p>';
+        if (tool.sensitivity_reason) html += '<p style="margin:2px 0 0;font-size:11px;color:#dc2626">⚠️ ' + text(tool.sensitivity_reason) + '</p>';
+        if (paramList.length) html += '<div style="margin-top:4px;font-size:11px;color:#94a3b8">参数：' + paramList.map(p => '<code style="margin-right:6px">' + escapeHtml(p) + (required.includes(p) ? ' *' : '') + '</code>').join('') + '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+      // 审核理由
+      html += '<div style="margin:0 16px 10px"><label style="font-size:12px;color:#64748b;font-weight:650;display:block;margin-bottom:4px">审核理由</label><input id="screenReason_' + escapeJs(selected.id) + '" placeholder="例如：业务能力识别合理，接口边界清晰" style="width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      // 操作按钮
+      html += '<div class="row-actions" style="padding:0 16px 16px">';
+      html += '<button type="button" class="primary-btn small" onclick="candidateScreenDecision(\'' + escapeJs(selected.id) + '\',\'approve\')">通过：识别可信</button>';
+      html += '<button type="button" class="ghost-btn small" onclick="toggleModifyFields(\'' + escapeJs(selected.id) + '\')">修改后重审：识别有偏差</button>';
+      html += '<button type="button" class="danger-btn small" onclick="candidateScreenDecision(\'' + escapeJs(selected.id) + '\',\'reject\')">拒绝：误识别</button>';
+      html += '</div>';
+      // 修改后重审：可编辑字段（默认隐藏）
+      html += '<div id="modifyFields_' + escapeJs(selected.id) + '" style="display:none;padding:0 16px 16px">';
+      html += '<div class="panel" style="background:#f0f9ff;border:1px solid #bae6fd;padding:14px;border-radius:8px;margin-bottom:10px">';
+      html += '<strong style="font-size:13px;color:#0369a1">修改后重审 — 填写需要修改的字段</strong>';
+      html += '<p class="muted-line" style="font-size:12px;margin:4px 0 10px">如果 AI 识别的业务域、名称或权限有误，在此修改后点击「提交修改」</p>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+      html += '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">业务能力名称</label><input id="editField_' + escapeJs(selected.id) + '_name" value="' + escapeHtml(selected.name || '') + '" style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      html += '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">业务域</label><input id="editField_' + escapeJs(selected.id) + '_business_domain" value="' + escapeHtml(selected.business_domain || '') + '" style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      html += '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">读写类型</label><input id="editField_' + escapeJs(selected.id) + '_operation_type" value="' + escapeHtml(selected.operation_type || '') + '" style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      html += '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">权限范围</label><input id="editField_' + escapeJs(selected.id) + '_permission_scope" value="' + escapeHtml(selected.permission_scope || '') + '" style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      html += '<div style="grid-column:1/-1"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">分组理由</label><input id="editField_' + escapeJs(selected.id) + '_grouping_reason" value="' + escapeHtml(selected.grouping_reason || '') + '" style="width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"></div>';
+      html += '</div>';
+      html += '<div class="row-actions" style="margin-top:10px"><button type="button" class="primary-btn small" onclick="candidateScreenDecision(\'' + escapeJs(selected.id) + '\',\'modify\')">提交修改并标记重审</button></div>';
+      html += '</div></div>';
+    }
+    html += '</article>';
+  }
 
-    return `<div class="metric-card ${overallClass}">
-      <span class="metric-label">${c.name || c.id}</span>
-      <div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">
-        <span class="gate-item gate-${gate1Class}">门1 开放任务：${gate1Text}</span>
-        <span class="gate-item gate-${gate2Class}">门2 人工初筛：${gate2Text}</span>
-        <span class="gate-item gate-${gate3Class}">门3 发布验收：${gate3Text}</span>
-      </div>
-      ${rejectedCount > 0 ? `<span class="muted-line" style="color:var(--danger)">有 ${rejectedCount} 个审核被拒绝</span>` : ''}
-      ${allPass ? '<button class="primary-btn tiny" style="margin-top:6px" onclick="publishCandidate(\'' + c.id + '\')">发布</button>' : ''}
-    </div>`;
-  }).join('');
+  // 候选列表
+  const listCandidates = selected ? allCandidates.filter(c => c.id !== selected.id) : allCandidates;
+  if (listCandidates.length) {
+    html += '<div class="panel" style="margin-bottom:10px"><div class="panel-head"><h3>' + (selected ? '其他候选业务能力' : '选择候选业务能力查看接口详情') + '</h3>' + (!selected && pendingCandidates.length ? '<small class="muted-line">' + pendingCandidates.length + ' 个待初筛</small>' : '') + '</div></div>';
+    html += listCandidates.map(c => {
+      const aiTools = jsonList(c.ai_tools_snapshot);
+      const screenDecided = c.manual_screen_decision && c.manual_screen_decision !== 'pending';
+      let badgeHtml = '<span class="badge info">待初筛</span>';
+      if (screenDecided) {
+        if (c.manual_screen_decision === 'approve') badgeHtml = '<span class="badge success">已通过</span>';
+        else if (c.manual_screen_decision === 'reject') badgeHtml = '<span class="badge danger">已拒绝</span>';
+        else badgeHtml = '<span class="badge warning">修改后重审</span>';
+      }
+      return '<article class="panel" style="margin-bottom:8px;cursor:pointer" onclick="enterCandidateReview(\'' + escapeJs(c.id) + '\')" tabindex="0"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px"><div><strong style="font-size:14px">' + text(c.name || '-') + '</strong><span style="margin-left:8px;font-size:12px;color:#94a3b8">' + aiTools.length + ' 个接口 · ' + text(c.business_domain || '-') + '</span></div>' + badgeHtml + '</div></article>';
+    }).join('');
+  }
+
+  screenRoot.innerHTML = html;
 }
 
-// 切换审核阶段 Tab
+window.toggleModifyFields = function(candidateId) {
+  const panel = $('modifyFields_' + candidateId);
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+};
+
+window.enterCandidateReview = function(candidateId) {
+  state.selectedCandidateId = candidateId;
+  state.currentPage = 'review';
+  renderAll();
+};
+
+// 切换审核阶段 Tab（保留兼容，不再有 UI 触发）
 window.switchReviewStageTab = function(stage) {
   currentReviewStage = stage;
   document.querySelectorAll('#reviewStageTabs .tab-btn').forEach(btn => {

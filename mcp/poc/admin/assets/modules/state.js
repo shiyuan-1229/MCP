@@ -144,20 +144,24 @@ export const state = {
   retroSummary: null,
   retroReasons: [],
   reuseSuggestions: [],
+  selectedCandidateId: '',
   currentPage: 'summary'
 };
 
 export const navItems = [
-  { id: 'summary', label: '生成总览', icon: '📊', desc: '资产生成全链路漏斗、产能趋势与动态', roles: ['admin', 'customer'] },
-  { id: 'intake', label: '资料接入', icon: '📥', desc: '实施顾问确认资料来源 · 上传业务资料触发 AI 识别', roles: ['admin'] },
-  { id: 'recognition', label: '接口识别', icon: '🔍', desc: '产品/技术确认识别结果 · 查看识别出的 OpenAPI 端点草案', roles: ['admin'] },
-  { id: 'tooling', label: 'Tool 映射', icon: '🔧', desc: '产品/技术确认 Tool 边界 · 将端点映射为 MCP Tool，配置安全规则', roles: ['admin'] },
-  { id: 'review', label: '分层审核', icon: '📋', desc: '人工审核工作台 · 候选审核 → Tool 审核 → 发布验收', roles: ['admin'] },
-  { id: 'assets', label: 'MCP 资产', icon: '📦', desc: '已封装的 MCP Server 资产列表、版本、状态与复用/复盘信息', roles: ['admin'] },
-  { id: 'publish', label: '测试发布', icon: '🚀', desc: '交付负责人验收发布 · 沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
-  { id: 'monitoring', label: '调用监控', icon: '📈', desc: '按异常优先查看 Tool 调用、Trace ID 和下一步诊断动作', roles: ['admin'] },
-  { id: 'delivery', label: '交付管理', icon: '📋', desc: '交付团队归档与复盘 · 配置包、测试报告、调用日志等交付物下载', roles: ['admin'] },
-  { id: 'governance', label: '治理统计', icon: '🛡️', desc: '网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
+  { id: 'summary', label: '打造总览', icon: '📊', desc: '资产生成全链路漏斗、产能趋势与动态', roles: ['admin', 'customer'] },
+  { id: 'intake', label: '资料接入', icon: '📥', desc: '步骤 1：上传业务资料、连接数据库，触发 AI 识别', roles: ['admin'] },
+  { id: 'recognition', label: 'AI 识别结果', icon: '🔍', desc: '步骤 2：查看 AI 识别出的 OpenAPI 端点草案与接口详情', roles: ['admin'] },
+  { id: 'candidates', label: '候选业务能力', icon: '🧩', desc: '步骤 3：AI 提取的候选业务能力，查看来源证据与业务域分类', roles: ['admin'] },
+  { id: 'review', label: '候选接口人工初筛', icon: '✅', desc: '步骤 4：人工审核候选业务能力是否可信，高风险候选双人复核', roles: ['admin'] },
+  { id: 'tooling', label: '人工确认 Tool 边界', icon: '🔧', desc: '步骤 5：确认 Tool 名称、参数边界、读写权限与安全规则', roles: ['admin'] },
+  { id: 'tool-draft', label: '生成 Tool 草稿', icon: '📝', desc: '步骤 6：Tool 边界确认后生成 Tool 草稿，供 MCP 组装使用', roles: ['admin'] },
+  { id: 'mcp-compose', label: '人工确认 MCP 组成', icon: '🧱', desc: '步骤 7：按业务场景确认 MCP 由哪些 Tool 组成', roles: ['admin'] },
+  { id: 'assets', label: '生成 MCP 草稿', icon: '📦', desc: '步骤 8：组装 MCP 草稿，管理 MCP 资产、复用建议与复盘', roles: ['admin'] },
+  { id: 'publish', label: '测试发布', icon: '🚀', desc: '步骤 9：沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
+  { id: 'delivery', label: '交付管理', icon: '📋', desc: '步骤 10：交付团队归档与复盘，配置包、测试报告、调用日志等交付物', roles: ['admin'] },
+  { id: 'monitoring', label: '调用监控', icon: '📈', desc: '步骤 11：异常优先查看 Tool 调用、Trace ID 和诊断动作', roles: ['admin'] },
+  { id: 'governance', label: '治理统计', icon: '🛡️', desc: '步骤 12：网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
   { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
 ];
 export const customerNavItems = [
