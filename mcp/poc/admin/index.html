@@ -232,9 +232,19 @@
 
       <section id="mcp-compose" class="page" data-title="人工确认 MCP 组成" data-eyebrow="步骤 7：按业务场景确认 MCP 由哪些 Tool 组成 &#183; 确认后组装 MCP 草稿">
         <div id="mcpComposeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <div class="panel control-flow-notice" style="margin-bottom:14px">
-          <strong>选择 Tool 草稿组合为 MCP</strong>
-          <p class="muted-line" style="margin:6px 0 0">按业务场景、权限范围和读写风险，确认一个 MCP 由哪些 Tool 组成。确认后进入 MCP 草稿生成。</p>
+        <div class="panel control-flow-notice mcp-compose-brief" style="margin-bottom:14px">
+          <div class="compose-brief-main">
+            <span class="compose-step-chip">步骤 07</span>
+            <div>
+              <strong>确认 MCP 的 Tool 组合</strong>
+              <p class="muted-line">从已确认的 Tool 草稿中选择同一业务场景需要的能力，核对权限范围、读写风险和调用边界。</p>
+            </div>
+          </div>
+          <div class="compose-brief-flow" aria-label="MCP 组合流向">
+            <span>输入：Tool 草稿</span>
+            <b aria-hidden="true">→</b>
+            <span>输出：MCP 草稿</span>
+          </div>
         </div>
         <div id="mcpComposeBoard"></div>
       </section>
@@ -294,10 +304,6 @@
 
       <section id="delivery" class="page" data-title="交付管理" data-eyebrow="步骤 10：交付团队归档与复盘 &#183; 配置包 &#183; 测试报告 &#183; 调用日志 &#183; 效果报告下载">
         <div id="deliveryStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
-        <article class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>交付闭环状态</h3><small class="muted-line">每个项目的 5 类交付资料齐全性一览：配置包 / 测试报告 / 调用日志 / 运行说明 / 复盘结论</small></div>
-          <div id="deliveryClosureBoard" class="metric-grid"></div>
-        </article>
         <article class="panel">
           <div class="panel-head"><h3>交付资料清单</h3><div style="display:flex;gap:8px;align-items:center"><select id="deliveryCustomerFilter" onchange="filterDeliveryByCustomer()" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px"><option value="">全部企业</option></select><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div></div>
           <div id="deliverableControls" class="project-controls"></div>

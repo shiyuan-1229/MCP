@@ -18,5 +18,8 @@ assert.match(appSource, /function syncLoginSelection\(/u);
 assert.match(appSource, /\$\('loginUserSelect'\)/u);
 assert.match(appSource, /selectedOptions\?\.\[0\]/u);
 assert.match(appSource, /selected\.dataset\.password/u);
+assert.match(appSource, /let loginInFlight = false/u);
+assert.match(appSource, /loginButton\.disabled = true/u);
+assert.match(appSource, /loginButton\.textContent = '进入中\.\.\.'/u);
 
 console.log('customer login flow checks passed');

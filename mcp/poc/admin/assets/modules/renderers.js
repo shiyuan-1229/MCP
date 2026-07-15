@@ -1322,70 +1322,9 @@ function renderPublish() {
 // 7. 交付管理 — 配置包/测试报告/调用日志下载
 // ============================================================
 
-// 交付闭环必需的 5 类交付资料
-const CLOSURE_TYPES = [
-  { type: 'poc-evidence', label: 'POC 验收凭证', icon: '🔗' },
-  { type: 'config', label: '配置包', icon: '📦' },
-  { type: 'test-report', label: '测试报告', icon: '📄' },
-  { type: 'log', label: '调用日志', icon: '📊' },
-  { type: 'run-guide', label: '运行说明', icon: '📖' },
-  { type: 'retro-conclusion', label: '复盘结论', icon: '🔁' }
-];
-
-function renderDeliveryClosureBoard() {
-  const root = $('deliveryClosureBoard');
-  if (!root) return;
-  const deliverables = list(state.deliverables);
-  // 按 project_id 分组
-  const byProject = {};
-  deliverables.forEach(d => {
-    const pid = d.project_id || d.project_name || '未知项目';
-    if (!byProject[pid]) byProject[pid] = { name: d.project_name || pid, items: {} };
-    byProject[pid].items[d.type] = d.status || 'draft';
-  });
-  const projectNames = Object.keys(byProject);
-  if (projectNames.length === 0) {
-    root.innerHTML = '<p class="muted-line">暂无交付数据。发布资产后交付资料会自动归档。</p>';
-    return;
-  }
-  root.innerHTML = projectNames.map(pid => {
-    const p = byProject[pid];
-    const completedCount = CLOSURE_TYPES.filter(ct => {
-      const s = p.items[ct.type];
-      return s === 'ready';
-    }).length;
-    const total = CLOSURE_TYPES.length;
-    const pct = Math.round((completedCount / total) * 100);
-    const isComplete = completedCount === total;
-    const statusColor = isComplete ? '#0f766e' : pct >= 60 ? '#d97706' : '#dc2626';
-    const statusLabel = isComplete ? '齐全' : pct >= 60 ? '部分齐全' : '缺项较多';
-    const itemsHtml = CLOSURE_TYPES.map(ct => {
-      const s = p.items[ct.type];
-      const hasIt = !!s;
-      const isReady = s === 'ready';
-      const iconColor = isReady ? '#0f766e' : hasIt ? '#d97706' : '#94a3b8';
-      const label = isReady ? '✅' : hasIt ? '⏳' : '❌';
-      return `<div style="display:flex;align-items:center;gap:4px;min-width:90px">
-        <span style="font-size:12px">${ct.icon}</span>
-        <span style="font-size:12px;color:${iconColor};font-weight:600">${ct.label}</span>
-        <span style="font-size:11px">${label}</span>
-      </div>`;
-    }).join('');
-    return `<div class="metric-card" style="border-left:3px solid ${statusColor}">
-      <span class="metric-label">${text(p.name)}</span>
-      <strong style="color:${statusColor}">${completedCount}/${total} ${statusLabel}</strong>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${itemsHtml}</div>
-      <div style="height:4px;background:#e2e8f0;border-radius:2px;margin-top:8px;overflow:hidden">
-        <div style="height:100%;background:${statusColor};width:${pct}%"></div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
 function renderDeliverables() {
   const stepBar = $('deliveryStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(10);
-  renderDeliveryClosureBoard();
 
   // 企业筛选器
   const filter = $('deliveryCustomerFilter');

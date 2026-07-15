@@ -18,6 +18,7 @@ const loginAccounts = [
 const CUSTOMER_LIVE_REFRESH_MS = 5000;
 let customerLiveRefreshTimer = null;
 let customerLiveRefreshInFlight = false;
+let loginInFlight = false;
 
 async function refreshCustomerLiveData() {
   const livePages = new Set(['customer-overview', 'my-assets', 'my-usage']);
@@ -425,6 +426,14 @@ async function loadAll() {
 window.refreshData = async function refreshData() { await loadAll(); renderAll(); };
 
 async function login() {
+  if (loginInFlight) return;
+  const loginButton = $('loginBtn');
+  const originalLabel = loginButton?.textContent || '进入工作台';
+  loginInFlight = true;
+  if (loginButton) {
+    loginButton.disabled = true;
+    loginButton.textContent = '进入中...';
+  }
   $('loginError').textContent = '';
   try {
     const data = await api('/auth/login', {
@@ -441,9 +450,14 @@ async function login() {
     await bootApp();
   } catch (error) {
     $('loginError').textContent = error.message;
+  } finally {
+    loginInFlight = false;
+    if (loginButton && !state.token) {
+      loginButton.disabled = false;
+      loginButton.textContent = originalLabel;
+    }
   }
 }
-
 async function logout() {
   stopCustomerLiveRefresh();
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
