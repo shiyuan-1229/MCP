@@ -36,6 +36,7 @@ export const state = {
   customerAssetDetail: null,
   customerTrialResult: null,
   customerLiveUpdatedAt: '',
+  customerDeliverableFilters: { projectId: 'all', type: 'all', status: 'all', query: '' },
   customerTrends: null,
   accessGuide: null,
   // 客户侧：AI 需求生成 MCP

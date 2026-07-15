@@ -2383,21 +2383,60 @@ function renderCustomerBilling() {
   );
 }
 function renderCustomerDeliverables() {
-  const items = list(state.deliverables);
-  renderMetricSummary('customerDeliverableSummary', [
-    { label: '交付物总数', value: items.length, meta: '全部交付资料' },
-    { label: '可下载', value: items.filter(item => item.status === 'ready').length, meta: '可直接获取' },
-    { label: '生成中', value: items.filter(item => item.status === 'generating').length, meta: '正在整理' },
-    { label: '待处理', value: items.filter(item => !['ready', 'generating'].includes(item.status)).length, meta: '需继续跟进' }
-  ]);
-  renderCardList('customerDeliverableHighlights', [
-    `<div class="info-card"><h4>交付资料总览</h4><p>配置包、测试报告、调用日志与复盘材料会持续归档到这里。</p></div>`,
-    `<div class="info-card"><h4>当前建议</h4><p>${items.some(item => item.status === 'ready') ? '优先下载状态为可下载的交付资料。' : '当前没有可下载文件，建议先关注生成中的资料。'}</p></div>`,
-    `<div class="info-card"><h4>最近更新</h4><p>${text(items[0]?.updated_at || '暂无更新记录')}</p></div>`
-  ], '暂无交付建议');
-  renderSimpleRows('customerDeliverableRows', items.map(item => `<tr><td>${text(item.name || '-')}</td><td>${text(item.project_name || item.project_id || '-')}</td><td>${text(item.type || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.updated_at || '-')}</td><td>${item.status === 'ready' ? `<div class="customer-row-actions"><button type="button" class="primary-btn small" onclick="downloadDeliverable('${item.id}')">下载</button></div>` : '<span class="muted-line">整理中</span>'}</td></tr>`), '暂无交付物记录', 6);
-}
+  const allItems = [...list(state.deliverables)].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const assets = customerAssets();
+  const filters = state.customerDeliverableFilters || { projectId: 'all', type: 'all', status: 'all', query: '' };
+  const typeMeta = {
+    config: { label: '配置包', usage: '部署 MCP 所需的环境与凭证配置' },
+    'test-report': { label: '联调验收报告', usage: '核验接口、Tool 和测试结果' },
+    'run-guide': { label: '运行说明', usage: '查看鉴权、限流和常见问题' },
+    'poc-evidence': { label: 'POC 验收凭证', usage: '查看在线试调和验收证据' },
+    log: { label: '调用日志', usage: '用于问题排查与运行复盘' },
+    'knowledge-base': { label: '知识库导出', usage: '资料归档与迁移使用' }
+  };
+  const deliverableTypeMeta = typeMeta;
+  const projectOptions = [...new Map(allItems.map(item => [item.project_id || item.project_name || 'unassigned', item.project_name || item.project_id || '未归属项目'])).entries()];
+  const typeOptions = [...new Set(allItems.map(item => item.type).filter(Boolean))];
+  const filtered = allItems.filter(item => {
+    const haystack = `${item.name || ''} ${item.project_name || ''} ${item.project_id || ''}`.toLowerCase();
+    return (filters.projectId === 'all' || (item.project_id || 'unassigned') === filters.projectId)
+      && (filters.type === 'all' || item.type === filters.type)
+      && (filters.status === 'all' || item.status === filters.status)
+      && (!filters.query || haystack.includes(String(filters.query).toLowerCase()));
+  });
+  const readyItems = allItems.filter(item => item.status === 'ready');
+  const preferred = readyItems.filter(item => ['config', 'test-report', 'run-guide'].includes(item.type));
+  const recommended = (preferred.length ? preferred : readyItems).slice(0, 3);
+  const firstProjectId = recommended[0]?.project_id || 'all';
+  const assetByProject = new Map(assets.map(asset => [asset.project_id, asset]));
 
+  renderMetricSummary('customerDeliverableSummary', [
+    { label: '资料总数', value: allItems.length, meta: '当前客户可见交付资料' },
+    { label: '可直接下载', value: readyItems.length, meta: '状态为已就绪' },
+    { label: '生成中', value: allItems.filter(item => item.status === 'generating').length, meta: '服务端正在整理' },
+    { label: '当前项目', value: projectOptions.length, meta: '可按项目筛选' }
+  ]);
+
+  const recommendedNode = $('customerDeliverableRecommended');
+  if (recommendedNode) {
+    recommendedNode.innerHTML = recommended.length ? `<div class="customer-deliverable-recommended-list">${recommended.map(item => {
+      const meta = deliverableTypeMeta[item.type] || { label: item.type || '交付资料', usage: '项目交付资料' };
+      const asset = assetByProject.get(item.project_id);
+      return `<div class="customer-deliverable-recommended-item"><div><strong>${text(meta.label)}</strong><span>${text(item.name || '-')} · ${text(item.project_name || item.project_id || '当前项目')}</span><small>${text(meta.usage)} · ${text(item.updated_at || '-')}</small></div><div class="customer-action-row"><button type="button" class="primary-btn small" onclick="downloadDeliverable('${escapeJs(item.id)}')">下载</button>${asset && item.type === 'config' ? `<button type="button" class="ghost-btn small" onclick="viewAccessGuide('${escapeJs(asset.id)}')">查看接入配置</button>` : ''}</div></div>`;
+    }).join('')}</div><div class="customer-deliverable-recommended-footer"><span>推荐项目：${text(recommended[0]?.project_name || recommended[0]?.project_id || '当前项目')}</span><button type="button" class="ghost-btn small" onclick="downloadProjectReadyDeliverables('${escapeJs(firstProjectId)}')">下载本项目全部就绪资料</button></div>` : '<div class="customer-deliverable-empty">当前暂无可推荐下载的资料。</div>';
+  }
+
+  const filtersNode = $('customerDeliverableFilters');
+  if (filtersNode) filtersNode.innerHTML = `<select aria-label="项目筛选" onchange="updateCustomerDeliverableFilters('projectId', this.value)"><option value="all">全部项目</option>${projectOptions.map(([id, name]) => `<option value="${escapeJs(id)}" ${filters.projectId === id ? 'selected' : ''}>${text(name)}</option>`).join('')}</select><select aria-label="类型筛选" onchange="updateCustomerDeliverableFilters('type', this.value)"><option value="all">全部类型</option>${typeOptions.map(type => `<option value="${escapeJs(type)}" ${filters.type === type ? 'selected' : ''}>${text(deliverableTypeMeta[type]?.label || type)}</option>`).join('')}</select><select aria-label="状态筛选" onchange="updateCustomerDeliverableFilters('status', this.value)"><option value="all">全部状态</option><option value="ready" ${filters.status === 'ready' ? 'selected' : ''}>已就绪</option><option value="generating" ${filters.status === 'generating' ? 'selected' : ''}>生成中</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>待处理</option></select><input aria-label="搜索交付资料" placeholder="搜索文件或项目" value="${text(filters.query || '')}" oninput="updateCustomerDeliverableFilters('query', this.value)">`;
+
+  renderSimpleRows('customerDeliverableRows', filtered.map(item => {
+    const meta = deliverableTypeMeta[item.type] || { label: item.type || '交付资料', usage: '项目交付资料' };
+    const asset = assetByProject.get(item.project_id);
+    const version = asset?.version || '-';
+    const action = item.status === 'ready' ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${escapeJs(item.id)}')">下载</button>${asset ? `<button type="button" class="ghost-btn small" onclick="openCustomerAsset('${escapeJs(asset.id)}')">查看服务</button>` : ''}` : '<span class="muted-line">发布完成后生成</span>';
+    return `<tr><td><strong>${text(asset?.name || item.project_name || item.project_id || '-')}</strong></td><td>${text(item.name || '-')}</td><td><span class="cap-chip">${text(meta.label)}</span></td><td>${text(meta.usage)}</td><td>${badge(item.status || 'draft')}</td><td>${text(version)}</td><td>${text(item.updated_at || '-')}</td><td><div class="customer-row-actions">${action}</div></td></tr>`;
+  }), '暂无符合条件的交付资料', 8);
+}
 function renderCustomerAccess() {
   const access = list(state.access);
   const assets = customerAssets();

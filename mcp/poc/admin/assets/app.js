@@ -1843,6 +1843,18 @@ function downloadReadyDeliverables() {
     window.setTimeout(() => downloadDeliverable(item.id), index * 300);
   });
 }
+function updateCustomerDeliverableFilters(field, value) {
+  state.customerDeliverableFilters = { ...(state.customerDeliverableFilters || {}), [field]: value };
+  renderAll();
+}
+
+function downloadProjectReadyDeliverables(projectId = 'all') {
+  const items = Array.isArray(state.deliverables) ? state.deliverables : [];
+  const readyItems = items.filter(item => item.status === 'ready' && (projectId === 'all' || item.project_id === projectId));
+  if (!readyItems.length) { showToast('当前项目没有可下载的交付资料。', 'warning'); return; }
+  showToast(`正在准备下载 ${readyItems.length} 份项目交付资料。`, 'warning');
+  readyItems.forEach((item, index) => window.setTimeout(() => downloadDeliverable(item.id), index * 300));
+}
 function openCustomerPage(pageId) {
   if (!isCustomerView() || !customerNavItems.some(item => item.id === pageId)) return;
   state.currentPage = pageId;
@@ -1899,6 +1911,8 @@ window.openCustomerAsset = openCustomerAsset;
 window.closeCustomerAsset = closeCustomerAsset;
 window.runCustomerTrial = runCustomerTrial;
 window.downloadReadyDeliverables = downloadReadyDeliverables;
+window.downloadProjectReadyDeliverables = downloadProjectReadyDeliverables;
+window.updateCustomerDeliverableFilters = updateCustomerDeliverableFilters;
 window.openCustomerPage = openCustomerPage;
 
 window.createApiKey = createApiKey;

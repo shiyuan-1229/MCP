@@ -543,16 +543,13 @@
   <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>历史账单</h3></div><div class="table-wrap"><table><thead><tr><th>账期</th><th>账单条目</th><th>金额</th><th>调用量</th><th>状态</th><th>操作</th></tr></thead><tbody id="customerBillingHistoryRows"></tbody></table></div></article>
 </section>
 
-            <section id="my-deliverables" class="page" data-title="交付物下载" data-eyebrow="配置包、报告、日志与复盘">
-        <article class="panel"><div class="panel-head"><h3>交付资料总览</h3></div><div id="customerDeliverableSummary" class="metric-grid"></div></article>
-        <div class="content-grid two-col" style="margin-top:20px">
-          <article class="panel"><div class="panel-head"><h3>交付建议</h3></div><div id="customerDeliverableHighlights" class="card-list"></div></article>
-          
-        </div>
-        <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>交付物下载</h3></div><div class="table-wrap"><table><thead><tr><th>文件</th><th>所属项目</th><th>类型</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
-      </section>
-
-            <section id="my-access" class="page" data-title="接入配置" data-eyebrow="地址、证书、鉴权方式与运行说明">
+            <section id="my-deliverables" class="page" data-title="交付与支持" data-eyebrow="配置包、验收报告、运行说明与调用证据">
+  <article class="panel customer-deliverable-library-hero"><div><p class="eyebrow">交付资料库</p><h3>找到当前项目真正需要的资料</h3><p class="muted-line">优先下载配置包、验收报告和运行说明，日志与历史资料用于排障和复盘。</p></div><button type="button" class="primary-btn" onclick="downloadReadyDeliverables()">下载全部就绪资料</button></article>
+  <div id="customerDeliverableSummary" class="metric-grid" style="margin-top:14px"></div>
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>本次推荐下载</h3><small class="muted-line">按当前交付项目优先展示</small></div><div id="customerDeliverableRecommended" class="customer-deliverable-recommended"></div></article>
+  <article class="panel" style="margin-top:20px"><div class="panel-head"><h3>全部交付资料</h3><div id="customerDeliverableFilters" class="customer-deliverable-filters"></div></div><div class="table-wrap"><table><thead><tr><th>MCP / 项目</th><th>文件</th><th>类型</th><th>用途说明</th><th>状态</th><th>版本</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="customerDeliverableRows"></tbody></table></div></article>
+</section>
+<section id="my-access" class="page" data-title="接入配置" data-eyebrow="地址、证书、鉴权方式与运行说明">
         <article class="panel"><div class="panel-head"><h3>运行配置总览</h3></div><div id="customerAccessSummary" class="metric-grid"></div></article>
         <div class="content-grid two-col" style="margin-top:20px">
           <article class="panel"><div class="panel-head"><h3>使用前须知</h3></div><div id="customerAccessGuideList" class="card-list"></div></article>

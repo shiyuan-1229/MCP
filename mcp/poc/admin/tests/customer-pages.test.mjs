@@ -20,7 +20,8 @@ for (const id of [
   'customerBillingUsageQuota',
   'customerBillingHistoryRows',
   'customerDeliverableSummary',
-  'customerDeliverableHighlights',
+  'customerDeliverableRecommended',
+  'customerDeliverableFilters',
   'customerAccessSummary',
   'customerAccessGuideList'
 ]) {
@@ -35,8 +36,8 @@ for (const label of [
   '费用明细',
   '调用与额度',
   '历史账单',
-  '交付资料总览',
-  '交付建议',
+  '交付资料库',
+  '本次推荐下载',
   '运行配置总览',
   '使用前须知']) {
   assert.match(html, new RegExp(label, 'u'));
@@ -51,7 +52,8 @@ for (const token of [
   'customerBillingUsageQuota',
   'customerBillingHistoryRows',
   'customerDeliverableSummary',
-  'customerDeliverableHighlights',
+  'customerDeliverableRecommended',
+  'customerDeliverableFilters',
   'customerAccessSummary',
   'customerAccessGuideList'
 ]) {
