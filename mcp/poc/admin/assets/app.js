@@ -1,7 +1,7 @@
-import { request } from './modules/api.js';
 import { state, navItems, customerNavItems, isCustomerView, getNavItems, displayAssetName } from './modules/state.js';
+import { request } from './modules/api.js';
 import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
-import { renderAll } from './modules/renderers.js';
+import { renderAll, renderNav } from './modules/renderers.js';
 
 function list(value) { return Array.isArray(value) ? value : []; }
 
@@ -72,6 +72,68 @@ async function api(path, options = {}) {
 window.__state = state;
 window.authHeader = () => state.token ? { Authorization: 'Bearer ' + state.token } : {};
 window.controlFlowRequest = api;
+
+// WebSocket 实时通知连接
+let ws;
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const WS_RECONNECT_DELAY = 3000;
+
+function initWebSocket() {
+  if (ws) {
+    ws.close();
+  }
+  
+  const token = state.token;
+  const wsUrl = `ws://localhost:3100/ws?token=${encodeURIComponent(token)}`;
+  ws = new WebSocket(wsUrl);
+  
+  ws.onopen = () => {
+    console.log('WebSocket 连接已建立');
+    wsReconnectAttempts = 0;
+  };
+  
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleWebSocketMessage(data);
+    } catch (error) {
+      console.error('WebSocket 消息解析错误:', error);
+    }
+  };
+  
+  ws.onclose = () => {
+    console.log('WebSocket 连接已关闭');
+    if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      wsReconnectAttempts++;
+      setTimeout(initWebSocket, WS_RECONNECT_DELAY);
+    }
+  };
+  
+  ws.onerror = (error) => {
+    console.error('WebSocket 错误:', error);
+  };
+}
+
+function handleWebSocketMessage(data) {
+  if (data.type === 'builder_metrics_update') {
+    // 更新 builder metrics
+    if (data.metrics) {
+      state.builderMetrics = data.metrics;
+      // 触发导航栏重新渲染以更新徽章
+      renderNav();
+    }
+  } else if (data.type === 'review_update') {
+    // 更新审核状态
+    if (data.reviews) {
+      state.reviews = data.reviews;
+      renderNav();
+    }
+  }
+}
+
+// 初始化 WebSocket 连接
+window.initWebSocket = initWebSocket;
 
 window.syncBuilderRequestToServer = async function syncBuilderRequestToServer(payload = {}) {
   return api('/api/platform/builder/requests', {
@@ -357,7 +419,7 @@ async function loadAll() {
     return;
   }
 
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, retroSummary, retroReasons, reuseSuggestions, builderRequests, candidates, reviews, toolDrafts, governanceDemoOverview] = await Promise.all([
+  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, deliveryPackageRecords, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, builderRequests, candidates, reviews, toolDrafts, governanceDemoOverview] = await Promise.all([
     api('/api/platform/summary'),
     api('/api/platform/customers'),
     api('/api/platform/projects'),
@@ -368,6 +430,7 @@ async function loadAll() {
     api('/api/platform/call-events'),
     api('/api/platform/billing'),
     api('/api/platform/deliverables'),
+    api('/api/platform/delivery-packages'),
     api('/api/platform/access-configs'),
     api('/api/platform/access-configs/health-summary'),
     api('/api/platform/access-configs/audit-summary'),
@@ -377,9 +440,6 @@ async function loadAll() {
     api('/api/platform/openapi-specs'),
     api('/api/platform/ai-config').catch(() => ({ configured: false })),
     api('/api/platform/builder/metrics').catch(() => null),
-    api('/api/platform/governance/retro-summary').catch(() => null),
-    api('/api/platform/governance/retro-reasons').catch(() => ({ items: [] })),
-    api('/api/platform/governance/reuse-suggestions').catch(() => ({ items: [] })),
     api('/api/platform/builder/requests').catch(() => []),
     api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
     api('/api/platform/governance/reviews').catch(() => ({ items: [] })),
@@ -388,7 +448,6 @@ async function loadAll() {
   ]);
 
   const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
-  const pocRuntimes = await api('/api/platform/poc-runtimes').catch(() => []);
 
   Object.assign(state, {
     summary,
@@ -396,12 +455,12 @@ async function loadAll() {
     projects,
     sources: Array.isArray(sources) ? sources : [],
     assets: Array.isArray(assets) ? assets : [],
-    pocRuntimes: Array.isArray(pocRuntimes) ? pocRuntimes : [],
     releases,
     policies,
     events: eventList,
     billing,
     deliverables,
+    deliveryPackageRecords: Array.isArray(deliveryPackageRecords) ? deliveryPackageRecords : [],
     access,
     accessHealth: accessHealth || [],
     accessAudit: accessAudit || [],
@@ -411,9 +470,6 @@ async function loadAll() {
     openapiSpecs: Array.isArray(openapiSpecs) ? openapiSpecs : [],
     aiConfig: aiConfig || { configured: false },
     builderMetrics: builderMetrics || null,
-    retroSummary: retroSummary || null,
-    retroReasons: Array.isArray(retroReasons?.items) ? retroReasons.items : [],
-    reuseSuggestions: Array.isArray(reuseSuggestions?.items) ? reuseSuggestions.items : [],
     builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
     candidates: Array.isArray(candidates?.items) ? candidates.items : [],
     reviews: Array.isArray(reviews?.items) ? reviews.items : [],
@@ -534,14 +590,17 @@ async function fetchProjectDetail(id) {
   renderAll();
   try {
     const detail = await api(`/api/platform/projects/${id}`);
+    const project = detail.project || detail || {};
     state.projectDetails = { ...state.projectDetails, [id]: detail };
     state.projectDrafts = {
       ...state.projectDrafts,
       [id]: {
-        owner: detail.project?.owner || '',
-        stage: detail.project?.stage || 'draft',
-        due_date: detail.project?.due_date || '',
-        description: detail.project?.description || ''
+        name: project.name || '',
+        status: project.status || 'draft',
+        implementer: project.implementer || '',
+        progress: project.progress ?? '',
+        deadline: project.deadline || '',
+        description: project.description || ''
       }
     };
   } finally {
@@ -573,9 +632,7 @@ function updateProjectDraft(id, patch) {
       ...patch
     }
   };
-  renderAll();
 }
-
 async function updateProject(id, data) {
   if (state.user?.role !== 'admin') {
     showToast(permissionDeniedMessage, 'error');
@@ -604,6 +661,23 @@ async function saveProjectDraft() {
   if (!id || !state.projectDrafts[id]) return;
   await updateProject(id, state.projectDrafts[id]);
 }
+
+async function saveDeliveryPackage(projectId, customerVisible) {
+  const title = document.getElementById('deliveryPackageTitle')?.value || '';
+  const deliveryNote = document.getElementById('deliveryPackageNote')?.value || '';
+  try {
+    await api('/api/platform/delivery-packages/' + projectId, {
+      method: 'PUT',
+      body: JSON.stringify({ title, delivery_note: deliveryNote, customer_visible: customerVisible })
+    });
+    await loadAll();
+    renderAll();
+    showToast(customerVisible ? 'Delivery package published.' : 'Delivery package withdrawn.', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+window.saveDeliveryPackage = saveDeliveryPackage;
 
 function persistReleaseOverrides() {
   localStorage.setItem('mcp_release_overrides', JSON.stringify(state.releaseOverrides || {}));
@@ -647,7 +721,7 @@ function markReleaseTested(id = state.selectedReleaseId) {
 
 function publishRelease(id = state.selectedReleaseId) {
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
-  confirmDialog('确认执行发版吗？系统会将当前版本标记为已发布，企业端将同步收到。', async () => {
+  confirmDialog('确认上线 MCP 版本吗？系统会将当前版本标记为已发布，企业端将可调用该 MCP。', async () => {
     try {
       await api(`/api/platform/releases/${id}/publish`, { method: 'POST' });
       await loadAll();
@@ -996,6 +1070,61 @@ function exportBillingStatement(id = state.selectedBillingId) {
   showToast('账单已开始导出。', 'success');
 }
 
+function openDeliveryRepairDrawer(projectId) {
+  if (!projectId || state.user?.role !== 'admin') return;
+  state.deliveryRepairProjectId = projectId;
+  state.deliveryRepairDrawerOpen = true;
+  renderAll();
+}
+
+function closeDeliveryRepairDrawer() {
+  state.deliveryRepairDrawerOpen = false;
+  state.deliveryRepairProjectId = '';
+  renderAll();
+}
+
+async function generateDeliveryMaterial(projectId, type) {
+  if (!projectId || !type) return;
+  try {
+    await api('/api/platform/deliverables/generate', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, type })
+    });
+    await loadAll();
+    renderAll();
+    showToast('交付资料已自动生成。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function uploadDeliveryMaterial(projectId) {
+  const input = $('deliveryUploadFile');
+  const type = $('deliveryUploadType')?.value || 'manual-document';
+  const file = input?.files?.[0];
+  if (!projectId || !file) {
+    showToast('请选择要上传的交付文件。', 'warning');
+    return;
+  }
+  const form = new FormData();
+  form.append('project_id', projectId);
+  form.append('type', type);
+  form.append('file', file);
+  try {
+    const response = await fetch('/api/platform/deliverables/upload', {
+      method: 'POST',
+      headers: window.authHeader(),
+      body: form
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'HTTP ' + response.status);
+    await loadAll();
+    renderAll();
+    showToast('交付文件已上传。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
 function openDeliverableDrawer(id) {
   if (!id) return;
   state.selectedDeliverableId = id;
@@ -1903,6 +2032,10 @@ window.reconcileBilling = reconcileBilling;
 window.openBillingAdjustmentModal = openBillingAdjustmentModal;
 window.exportBillingStatement = exportBillingStatement;
 window.openDeliverableDrawer = openDeliverableDrawer;
+window.openDeliveryRepairDrawer = openDeliveryRepairDrawer;
+window.closeDeliveryRepairDrawer = closeDeliveryRepairDrawer;
+window.generateDeliveryMaterial = generateDeliveryMaterial;
+window.uploadDeliveryMaterial = uploadDeliveryMaterial;
 window.closeDeliverableDrawer = closeDeliverableDrawer;
 window.openKnowledgeDrawer = openKnowledgeDrawer;
 window.closeKnowledgeDrawer = closeKnowledgeDrawer;
@@ -2787,9 +2920,6 @@ window.refreshDbSource = refreshDbSource;
 window.sendAgentMessage = sendAgentMessage;
 window.runSandboxTest = runSandboxTest;
 window.deployToWorkBuddy = deployToWorkBuddy;
-window.connectRealMcp = connectRealMcp;
-window.startPocRuntime = async id => { await api(`/api/platform/mcp-assets/${id}/poc-runtimes`, { method: 'POST' }); await loadAll(); renderAll(); showToast('POC 实例已启动', 'success'); };
-window.stopPocRuntime = async id => { await api(`/api/platform/poc-runtimes/${id}/stop`, { method: 'POST' }); await loadAll(); renderAll(); showToast('POC 实例已停止', 'success'); };
 window.onSandboxAssetChange = onSandboxAssetChange;
 
 // 智能体联调 — 通过 WorkBuddy Tool Call 协议
@@ -2810,7 +2940,9 @@ async function deployToWorkBuddy() {
 
   try {
     // 获取 Tool 定义
-    const resp = await fetch(`/api/workbuddy/assets/${assetSelect.value}/tools`);
+    const resp = await fetch(`/api/workbuddy/assets/${assetSelect.value}/tools`, {
+      headers: { Authorization: `Bearer ${state.token}` }
+    });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
 
@@ -2847,33 +2979,97 @@ async function deployToWorkBuddy() {
   }
 }
 
-async function connectRealMcp() {
-  const assetSelect = $('sandboxAssetSelect');
-  const statusEl = $('workbuddyDeployStatus');
-  const runtimeEl = $('runtimeStatus');
-  if (!assetSelect?.value) { showToast('请先选择 MCP 资产', 'warning'); return; }
-  statusEl.innerHTML = '<div class="muted-line">正在连接真实 MCP：健康检查、SSE 初始化、Tool 发现...</div>';
+let _customerWorkBuddyHistory = [];
+let _customerWorkBuddyDeployedAssetId = '';
+
+function resetCustomerWorkBuddy() {
+  _customerWorkBuddyHistory = [];
+  _customerWorkBuddyDeployedAssetId = '';
+  const status = $('customerWorkBuddyDeployStatus');
+  const input = $('customerWorkBuddyInput');
+  const sendButton = $('customerWorkBuddySendBtn');
+  const messages = $('customerWorkBuddyMessages');
+  if (status) status.innerHTML = '';
+  if (input) { input.disabled = true; input.placeholder = '\u8bf7\u5148\u90e8\u7f72 MCP \u8d44\u4ea7\uff0c\u518d\u8f93\u5165\u95ee\u9898...'; }
+  if (sendButton) sendButton.disabled = true;
+  if (messages) messages.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">\u9009\u62e9 MCP \u8d44\u4ea7\uff0c\u90e8\u7f72\u5230 WorkBuddy \u540e\u5373\u53ef\u5f00\u59cb\u6d4b\u8bd5\u3002</div>';
+}
+
+function onCustomerWorkBuddyAssetChange() {
+  resetCustomerWorkBuddy();
+}
+
+async function customerDeployToWorkBuddy() {
+  const select = $('customerWorkBuddyAssetSelect');
+  const status = $('customerWorkBuddyDeployStatus');
+  const input = $('customerWorkBuddyInput');
+  const sendButton = $('customerWorkBuddySendBtn');
+  const messages = $('customerWorkBuddyMessages');
+  if (!select?.value) { showToast('\u8bf7\u5148\u9009\u62e9 MCP \u8d44\u4ea7\u3002', 'warning'); return; }
+  if (status) status.innerHTML = '<div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e40af">\u6b63\u5728\u52a0\u8f7d WorkBuddy Tool \u5b9a\u4e49...</div>';
   try {
-    const runtimes = await api('/api/platform/poc-runtimes');
-    const runtime = runtimes.find(item => item.asset_id === assetSelect.value && item.status === 'running');
-    if (!runtime) throw new Error('该资产尚未启动 POC 实例，请先到 MCP 资产页启动');
-    const result = await api(`/api/platform/poc-runtimes/${runtime.id}/connect`, { method: 'POST' });
-    if (!result.ok) throw new Error(result.error?.message || '真实 MCP 连接失败');
-    _connectedRuntimeId = runtime.id;
-    _workbuddyDeployed = true;
-    runtimeEl.textContent = `已连接真实 MCP · ${runtime.endpoint} · 发现 ${result.tools.length} 个 Tool`;
-    statusEl.innerHTML = result.steps.map(step => `<div style="font-size:12px;color:#16a34a">✓ ${escapeHtml(step.name)}：${escapeHtml(step.detail || '成功')}</div>`).join('');
-    $('agentInput').disabled = false;
-    $('agentSendBtn').disabled = false;
-    showToast('真实 MCP 已连接，可开始智能体联调', 'success');
+    const response = await fetch(`/api/workbuddy/assets/${select.value}/tools`, {
+      headers: { Authorization: `Bearer ${state.token}` }
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    const tools = Array.isArray(data.tools) ? data.tools : [];
+    if (!tools.length) throw new Error('\u8be5 MCP \u8d44\u4ea7\u6682\u65e0\u53ef\u7528 Tool\u3002');
+    if (status) status.innerHTML = `<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"><strong style="color:#16a34a">WorkBuddy \u5df2\u51c6\u5907\u5c31\u7eea</strong><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${tools.map(tool => `<span style="font-size:11px;background:#fff;border:1px solid var(--line);padding:2px 8px;border-radius:4px">${escapeHtml(tool.function?.name || '-')}</span>`).join('')}</div></div>`;
+    _customerWorkBuddyHistory = [];
+    _customerWorkBuddyDeployedAssetId = select.value;
+    if (input) { input.disabled = false; input.placeholder = '\u8bf7\u8f93\u5165\u95ee\u9898\uff0c\u6d4b\u8bd5\u8be5 MCP \u8d44\u4ea7...'; input.focus(); }
+    if (sendButton) sendButton.disabled = false;
+    if (messages) messages.innerHTML = '<div style="text-align:center;color:#16a34a;font-size:12px;padding:16px 0">MCP \u8d44\u4ea7\u5df2\u90e8\u7f72\u5230 WorkBuddy\uff0c\u73b0\u5728\u53ef\u4ee5\u5f00\u59cb\u6d4b\u8bd5\u3002</div>';
   } catch (error) {
-    _connectedRuntimeId = '';
-    _workbuddyDeployed = false;
-    statusEl.innerHTML = `<div style="color:#dc2626;font-size:12px">连接失败：${escapeHtml(error.message)}</div>`;
+    _customerWorkBuddyDeployedAssetId = '';
+    if (status) status.innerHTML = `<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">${escapeHtml(error.message)}</div>`;
     showToast(error.message, 'error');
   }
 }
 
+async function sendCustomerWorkBuddyMessage() {
+  const select = $('customerWorkBuddyAssetSelect');
+  const input = $('customerWorkBuddyInput');
+  const messages = $('customerWorkBuddyMessages');
+  if (!input?.value?.trim()) return;
+  if (!select?.value || _customerWorkBuddyDeployedAssetId !== select.value) { showToast('\u8bf7\u5148\u90e8\u7f72\u5f53\u524d\u9009\u4e2d\u7684 MCP \u8d44\u4ea7\u3002', 'warning'); return; }
+  const message = input.value.trim();
+  input.value = '';
+  messages.innerHTML += `<div style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(message)}</div>`;
+  messages.innerHTML += '<div id="customerWorkBuddyTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">WorkBuddy \u6b63\u5728\u8c03\u7528\u5de5\u5177...</div>';
+  messages.scrollTop = messages.scrollHeight;
+  try {
+    const response = await fetch('/api/workbuddy/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
+      body: JSON.stringify({ asset_id: select.value, message, history: _customerWorkBuddyHistory.slice(-10), model_config: WORKBUDDY_DEFAULT_MODEL })
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+    _customerWorkBuddyHistory.push({ role: 'user', content: message }, { role: 'assistant', content: result.reply || '' });
+    $('customerWorkBuddyTyping')?.remove();
+    (result.tool_calls || []).forEach(call => {
+      const trace = document.createElement('div');
+      trace.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
+      trace.innerHTML = `<details><summary style="color:#7c3aed;font-weight:600">${escapeHtml(call.display_name || call.tool_name || '\u5de5\u5177\u8c03\u7528')}</summary><div style="margin-top:6px;font-family:Consolas,monospace;font-size:11px;color:#64748b">\u53c2\u6570\uff1a${escapeHtml(JSON.stringify(call.arguments || {}))}<br>\u7ed3\u679c\uff1a${escapeHtml(JSON.stringify(call.result || {}))}</div></details>`;
+      messages.appendChild(trace);
+    });
+    const reply = document.createElement('div');
+    reply.style.cssText = 'align-self:flex-start;background:#f1f5f9;padding:10px 14px;border-radius:12px 12px 12px 2px;max-width:85%;line-height:1.7';
+    reply.innerHTML = renderMarkdown(result.reply || '');
+    messages.appendChild(reply);
+    messages.scrollTop = messages.scrollHeight;
+  } catch (error) {
+    $('customerWorkBuddyTyping')?.remove();
+    messages.innerHTML += `<div style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">${escapeHtml(error.message)}</div>`;
+    messages.scrollTop = messages.scrollHeight;
+  }
+}
+
+window.customerDeployToWorkBuddy = customerDeployToWorkBuddy;
+window.onCustomerWorkBuddyAssetChange = onCustomerWorkBuddyAssetChange;
+window.sendCustomerWorkBuddyMessage = sendCustomerWorkBuddyMessage;
 function syncLoginSelection(forcePassword = true) {
   const accountSelect = $('loginUserSelect');
   const legacyUserInput = $('loginUser');
@@ -3092,10 +3288,10 @@ async function runSandboxTest() {
     html += `</div></div>`;
 
     // Tool 测试详情
-    html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">🔧 Tool 测试详情（${result.tool_tests.length}）</summary>`;
+    html += `<details open class="tool-test-details"><summary>🔧 Tool 测试详情（${result.tool_tests.length}）</summary>`;
     html += result.tool_tests.map(t => {
       const tc = statusColor[t.status] || '#64748b';
-      return `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:${tc};font-weight:600">${statusIcon[t.status] || '○'}</span><strong>${escapeHtml(t.display_name)}</strong><code style="font-size:11px;color:var(--primary)">${escapeHtml(t.tool_name)}</code></div>${t.checks.map(c => `<div style="font-size:12px;padding:2px 0 2px 20px;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('')}</div>`;
+      return `<div class="tool-test-result"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:${tc};font-weight:600">${statusIcon[t.status] || '○'}</span><strong>${escapeHtml(t.display_name)}</strong><code style="font-size:11px;color:var(--primary)">${escapeHtml(t.tool_name)}</code></div>${t.checks.map(c => `<div style="font-size:12px;padding:2px 0 2px 20px;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('')}</div>`;
     }).join('');
     html += `</details>`;
 
@@ -3144,6 +3340,12 @@ async function bootApp() {
   await loadAll();
   renderAll();
   showApp();
+  
+  // 初始化 WebSocket 连接
+  if (state.user?.role === 'admin') {
+    initWebSocket();
+  }
+  
   startCustomerLiveRefresh();
 }
 
@@ -3170,6 +3372,8 @@ function bindEvents() {
   $('billingDrawerClose')?.addEventListener('click', closeBillingDrawer);
   $('billingDrawerBackdrop')?.addEventListener('click', closeBillingDrawer);
   $('deliverableDrawerClose')?.addEventListener('click', closeDeliverableDrawer);
+  $('deliveryRepairClose')?.addEventListener('click', closeDeliveryRepairDrawer);
+  $('deliveryRepairBackdrop')?.addEventListener('click', closeDeliveryRepairDrawer);
   $('deliverableDrawerBackdrop')?.addEventListener('click', closeDeliverableDrawer);
   $('knowledgeDrawerClose')?.addEventListener('click', closeKnowledgeDrawer);
   $('knowledgeDrawerBackdrop')?.addEventListener('click', closeKnowledgeDrawer);

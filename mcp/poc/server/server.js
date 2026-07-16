@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import fs from "fs";
 import Database from "better-sqlite3";
+import WebSocket, { WebSocketServer } from "ws";
 import { runFullPipeline, analyzeBusinessData, previewCapabilities, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
 import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
 import { createGovernanceRepository } from "./modules/governance/repository.mjs";
@@ -44,9 +45,122 @@ const CLIENT_DIR = path.join(__dirname, "..", "client");
 const governanceRepo = createGovernanceRepository(db);
 let pocRuntimeManager;
 
+// WebSocket 服务
+const wss = new WebSocketServer({ noServer: true });
+const clients = new Map();
+
+// WebSocket 连接处理
+wss.on('connection', (ws, req) => {
+  const token = req.url?.split('token=')[1];
+  if (!token) {
+    ws.close();
+    return;
+  }
+  
+  const user = getUserIdFromToken(token);
+  if (!user) {
+    ws.close();
+    return;
+  }
+  
+  clients.set(ws, { userId: user.id, role: user.role, token });
+  
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      handleWebSocketMessage(ws, data);
+    } catch (error) {
+      console.error('WebSocket 消息解析错误:', error);
+    }
+  });
+  
+  ws.on('close', () => {
+    clients.delete(ws);
+  });
+  
+  ws.on('error', (error) => {
+    console.error('WebSocket 错误:', error);
+    clients.delete(ws);
+  });
+});
+
+// 从 token 获取用户信息（使用真实 session 表验证）
+function getUserIdFromToken(token) {
+  try {
+    const row = db.prepare(`
+      SELECT u.id, u.role FROM platform_sessions s
+      JOIN platform_users u ON u.id = s.user_id
+      WHERE s.token = ? AND s.expires_at > datetime('now')
+    `).get(token);
+    return row || null;
+  } catch {
+    return null;
+  }
+}
+
+// 处理 WebSocket 消息
+function handleWebSocketMessage(ws, data) {
+  // 可以在这里处理客户端发送的消息
+}
+
+// 向所有管理员客户端广播消息
+function broadcastToAdmins(message) {
+  clients.forEach((client, ws) => {
+    if (client.role === 'admin') {
+      if (ws.readyState === 1) { // WebSocket.OPEN
+        ws.send(JSON.stringify(message));
+      }
+    }
+  });
+}
+
+// 当 builder metrics 更新时广播
+function broadcastBuilderMetricsUpdate(metrics) {
+  broadcastToAdmins({
+    type: 'builder_metrics_update',
+    metrics
+  });
+}
+
+// 当审核状态更新时广播
+function broadcastReviewUpdate(reviews) {
+  broadcastToAdmins({
+    type: 'review_update',
+    reviews
+  });
+}
+
+// 定时轮询广播：每 10 秒检查 metrics 变化并推送（作为事件驱动的补充）
+let lastMetricsSnapshot = null;
+setInterval(() => {
+  if (clients.size === 0) return;
+  try {
+    const metrics = governanceRepo.builderMetrics();
+    const snapshot = JSON.stringify(metrics);
+    if (snapshot !== lastMetricsSnapshot) {
+      lastMetricsSnapshot = snapshot;
+      broadcastBuilderMetricsUpdate(metrics);
+    }
+  } catch (e) {
+    // 静默忽略
+  }
+}, 10000);
+
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 app.use(express.json({ limit: "2mb" }));
+
+// WebSocket 路由
+app.server = app.listen(PORT, () => {
+  console.log(`MCP Forge admin server running on port ${PORT}`);
+});
+
+// 升级 HTTP 请求为 WebSocket
+app.server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request);
+  });
+});
 
 // ============== 宸ュ叿鍑芥暟 ==============
 function makeId(prefix) {
@@ -90,6 +204,20 @@ function getCandidatePublishReadiness(candidate) {
   };
 }
 
+// 更新 builder metrics 并广播
+function updateBuilderMetrics(metrics) {
+  // 这里可以添加实际的 metrics 更新逻辑
+  // 然后广播更新
+  broadcastBuilderMetricsUpdate(metrics);
+}
+
+// 更新审核状态并广播
+function updateReviews(reviews) {
+  // 这里可以添加实际的 reviews 更新逻辑
+  // 然后广播更新
+  broadcastReviewUpdate(reviews);
+}
+
 function ensureColumn(table, name, definition) {
   const tableExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
   if (!tableExists) return;
@@ -131,7 +259,8 @@ function runMigrations() {
     status TEXT,
     implementer TEXT,
     progress INTEGER,
-    deadline TEXT
+    deadline TEXT,
+    description TEXT
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS platform_data_sources (
     id TEXT PRIMARY KEY,
@@ -229,9 +358,17 @@ function runMigrations() {
     name TEXT NOT NULL,
     type TEXT,
     status TEXT,
+    file_name TEXT,
+    content_type TEXT,
+    file_content BLOB,
+    origin TEXT DEFAULT 'generated',
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
-  db.exec(`CREATE TABLE IF NOT EXISTS platform_billing_records (
+  try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN file_name TEXT"); } catch {}
+  try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN content_type TEXT"); } catch {}
+  try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN file_content BLOB"); } catch {}
+  try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN origin TEXT"); } catch {}
+  db.exec("CREATE TABLE IF NOT EXISTS platform_delivery_packages (\n    project_id TEXT PRIMARY KEY,\n    title TEXT,\n    delivery_note TEXT,\n    customer_visible INTEGER DEFAULT 0,\n    published_at TEXT,\n    published_by TEXT,\n    updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n  )");  db.exec(`CREATE TABLE IF NOT EXISTS platform_billing_records (
     id TEXT PRIMARY KEY,
     customer_id TEXT NOT NULL,
     tier TEXT DEFAULT 'standard',
@@ -337,6 +474,7 @@ function runMigrations() {
     created_at TEXT DEFAULT (datetime('now'))
   )`);
 
+  ensureColumn('platform_projects', 'description', 'TEXT');
   ensureColumn('kb_collections', 'project_id', 'TEXT');
   ensureColumn('kb_collections', 'source_id', 'TEXT');
   ensureColumn('kb_collections', 'indexed_at', 'TEXT');
@@ -1805,18 +1943,21 @@ app.get("/api/platform/projects/:id", requireAuth, (req, res) => {
 
 app.put("/api/platform/projects/:id", requireAuth, requireAdmin, (req, res) => {
   const { id } = req.params;
-  const { name, status, implementer, progress, deadline } = req.body || {};
+  const { name, status, implementer, progress, deadline, description } = req.body || {};
   const existing = db.prepare("SELECT * FROM platform_projects WHERE id = ?").get(id);
   if (!existing) return res.status(404).json({ error: "project not found" });
+  const nextProgress = progress === undefined || progress === null || progress === ''
+    ? null
+    : Math.max(0, Math.min(100, Number(progress) || 0));
   db.prepare(`UPDATE platform_projects SET
     name = COALESCE(?, name), status = COALESCE(?, status),
     implementer = COALESCE(?, implementer), progress = COALESCE(?, progress),
-    deadline = COALESCE(?, deadline) WHERE id = ?`).run(
-    name || null, status || null, implementer || null, progress ?? null, deadline || null, id
+    deadline = COALESCE(?, deadline), description = COALESCE(?, description) WHERE id = ?`).run(
+    name || null, status || null, implementer || null, nextProgress, deadline || null,
+    description === undefined ? null : String(description).trim(), id
   );
   res.json(scopedProjectById(req, id));
 });
-
 app.get("/api/platform/builder/requests", requireAuth, (req, res) => {
   res.json(scopedBuilderRequests(req));
 });
@@ -3167,10 +3308,56 @@ app.get("/api/platform/call-events", requireAuth, (req, res) => {
   res.json({ total, page: Number(page), pageSize: Number(pageSize), data: db.prepare(sql).all(...params) });
 });
 
+const deliveryMaterialTypes = new Set(['config', 'test-report', 'run-guide']);
+
+function deliveryMaterialName(project, type) {
+  const label = { config: '配置包', 'test-report': '验收报告', 'run-guide': '运行说明' }[type] || '交付资料';
+  return String(project.name || project.id) + ' ' + label;
+}
+
+app.post("/api/platform/deliverables/generate", requireAuth, requireAdmin, (req, res) => {
+  const { project_id, type } = req.body || {};
+  if (!project_id || !deliveryMaterialTypes.has(type)) return res.status(400).json({ error: "supported project_id and type required" });
+  const project = scopedProjectById(req, project_id);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const id = makeId("del");
+  db.prepare("INSERT INTO platform_deliverables (id, project_id, name, type, status, origin, updated_at) VALUES (?,?,?,?,?,?,datetime('now'))").run(id, project.id, deliveryMaterialName(project, type), type, "ready", "generated");
+  res.status(201).json(db.prepare("SELECT id, project_id, name, type, status, file_name, content_type, origin, updated_at FROM platform_deliverables WHERE id = ?").get(id));
+});
+
+app.post("/api/platform/deliverables/upload", requireAuth, requireAdmin, upload.single('file'), (req, res) => {
+  const file = req.file;
+  const { project_id, type } = req.body || {};
+  if (!file || !project_id || !(deliveryMaterialTypes.has(type) || type === "manual-document")) return res.status(400).json({ error: "file, project_id and supported type required" });
+  const project = scopedProjectById(req, project_id);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const id = makeId("del");
+  const filename = String(file.originalname || "delivery-material").slice(0, 160);
+  db.prepare("INSERT INTO platform_deliverables (id, project_id, name, type, status, file_name, content_type, file_content, origin, updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))").run(id, project.id, filename, type, "ready", filename, file.mimetype || "application/octet-stream", file.buffer, "uploaded");
+  res.status(201).json(db.prepare("SELECT id, project_id, name, type, status, file_name, content_type, origin, updated_at FROM platform_deliverables WHERE id = ?").get(id));
+});
+app.get("/api/platform/delivery-packages", requireAuth, requireAdmin, (req,res)=>res.json(db.prepare("SELECT dp.*,p.name AS project_name,p.customer_id,c.name AS customer_name FROM platform_delivery_packages dp JOIN platform_projects p ON p.id=dp.project_id JOIN platform_customers c ON c.id=p.customer_id").all()));
+app.put("/api/platform/delivery-packages/:projectId", requireAuth, requireAdmin, (req, res) => {
+  const project = scopedProjectById(req, req.params.projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const body = req.body || {};
+  const customerVisible = body.customer_visible ? 1 : 0;
+
+  if (customerVisible) {
+    const publishedAsset = db.prepare("SELECT 1 FROM platform_mcp_assets WHERE project_id = ? AND status = 'published' LIMIT 1").get(project.id);
+    if (!publishedAsset) return res.status(409).json({ error: "published MCP asset required before delivery package publishing" });
+    const readyTypes = new Set(db.prepare("SELECT type FROM platform_deliverables WHERE project_id = ? AND status = 'ready' AND type IN ('config','test-report','run-guide')").all(project.id).map(item => item.type));
+    const missingTypes = ['config', 'test-report', 'run-guide'].filter(type => !readyTypes.has(type));
+    if (missingTypes.length) return res.status(409).json({ error: "required delivery materials missing: " + missingTypes.join(', ') });
+  }
+
+  db.prepare("INSERT INTO platform_delivery_packages (project_id,title,delivery_note,customer_visible,published_at,published_by,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET title=excluded.title,delivery_note=excluded.delivery_note,customer_visible=excluded.customer_visible,published_at=CASE WHEN excluded.customer_visible=1 THEN CURRENT_TIMESTAMP ELSE NULL END,published_by=CASE WHEN excluded.customer_visible=1 THEN excluded.published_by ELSE NULL END,updated_at=CURRENT_TIMESTAMP").run(project.id, body.title || "", body.delivery_note || "", customerVisible, req.user.display_name);
+  res.json(db.prepare("SELECT * FROM platform_delivery_packages WHERE project_id = ?").get(project.id));
+});
 app.get("/api/platform/deliverables", requireAuth, (req, res) => {
   const ids = scopedProjects(req).map(p => p.id);
   if (!ids.length) return res.json([]);
-  res.json(db.prepare(`SELECT d.*, p.name AS project_name FROM platform_deliverables d
+  res.json(db.prepare(`SELECT d.id, d.project_id, d.name, d.type, d.status, d.file_name, d.content_type, d.origin, d.updated_at, p.name AS project_name FROM platform_deliverables d
     JOIN platform_projects p ON p.id = d.project_id WHERE d.project_id IN (${ids.map(() => "?").join(",")})
     ORDER BY d.updated_at DESC`).all(...ids));
 });
@@ -3308,6 +3495,15 @@ app.post("/api/platform/governance/reviews/:id/decision", requireAuth, (req, res
     escalation: escalationResult,
     modification: modificationResult
   });
+
+  // 实时广播：审核决策变更后推送最新 metrics 和 reviews
+  try {
+    broadcastBuilderMetricsUpdate(governanceRepo.builderMetrics());
+    const latestReviews = governanceRepo.listReviewTasks();
+    broadcastReviewUpdate(Array.isArray(latestReviews) ? latestReviews : []);
+  } catch (e) {
+    console.error('广播审核变更失败:', e.message);
+  }
 });
 
 app.get("/api/platform/governance/published-assets", requireAuth, (req, res) => {
@@ -4312,10 +4508,23 @@ app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
   const item = db.prepare("SELECT * FROM platform_deliverables WHERE id = ?").get(req.params.id);
   if (!item) return res.status(404).json({ error: "Deliverable not found" });
 
+  if (req.user.role !== "admin") {
+    const customerId = customerScope(req);
+    const project = db.prepare("SELECT customer_id FROM platform_projects WHERE id = ?").get(item.project_id);
+    const deliveryPackage = db.prepare("SELECT customer_visible FROM platform_delivery_packages WHERE project_id = ?").get(item.project_id);
+    if (!customerId || project?.customer_id !== customerId || (deliveryPackage && !deliveryPackage.customer_visible)) {
+      return res.status(403).json({ error: "Deliverable not available" });
+    }
+  }
+
   const type = item.type || 'report';
   let content, filename, contentType;
 
-  if (type === 'config-package' || type === 'config') {
+  if (item.file_content) {
+    content = item.file_content;
+    filename = item.file_name || 'mcp-forge-deliverable-' + item.id;
+    contentType = item.content_type || 'application/octet-stream';
+  } else if (type === 'config-package' || type === 'config') {
     content = generateConfigPackage(item);
     filename = `mcp-forge-config-${item.id}.json`;
     contentType = 'application/json';
@@ -4323,6 +4532,12 @@ app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
     content = generateTestReport(item);
     filename = `mcp-forge-test-report-${item.id}.html`;
     contentType = 'text/html; charset=utf-8';
+  } else if (type === 'run-guide') {
+    const asset = db.prepare("SELECT name, version FROM platform_mcp_assets WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1").get(item.project_id);
+    const access = db.prepare("SELECT name, endpoint, scope, environment FROM platform_access_configs WHERE project_id = ? ORDER BY last_health_check_at DESC LIMIT 1").get(item.project_id);
+    content = ['# MCP 运行说明', '', '- MCP：' + (asset?.name || '-'), '- 版本：' + (asset?.version || '-'), '- 接入项：' + (access?.name || '-'), '- 地址：' + (access?.endpoint || '-'), '- 鉴权范围：' + (access?.scope || '-'), '- 环境：' + (access?.environment || '-')].join('\n');
+    filename = 'mcp-forge-run-guide-' + item.id + '.md';
+    contentType = 'text/markdown; charset=utf-8';
   } else if (type === 'call-log' || type === 'log') {
     content = generateCallLog(item);
     filename = `mcp-forge-call-log-${item.id}.csv`;
@@ -4542,7 +4757,7 @@ app.get("/api/customer/overview", requireAuth, (req, res) => {
   const assets = scopedAssets(req).filter(asset => asset.status === "published");
   const projectIds = [...new Set(assets.map(asset => asset.project_id))];
   const deliverables = projectIds.length
-    ? db.prepare(`SELECT d.*, p.name AS project_name FROM platform_deliverables d JOIN platform_projects p ON p.id = d.project_id WHERE d.project_id IN (${projectIds.map(() => "?").join(",")}) ORDER BY d.updated_at DESC LIMIT 5`).all(...projectIds)
+    ? db.prepare(`SELECT d.*, p.name AS project_name FROM platform_deliverables d JOIN platform_projects p ON p.id = d.project_id WHERE d.project_id IN (${projectIds.map(() => "?").join(",")}) AND COALESCE((SELECT customer_visible FROM platform_delivery_packages dp WHERE dp.project_id = d.project_id), 1) = 1 ORDER BY d.updated_at DESC LIMIT 5`).all(...projectIds)
     : [];
   const releases = assets.length
     ? db.prepare(`SELECT r.version, r.released_at, r.tested_at, r.notes, a.id AS asset_id, a.name AS asset_name FROM platform_mcp_releases r JOIN platform_mcp_assets a ON a.id = r.asset_id WHERE r.asset_id IN (${assets.map(() => "?").join(",")}) ORDER BY COALESCE(r.released_at, r.tested_at) DESC LIMIT 5`).all(...assets.map(asset => asset.id))
@@ -4566,7 +4781,10 @@ app.get("/api/customer/assets/:id", requireAuth, (req, res) => {
   const asset = customerPublishedAsset(req, req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
   const releases = db.prepare("SELECT version, status, tested_at, released_at, notes FROM platform_mcp_releases WHERE asset_id = ? ORDER BY COALESCE(released_at, tested_at) DESC").all(asset.id);
-  const deliverables = db.prepare("SELECT id, name, type, status, updated_at FROM platform_deliverables WHERE project_id = ? ORDER BY updated_at DESC").all(asset.project_id);
+  const deliveryPackage = db.prepare("SELECT customer_visible FROM platform_delivery_packages WHERE project_id = ?").get(asset.project_id);
+  const deliverables = deliveryPackage && !deliveryPackage.customer_visible
+    ? []
+    : db.prepare("SELECT id, name, type, status, updated_at FROM platform_deliverables WHERE project_id = ? ORDER BY updated_at DESC").all(asset.project_id);
   const access = db.prepare("SELECT name, type, endpoint, scope, status, environment, expires_at, description FROM platform_access_configs WHERE customer_id = ? AND project_id = ? ORDER BY id LIMIT 1").get(cid, asset.project_id) || null;
   const recentEvents = db.prepare("SELECT id, status, latency_ms, business_result, trace_id, input_tokens, output_tokens, created_at FROM platform_call_events WHERE asset_id = ? ORDER BY created_at DESC LIMIT 10").all(asset.id);
   res.json({ asset: customerAssetHealth(asset), releases, access, deliverables, recent_events: recentEvents });
@@ -4699,9 +4917,11 @@ app.get("/api/workbuddy/assets", (req, res) => {
 });
 
 // 获取指定资产的 Tool 定义（OpenAI function calling 格式）
-app.get("/api/workbuddy/assets/:id/tools", (req, res) => {
+app.get("/api/workbuddy/assets/:id/tools", requireAuth, (req, res) => {
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
+  if (!scopedAssets(req).some(item => item.id === asset.id)) return res.status(403).json({ error: "asset access denied" });
+  if (customerScope(req) && asset.status !== "published") return res.status(403).json({ error: "asset is not delivered" });
   const tools = decode(asset.tools).filter(t => typeof t === 'object');
   // 返回 OpenAI 兼容的 function 定义格式
   const functions = tools.map(t => ({
@@ -4764,6 +4984,8 @@ app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
 
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(asset_id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
+  if (!scopedAssets(req).some(item => item.id === asset_id)) return res.status(403).json({ error: "asset access denied" });
+  if (customerScope(req) && asset.status !== "published") return res.status(403).json({ error: "asset is not delivered" });
   const runtime = runtime_id ? db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id) : null;
 
   const tools = decode(asset.tools).filter(t => typeof t === 'object');
@@ -4978,7 +5200,6 @@ pocRuntimeManager = createRuntimeManager({
   }
 });
 seed();
-app.listen(PORT, () => console.log(`MCP Forge admin server running at http://localhost:${PORT}/admin`));
 
 
 

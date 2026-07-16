@@ -139,8 +139,8 @@ function renderStepBar(currentStep) {
     { n: 6, label: '生成 Tool 草稿', page: 'tool-draft' },
     { n: 7, label: '人工确认 MCP 组成', page: 'mcp-compose' },
     { n: 8, label: '生成 MCP 草稿', page: 'assets' },
-    { n: 9, label: '测试发布', page: 'publish' },
-    { n: 10, label: '交付管理', page: 'delivery' },
+    { n: 9, label: '上线 MCP 版本', page: 'publish' },
+    { n: 10, label: '交付包管理', page: 'delivery' },
     { n: 11, label: '调用监控', page: 'monitoring' },
     { n: 12, label: '治理统计', page: 'governance' }
   ];
@@ -185,7 +185,7 @@ function renderLegacySummary() {
       { label: '减少重复工作', value: `${metrics.repeated_work_reduction}%`, meta: 'AI 识别后由人工聚焦关键差异' },
       { label: '当前可发布 MCP', value: metrics.publishable_mcps, meta: '已完成所有治理门禁' }
     ]);
-    const completed = ['资料接入', 'AI 识别结果', '候选业务能力', '候选接口人工初筛', '人工确认 Tool 边界', '生成 Tool 草稿', '人工确认 MCP 组成', '生成 MCP 草稿', '测试发布', '交付管理', '调用监控', '治理统计'];
+    const completed = ['资料接入', 'AI 识别结果', '候选业务能力', '候选接口人工初筛', '人工确认 Tool 边界', '生成 Tool 草稿', '人工确认 MCP 组成', '生成 MCP 草稿', '上线 MCP 版本', '交付包管理', '调用监控', '治理统计'];
     const governanceFlowRoutes = ['intake', 'recognition', 'candidates', 'review', 'tooling', 'tool-draft', 'mcp-compose', 'assets', 'publish', 'delivery', 'monitoring', 'governance'];
     renderMetricSummary('governanceFlowBoard', completed.map((label, index) => ({
       label,
@@ -344,105 +344,92 @@ function renderSummary() {
   renderCardList('governanceRiskBoard', failures.map(item => `<button type="button" class="governance-risk" onclick="navigateToPage('monitoring', { eventId: '${escapeJs(item.trace_id || '')}' })"><span class="risk-title">${text(item.check || '验收失败')} · HTTP ${text(item.status_code || '-')}</span><span class="risk-trace">Trace ID：${text(item.trace_id || '-')}</span><span class="action-link">调用监控诊断</span></button>`), '当前没有发布阻断风险');
 }
 
+const MAX_VISIBLE_INTAKE_ITEMS = 3;
+
+function renderIntakeTableColgroup() {
+  return `<colgroup>
+    <col class="intake-col intake-col-select"><col class="intake-col intake-col-name"><col class="intake-col intake-col-project"><col class="intake-col intake-col-type"><col class="intake-col intake-col-auth"><col class="intake-col intake-col-status"><col class="intake-col intake-col-recognition"><col class="intake-col intake-col-output"><col class="intake-col intake-col-actions">
+  </colgroup>`;
+}
+
+function syncIntakeEnterpriseScrollHeights(root) {
+  if (!root) return;
+  root.querySelectorAll('.intake-enterprise-scroll.is-scrollable').forEach(node => {
+    const rows = Array.from(node.querySelectorAll('.intake-source-row')).slice(0, MAX_VISIBLE_INTAKE_ITEMS);
+    const maxHeight = rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0);
+    if (maxHeight > 0) node.style.maxHeight = `${Math.ceil(maxHeight)}px`;
+  });
+}
+
 function renderIntake() {
   const items = list(state.sources);
   const stepBar = $('intakeStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(1);
-
   const aiBadge = $('aiStatusBadge');
   if (aiBadge) {
     const cfg = state.aiConfig || {};
-    if (cfg.configured) {
-      aiBadge.textContent = `AI 已就绪 · ${cfg.model || ''}`;
-      aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#dcfce7;color:#16a34a;font-weight:600';
-    } else {
-      aiBadge.textContent = 'AI 未配置';
-      aiBadge.style.cssText = 'font-size:11px;padding:2px 10px;border-radius:4px;background:#fef9c3;color:#a16207;font-weight:600';
-    }
+    aiBadge.textContent = cfg.configured ? `AI 已就绪 · ${cfg.model || ''}` : 'AI 未配置';
+    aiBadge.style.cssText = cfg.configured ? 'font-size:11px;padding:2px 10px;border-radius:4px;background:#dcfce7;color:#16a34a;font-weight:600' : 'font-size:11px;padding:2px 10px;border-radius:4px;background:#fef9c3;color:#a16207;font-weight:600';
   }
 
-  // 填充企业筛选器
   const filter = $('intakeCustomerFilter');
   if (filter) {
     const currentVal = filter.value;
-    const customerIds = [...new Set(items.map(i => i.customer_id).filter(Boolean))];
-    filter.innerHTML = '<option value="">全部企业</option>' + customerIds.map(cid => {
-      const cname = items.find(i => i.customer_id === cid)?.customer_name || cid;
-      return `<option value="${cid}">${escapeHtml(cname)}</option>`;
-    }).join('');
+    const ids = [...new Set(items.map(item => item.customer_id).filter(Boolean))];
+    filter.innerHTML = '<option value="">全部企业</option>' + ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(items.find(item => item.customer_id === id)?.customer_name || id)}</option>`).join('');
     if (currentVal) filter.value = currentVal;
   }
 
   const selectedCustomer = filter?.value || '';
-  const filtered = selectedCustomer ? items.filter(i => i.customer_id === selectedCustomer) : items;
-
-  // 按企业分组
   const grouped = {};
-  filtered.forEach(item => {
-    const cid = item.customer_id || item.project_id || 'unknown';
-    const cname = item.customer_name || item.project_name || item.project_id || '未分类';
-    if (!grouped[cid]) grouped[cid] = { name: cname, id: cid, items: [] };
-    grouped[cid].items.push(item);
+  (selectedCustomer ? items.filter(item => item.customer_id === selectedCustomer) : items).forEach(item => {
+    const id = item.customer_id || item.project_id || 'unknown';
+    if (!grouped[id]) grouped[id] = { id, name: item.customer_name || item.project_name || item.project_id || '未分类', items: [] };
+    grouped[id].items.push(item);
   });
 
   const tbody = $('sourceRows');
   if (!tbody) return;
-  let html = '';
   const customerIds = Object.keys(grouped);
-
-  customerIds.forEach(cid => {
-    const grp = grouped[cid];
-    const pendingItems = grp.items.filter(i => (i.recognition_status || 'draft') !== 'done');
-    // 企业分组标题行
-    html += `<tr style="background:var(--surface-2)"><td colspan="9" style="padding:10px 12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <strong style="font-size:14px">🏢 ${escapeHtml(grp.name)}</strong>
-          <span class="muted-line" style="font-size:12px">${grp.items.length} 份资料 · ${pendingItems.length} 待识别</span>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button type="button" class="ghost-btn small" onclick="uploadFilesForCustomer('${cid}', '${escapeHtml(grp.name)}')">📁 接收文件</button>
-        </div>
-      </div>
-    </td></tr>`;
-
-    // 数据源行（带勾选框）
+  let html = '';
+  customerIds.forEach(id => {
+    const grp = grouped[id];
+    const pendingItems = grp.items.filter(item => (item.recognition_status || 'draft') !== 'done');
+    const isScrollable = grp.items.length > MAX_VISIBLE_INTAKE_ITEMS;
+    html += `<tr style="background:var(--surface-2)"><td colspan="9" style="padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><div style="display:flex;align-items:center;gap:8px"><strong style="font-size:14px">${escapeHtml(grp.name)}</strong><span class="muted-line" style="font-size:12px">${grp.items.length} 份资料 · ${pendingItems.length} 待识别</span></div><button type="button" class="ghost-btn small" onclick="uploadFilesForCustomer('${escapeJs(id)}', '${escapeJs(grp.name)}')">接收文件</button></div></td></tr>`;
+    html += `<tr><td colspan="9" class="intake-enterprise-scroll-cell"><div class="intake-enterprise-scroll${isScrollable ? ' is-scrollable' : ''}"><table class="intake-enterprise-table">${renderIntakeTableColgroup()}<tbody>`;
     grp.items.forEach(item => {
       const recStatus = item.recognition_status || 'draft';
       const statusBadge = badge(item.status || 'draft');
       const recBadge = recStatus === 'done' ? '<span class="badge success">已识别</span>' : recStatus === 'pending' ? '<span class="badge warning">识别中</span>' : '<span class="badge info">待识别</span>';
       const isDbConn = item.auth_mode === 'Database Connection';
       const isUpload = item.auth_mode === 'File Upload';
-      const tag = isDbConn ? ' <span style="font-size:10px;color:#2563eb">🗄️直连</span>' : isUpload ? ' <span style="font-size:10px;color:#7c3aed">📎上传</span>' : '';
-      const canSelect = recStatus !== 'done';
-      const checkbox = canSelect ? `<input type="checkbox" class="src-check" value="${item.id}" onchange="updateBatchBar()" style="cursor:pointer">` : '<span style="padding-left:4px;color:#ccc">—</span>';
-      const actionBtn = recStatus === 'done'
-        ? `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceContent('${item.id}')">📄 查看文件</button><button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${item.id}')">查看草案</button>${isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${item.id}')">🔄 刷新</button>` : ''}<button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">重新识别</button></div>`
-        : `<div class="row-actions"><button type="button" class="ghost-btn small" onclick="viewSourceContent('${item.id}')">📄 查看文件</button><button type="button" class="primary-btn small" onclick="triggerRecognition('${item.id}')">开始识别</button></div>`;
+      const tag = isDbConn ? ' <span style="font-size:10px;color:#2563eb">直连</span>' : isUpload ? ' <span style="font-size:10px;color:#7c3aed">上传</span>' : '';
+      const checkbox = recStatus !== 'done' ? `<input type="checkbox" class="src-check" value="${escapeHtml(item.id)}" onchange="updateBatchBar()" style="cursor:pointer">` : '<span style="padding-left:4px;color:#ccc">-</span>';
+      const hasOpenapiDraft = list(state.openapiSpecs).some(spec => spec.source_id === item.id);
+      const viewFileBtn = `<button type="button" class="ghost-btn small" onclick="viewSourceContent('${escapeJs(item.id)}')">查看文件</button>`;
+      const viewDraftBtn = hasOpenapiDraft ? `<button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${escapeJs(item.id)}')">查看草案</button>` : '';
+      const refreshBtn = isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${escapeJs(item.id)}')">刷新</button>` : '';
+      const actionBtn = `<div class="row-actions intake-row-actions">${viewFileBtn}${viewDraftBtn}${refreshBtn}<button type="button" class="primary-btn small" onclick="triggerRecognition('${escapeJs(item.id)}')">${recStatus === 'done' ? '重新识别' : '开始识别'}</button></div>`;
       const outputInfo = recStatus === 'done' ? '<span class="badge success">草案已生成</span>' : '<span class="muted-line">-</span>';
-      html += `<tr><td style="padding-left:8px;text-align:center">${checkbox}</td><td style="padding-left:20px"><strong>${text(item.name || '未命名资料')}</strong>${tag}</td><td>${text(item.project_name || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
+      html += `<tr class="intake-source-row"><td style="padding-left:8px;text-align:center">${checkbox}</td><td style="padding-left:20px"><strong>${text(item.name || '未命名资料')}</strong>${tag}</td><td>${text(item.project_name || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
     });
+    html += '</tbody></table></div></td></tr>';
   });
-
-  if (!customerIds.length) {
-    html = `<tr><td colspan="9">${emptyState('暂无业务资料')}</td></tr>`;
-  }
+  if (!customerIds.length) html = `<tr><td colspan="9">${emptyState('暂无业务资料')}</td></tr>`;
   tbody.innerHTML = html;
-
-  // 更新批量操作栏
+  requestAnimationFrame(() => syncIntakeEnterpriseScrollHeights(tbody));
   if (typeof window !== 'undefined') window.updateBatchBar?.();
 
-  const total = items.length;
   const recognized = items.filter(item => (item.recognition_status || 'draft') === 'done').length;
-  const draftCount = items.filter(item => (item.recognition_status || 'draft') === 'draft').length;
+  const drafts = items.filter(item => (item.recognition_status || 'draft') === 'draft').length;
   renderMetricSummary('intakeProgressBoard', [
     { label: '企业数', value: customerIds.length, meta: '已接入资料' },
-    { label: '资料总数', value: total, meta: `已识别 ${recognized}` },
+    { label: '资料总数', value: items.length, meta: `已识别 ${recognized}` },
     { label: '已识别', value: recognized, meta: '等待确认后进入 Tool 映射' },
-    { label: '待识别', value: draftCount, meta: '可勾选批量识别' }
+    { label: '待识别', value: drafts, meta: '可勾选批量识别' }
   ]);
 }
-
 // ============================================================
 // 3. 接口识别 — AI 识别 + OpenAPI + 确认 + 下载
 // ============================================================
@@ -792,7 +779,7 @@ window.confirmMcpCompositionFromUI = async function(candidateId) {
   const reason = reasonInput?.value?.trim() || '人工确认 MCP 组成';
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   // 读取勾选的 Tool
-  const checks = document.querySelectorAll('input[type="checkbox"][data-candidate="' + candidateId + '"]');
+  const checks = document.querySelectorAll('.mcp-tool-check-' + candidateId.replace(/[^a-zA-Z0-9_-]/g, ''));
   const selectedIndices = [];
   checks.forEach(check => { if (check.checked) selectedIndices.push(parseInt(check.dataset.idx)); });
   if (!selectedIndices.length) {
@@ -825,114 +812,6 @@ window.assembleCandidateMcpFromUI = async function(candidateId) {
   } catch (error) {
     showToast(error.message, 'error');
   }
-};
-
-// WorkBuddy 对话测试弹窗
-window.openWorkBuddyChat = function(assetId, runtimeId) {
-  const asset = list(state.assets).find(a => a.id === assetId);
-  if (!asset) return;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.style.zIndex = '10000';
-  overlay.innerHTML = `
-    <div class="modal-box" style="max-width:680px;max-height:85vh;display:flex;flex-direction:column">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div>
-          <h3 style="margin:0">🤖 WorkBuddy 对话测试</h3>
-          <p class="muted-line" style="margin:4px 0 0;font-size:12px">${escapeHtml(asset.name || '-')} · ${list(asset.tools).length} 个 Tool · 通过 POC Runtime 真实调用</p>
-        </div>
-        <button type="button" class="ghost-btn" data-action="close">关闭</button>
-      </div>
-      <div id="wbChatMessages" style="flex:1;overflow-y:auto;padding:14px;background:var(--surface-2);border-radius:8px;margin-bottom:14px;min-height:300px;max-height:400px"></div>
-      <div style="display:flex;gap:8px">
-        <input id="wbChatInput" placeholder="输入问题，如：帮我查询会员积分余额" style="flex:1;padding:10px 14px;border:1px solid var(--line);border-radius:8px;font-size:13px" onkeydown="if(event.key==='Enter')document.getElementById('wbSendBtn').click()">
-        <button type="button" class="primary-btn" id="wbSendBtn">发送</button>
-      </div>
-    </div>`;
-
-  const messagesEl = () => document.getElementById('wbChatMessages');
-  const inputEl = () => document.getElementById('wbChatInput');
-  let chatHistory = [];
-
-  // 初始消息
-  messagesEl().innerHTML = '<div style="text-align:center;padding:20px"><span class="muted-line">输入问题开始对话，AI 会自动调用 MCP Tool 并返回真实结果</span></div>';
-
-  async function sendMessage() {
-    const msg = inputEl().value.trim();
-    if (!msg) return;
-    inputEl().value = '';
-    inputEl().disabled = true;
-    document.getElementById('wbSendBtn').disabled = true;
-    document.getElementById('wbSendBtn').textContent = '思考中...';
-
-    // 渲染用户消息
-    const userDiv = document.createElement('div');
-    userDiv.style.cssText = 'margin-bottom:12px;text-align:right';
-    userDiv.innerHTML = '<div style="display:inline-block;max-width:80%;padding:10px 14px;background:var(--primary);color:#fff;border-radius:12px 12px 4px 12px;font-size:13px">' + escapeHtml(msg) + '</div>';
-    messagesEl().appendChild(userDiv);
-    messagesEl().scrollTop = messagesEl().scrollHeight;
-
-    // 渲染 loading
-    const loadingDiv = document.createElement('div');
-    loadingDiv.style.cssText = 'margin-bottom:12px';
-    loadingDiv.innerHTML = '<div style="display:inline-block;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:13px;color:#94a3b8">⏳ AI 正在分析并调用工具...</div>';
-    messagesEl().appendChild(loadingDiv);
-    messagesEl().scrollTop = messagesEl().scrollHeight;
-
-    try {
-      const result = await api('/api/workbuddy/chat', {
-        method: 'POST',
-        body: JSON.stringify({ asset_id: assetId, runtime_id: runtimeId || '', message: msg, history: chatHistory })
-      });
-
-      chatHistory.push({ role: 'user', content: msg }, { role: 'assistant', content: result.reply });
-
-      loadingDiv.remove();
-
-      // 渲染 AI 回复
-      const aiDiv = document.createElement('div');
-      aiDiv.style.cssText = 'margin-bottom:12px';
-      let toolHtml = '';
-      if (result.tool_calls && result.tool_calls.length) {
-        toolHtml = '<div style="margin-top:8px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:11px">';
-        toolHtml += '<strong>🔧 调用的 Tool：</strong><br>';
-        result.tool_calls.forEach(tc => {
-          toolHtml += '· <strong>' + escapeHtml(tc.display_name || tc.tool_name) + '</strong>';
-          if (tc.source === 'mock') toolHtml += ' <span style="color:#f59e0b">(模拟)</span>';
-          else if (tc.source === 'poc_sse') toolHtml += ' <span style="color:#10b981">(真实调用)</span>';
-          if (tc.latency_ms) toolHtml += ' · ' + tc.latency_ms + 'ms';
-          if (tc.error) toolHtml += ' · <span style="color:#dc2626">错误: ' + escapeHtml(tc.error) + '</span>';
-          toolHtml += '<br>';
-        });
-        toolHtml += '</div>';
-      }
-      aiDiv.innerHTML = '<div style="display:inline-block;max-width:85%;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:12px 12px 12px 4px;font-size:13px;line-height:1.6">' + escapeHtml(result.reply || '').replace(/\n/g, '<br>') + toolHtml + '</div>';
-      messagesEl().appendChild(aiDiv);
-      messagesEl().scrollTop = messagesEl().scrollHeight;
-    } catch (error) {
-      loadingDiv.remove();
-      const errDiv = document.createElement('div');
-      errDiv.style.cssText = 'margin-bottom:12px';
-      errDiv.innerHTML = '<div style="display:inline-block;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:12px;font-size:13px;color:#dc2626">❌ ' + escapeHtml(error.message) + '</div>';
-      messagesEl().appendChild(errDiv);
-    }
-
-    inputEl().disabled = false;
-    document.getElementById('wbSendBtn').disabled = false;
-    document.getElementById('wbSendBtn').textContent = '发送';
-    inputEl().focus();
-  }
-
-  overlay.addEventListener('click', event => {
-    if (event.target?.dataset?.action === 'close' || event.target === overlay) {
-      document.body.removeChild(overlay);
-    }
-    if (event.target?.id === 'wbSendBtn') sendMessage();
-  });
-
-  document.body.appendChild(overlay);
-  setTimeout(() => inputEl().focus(), 100);
 };
 
 window.assembleCandidateMcp = async function(candidateId) {
@@ -1123,7 +1002,7 @@ function renderMcpComposePage() {
       const name = tool.name || tool.display_name || '-';
       const visChip = tool.visibility === 'public' ? '🌐' : '🔒';
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
-        '<input type="checkbox" data-candidate="' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
+        '<input type="checkbox" class="mcp-tool-check-' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
         '<strong style="font-size:13px">' + text(name) + '</strong>' +
         '<code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' +
         '<span style="font-size:11px">' + visChip + '</span>' +
@@ -1208,7 +1087,6 @@ function renderAssets() {
     } else {
       mcpList.innerHTML = filteredAssets.map(asset => {
         const tools = list(asset.tools);
-        const runtime = list(state.pocRuntimes).find(item => item.asset_id === asset.id && ['starting', 'running'].includes(item.status));
         const isPublic = asset.visibility === 'public';
         const visBadge = isPublic ? '🌐 公开' : '🔒 内部';
         return `<div class="info-card" style="padding:16px">
@@ -1239,92 +1117,20 @@ function renderAssets() {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span class="muted-line" style="font-size:11px">v${text(asset.version || '0.1.0')}</span>
-            ${runtime ? `<span class="badge success">POC 运行中</span><code style="font-size:10px">${text(runtime.endpoint || '')}</code><button type="button" class="ghost-btn small" onclick="stopPocRuntime('${runtime.id}')">停止 POC</button><button type="button" class="primary-btn small" onclick="openWorkBuddyChat('${asset.id}','${runtime.id}')">🤖 WorkBuddy 对话测试</button>` : `<button type="button" class="primary-btn small" onclick="startPocRuntime('${asset.id}')">启动 POC 运行时</button>`}
-            <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入测试发布</button>
+            <button type="button" class="primary-btn small" onclick="openWorkBuddyChat('${asset.id}')">WorkBuddy 对话测试</button>
+            <button type="button" class="ghost-btn small" onclick="jumpToPublish()">进入上线 MCP 版本</button>
           </div>
         </div>`;
       }).join('');
     }
   }
 
-  // 复用建议与复盘汇总
-  renderReuseSuggestions();
-  renderRetroSummaryBoard();
 }
 
-// 渲染复用建议：直接复用 / 复制后改造 / 建议新建
-function renderReuseSuggestions() {
-  const root = $('reuseSuggestionBoard');
-  if (!root) return;
-  const suggestions = list(state.reuseSuggestions);
-  if (!suggestions.length) {
-    root.innerHTML = '<p class="muted-line">暂无复用建议。发布资产后会自动生成复用推荐。</p>';
-    return;
-  }
-  const categoryMap = {
-    'direct_reuse': { label: '可直接复用', color: '#0f766e', icon: '✅' },
-    'adapt_reuse': { label: '建议复制后改造', color: '#d97706', icon: '🔧' },
-    'suggest_new': { label: '建议新建', color: '#dc2626', icon: '🆕' }
-  };
-  const grouped = {};
-  suggestions.forEach(s => {
-    const cat = s.reuse_category || 'suggest_new';
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(s);
-  });
-  root.innerHTML = Object.entries(grouped).map(([cat, items]) => {
-    const meta = categoryMap[cat] || categoryMap['suggest_new'];
-    return `<div style="margin-bottom:12px">
-      <h4 style="display:flex;align-items:center;gap:6px;margin:0 0 6px;color:${meta.color}">${meta.icon} ${meta.label} (${items.length})</h4>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${items.slice(0, 8).map(s => `<div style="padding:8px 12px;border:1px solid var(--line);border-radius:8px;min-width:140px">
-          <strong style="font-size:13px">${text(s.candidate_name || s.candidate_id || '-')}</strong>
-          <div style="font-size:11px;color:#64748b;margin-top:4px">→ ${text(s.published_asset_name || s.published_asset_id || '-')}</div>
-          ${typeof s.score === 'number' ? `<div style="font-size:11px;color:${meta.color}">相似度 ${s.score.toFixed(2)}</div>` : ''}
-        </div>`).join('')}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-// 渲染误识别复盘汇总：高频误判分布 + 反哺提示
-function renderRetroSummaryBoard() {
-  const root = $('retroSummaryBoard');
-  if (!root) return;
-  const summary = state.retroSummary;
-  const reasons = list(state.retroReasons);
-  if (!summary || !summary.total_retros) {
-    root.innerHTML = '<p class="muted-line">暂无复盘记录。当候选被驳回/修改时，可记录复盘标记 AI 哪里识别错了，反哺给下一轮识别。</p>';
-    return;
-  }
-  const reasonMap = reasons.reduce((acc, r) => { acc[r.value] = r.label; return acc; }, {});
-  const ranked = Object.entries(summary.by_reason || {})
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1]);
-  root.innerHTML = `
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
-      <div class="metric-card"><span class="metric-label">累计复盘</span><strong>${summary.total_retros}</strong></div>
-      <div class="metric-card"><span class="metric-label">最常见误判</span><strong>${text(reasonMap[summary.top_reason] || summary.top_reason || '-')}</strong></div>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px">
-      ${ranked.map(([reason, count]) => {
-        const pct = summary.total_retros > 0 ? Math.round((count / summary.total_retros) * 100) : 0;
-        const color = pct >= 50 ? '#dc2626' : pct >= 25 ? '#d97706' : '#0f766e';
-        return `<div style="padding:8px 12px;border:1px solid var(--line);border-radius:8px;min-width:160px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <strong style="font-size:13px">${text(reasonMap[reason] || reason)}</strong>
-            <span style="font-size:18px;font-weight:700;color:${color}">${count}</span>
-          </div>
-          <div style="height:4px;background:#e2e8f0;border-radius:2px;margin-top:6px;overflow:hidden">
-            <div style="height:100%;background:${color};width:${pct}%"></div>
-          </div>
-          <div style="font-size:11px;color:#64748b;margin-top:4px">占比 ${pct}%</div>
-        </div>`;
-      }).join('')}
-    </div>
-    <p class="muted-line" style="margin-top:12px">这些高频误判会在下次 AI 识别时作为「历史高频误判提示」自动注入到识别请求中，提醒人工重点确认。</p>
-  `;
-}
+window.openWorkBuddyChat = function(assetId) {
+  state.pendingWorkBuddyAssetId = assetId;
+  window.jumpToPage?.('publish');
+};
 
 // ============================================================
 // 6. 测试发布 — 沙箱试调 + 版本发布 + 回滚
@@ -1379,6 +1185,14 @@ function renderPublish() {
     let options = scopedAssets.map(asset => `<option value="${asset.id}">${displayAssetName(asset.name)}（${asset.project_name || asset.project_id}）</option>`).join('');
     sandboxSelect.innerHTML = options;
     if (currentVal && scopedAssets.find(a => a.id === currentVal)) sandboxSelect.value = currentVal;
+    const pendingWorkBuddyAssetId = state.pendingWorkBuddyAssetId;
+    if (pendingWorkBuddyAssetId && scopedAssets.some(asset => asset.id === pendingWorkBuddyAssetId)) {
+      sandboxSelect.value = pendingWorkBuddyAssetId;
+      state.pendingWorkBuddyAssetId = null;
+      window.setTimeout(() => {
+        document.getElementById('agentChatBox')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 0);
+    }
   }
 
   // 按企业筛选 release
@@ -1413,6 +1227,104 @@ function renderPublish() {
 // 7. 交付管理 — 配置包/测试报告/调用日志下载
 // ============================================================
 
+const deliveryTypeLabels = {
+  config: '配置包',
+  'test-report': '验收报告',
+  'run-guide': '运行说明',
+  log: '调用日志',
+  'effect-report': '效果报告',
+  'retro-conclusion': '复盘结论',
+  'knowledge-base': '知识库导出'
+};
+
+function deliveryPackages(deliverables = list(state.deliverables), projectScope = null) {
+  const projects = list(state.projects);
+  const assets = list(state.assets);
+  const releases = adminReleases();
+  const events = list(state.events);
+  const requiredTypes = ['config', 'test-report', 'run-guide'];
+  const projectIds = new Set((projectScope ? projectScope.map(item => item.id) : [...projects.map(item => item.id), ...deliverables.map(item => item.project_id), ...assets.map(item => item.project_id)]).filter(Boolean));
+
+  return [...projectIds].map(projectId => {
+    const project = projects.find(item => item.id === projectId) || { id: projectId, name: projectId };
+    const files = deliverables.filter(item => item.project_id === projectId);
+    const projectAssets = assets.filter(item => item.project_id === projectId);
+    const assetIds = new Set(projectAssets.map(item => item.id));
+    const release = releases.filter(item => assetIds.has(item.asset_id)).sort((a, b) => String(b.released_at || b.tested_at || '').localeCompare(String(a.released_at || a.tested_at || '')))[0] || null;
+    const recentEvent = events.filter(item => assetIds.has(item.asset_id) || projectAssets.some(asset => asset.name === item.asset_name)).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0] || null;
+    const missingTypes = requiredTypes.filter(type => !files.some(item => item.type === type && item.status === 'ready'));
+    const blockedFiles = files.filter(item => ['failed', 'expired', 'revoked'].includes(item.status));
+    const status = blockedFiles.length ? 'blocked' : missingTypes.length ? 'incomplete' : 'ready';
+    return { project, files, assets: projectAssets, release, recentEvent, missingTypes, blockedFiles, status, readiness: `${requiredTypes.length - missingTypes.length}/${requiredTypes.length}`, readyFiles: files.filter(item => item.status === 'ready') };
+  }).sort((a, b) => ({ blocked: 0, incomplete: 1, ready: 2 }[a.status]) - ({ blocked: 0, incomplete: 1, ready: 2 }[b.status]) || String(a.project.name || '').localeCompare(String(b.project.name || '')));
+}
+
+function deliveryPackageStatusLabel(status) {
+  return { ready: '可交付', incomplete: '待补资料', blocked: '存在阻断' }[status] || status;
+}
+
+function deliveryPackageBadge(status) {
+  return `<span class="badge ${status === 'ready' ? 'success' : status === 'blocked' ? 'danger' : 'warning'}">${deliveryPackageStatusLabel(status)}</span>`;
+}
+
+function renderDeliveryCommandCenter(deliverables, projectScope = null) {
+  const packages = deliveryPackages(deliverables, projectScope);
+  const readyPackages = packages.filter(item => item.status === 'ready');
+  const attentionPackages = packages.filter(item => item.status !== 'ready');
+  const blockedPackages = packages.filter(item => item.status === 'blocked');
+  const totalFiles = packages.reduce((total, item) => total + item.files.length, 0);
+  const readyFiles = packages.reduce((total, item) => total + item.readyFiles.length, 0);
+
+  renderMetricSummary('deliveryHealthSummary', [
+    { label: '可交付项目包', value: readyPackages.length, meta: `${readyPackages.length}/${packages.length} 个项目资料齐全` },
+    { label: '待补资料包', value: attentionPackages.length, meta: attentionPackages.length ? '优先处理交付待办队列' : '当前无交付缺口' },
+    { label: '阻断资料', value: blockedPackages.reduce((total, item) => total + item.blockedFiles.length, 0), meta: blockedPackages.length ? '生成失败、过期或已撤销' : '暂无阻断资料' },
+    { label: '资料就绪率', value: totalFiles ? `${Math.round(readyFiles / totalFiles * 100)}%` : '0%', meta: `${readyFiles}/${totalFiles} 份资料可直接下载` }
+  ]);
+
+  const taskNode = $('deliveryTaskQueue');
+  if (taskNode) {
+    taskNode.innerHTML = attentionPackages.length ? attentionPackages.map(item => {
+      const blocked = item.status === 'blocked';
+      const issue = blocked ? item.blockedFiles.map(file => file.name || deliveryTypeLabels[file.type] || '交付资料').join('、') : item.missingTypes.map(type => deliveryTypeLabels[type]).join('、');
+      return `<article class="delivery-task-card is-${item.status}"><div class="delivery-task-main"><div>${deliveryPackageBadge(item.status)}<span>${text(item.project.customer_name || item.project.customer_id || '平台客户')}</span></div><strong>${text(item.project.name || item.project.id || '未命名项目')}</strong><p>${blocked ? `以下资料需要恢复后才能交付：${text(issue)}` : `缺少必交资料：${text(issue)}`}</p><small>完整度 ${item.readiness} · ${item.assets.length} 个 MCP 资产</small></div><div class="delivery-task-actions"><button type="button" class="primary-btn small" onclick="openDeliveryRepairDrawer('${escapeJs(item.project.id || '')}')">补齐资料</button><button type="button" class="ghost-btn small" onclick="openProjectDrawer('${escapeJs(item.project.id || '')}')">预览交付包</button></div></article>`;
+    }).join('') : '<div class="empty-state">当前没有交付待办，所有项目包均已具备交付条件。</div>';
+  }
+
+  const evidenceNode = $('deliveryEvidencePanel');
+  if (evidenceNode) {
+    evidenceNode.innerHTML = packages.length ? packages.slice(0, 4).map(item => `<div class="delivery-evidence-item"><strong>${text(item.project.name || item.project.id || '-')}</strong><span>发布版本：${text(item.release?.version || '待发布')}</span><span>调用证据：${text(item.recentEvent?.trace_id || '暂无 Trace')}</span><small>${text(item.recentEvent?.created_at || item.release?.released_at || item.release?.tested_at || '暂无更新时间')}</small></div>`).join('') : '<div class="empty-state">暂无可关联发布版本或调用证据的项目。</div>';
+  }
+
+  const packageNode = $('deliveryPackageRows');
+  if (packageNode) {
+    packageNode.innerHTML = packages.length ? packages.map(item => {
+      const requiredFiles = ['config', 'test-report', 'run-guide'].map(type => {
+        const file = item.files.find(entry => entry.type === type && entry.status === 'ready');
+        return `<span class="delivery-package-file ${file ? 'is-ready' : 'is-missing'}">${file ? '✓' : '○'} ${deliveryTypeLabels[type]}</span>`;
+      }).join('');
+      const firstReadyFile = item.readyFiles[0];
+      return `<article class="delivery-package-card is-${item.status}"><div class="delivery-package-head"><div><div class="delivery-package-title">${deliveryPackageBadge(item.status)}<strong>${text(item.project.name || item.project.id || '未命名项目')}</strong></div><span>${text(item.project.customer_name || item.project.customer_id || '平台客户')} · ${item.assets.length} 个 MCP</span></div><b>完整度 ${item.readiness}</b></div><div class="delivery-package-files">${requiredFiles}</div><div class="delivery-package-evidence"><span>发布版本：${text(item.release?.version || '待发布')}</span><span>调用证据：${text(item.recentEvent?.trace_id || '暂无 Trace')}</span></div><div class="delivery-package-actions"><button type="button" class="ghost-btn small" onclick="openProjectDrawer('${escapeJs(item.project.id || '')}')">预览交付包</button>${firstReadyFile ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${escapeJs(firstReadyFile.id)}')">下载资料</button>` : '<span class="muted-line">资料整理中</span>'}</div></article>`;
+    }).join('') : '<div class="empty-state">暂无项目交付包，请先完成 MCP 发布并归档交付资料。</div>';
+  }
+}
+function renderDeliveryRepairDrawer() {
+  const projectId = state.deliveryRepairProjectId;
+  const project = list(state.projects).find(item => item.id === projectId);
+  const deliveryPackage = project ? deliveryPackages(list(state.deliverables), [project])[0] : null;
+  const missingTypes = deliveryPackage?.missingTypes || [];
+  const projectName = project?.name || '项目交付包';
+  const projectKey = escapeJs(projectId || '');
+  const sourceMap = {
+    config: '根据 MCP 资产、发布版本和接入配置生成。',
+    'test-report': '根据测试发布结果、Tool 验证和 Trace 生成。',
+    'run-guide': '根据接入地址、鉴权范围和运行环境生成。'
+  };
+  const autoRows = missingTypes.length ? missingTypes.map(type => '<article class="delivery-repair-item"><div><strong>' + text(deliveryTypeLabels[type]) + '</strong><p>' + text(sourceMap[type]) + '</p></div><button type="button" class="primary-btn small" onclick="generateDeliveryMaterial(\'' + projectKey + '\', \'' + type + '\')">自动生成</button></article>').join('') : '<div class="empty-state">必交资料已齐全，如需补充客户签收单或实施文档，可在下方上传。</div>';
+  const body = '<div class="drawer-panel"><h4>必交资料</h4><p>当前完整度 ' + text(deliveryPackage?.readiness || '0/3') + '，自动生成后会立即刷新项目交付包。</p><div class="delivery-repair-list">' + autoRows + '</div></div>' +
+    '<div class="drawer-panel"><h4>上传人工资料</h4><p>上传的文件会作为真实交付物保存并可直接下载。选择必交类型时，该文件会计入交付完整度。</p><div class="delivery-upload-form"><select id="deliveryUploadType" aria-label="交付资料类型"><option value="manual-document">其他人工资料</option><option value="config">配置包</option><option value="test-report">验收报告</option><option value="run-guide">运行说明</option></select><input id="deliveryUploadFile" type="file" aria-label="选择交付文件"><button type="button" class="primary-btn" onclick="uploadDeliveryMaterial(\'' + projectKey + '\')">上传文件</button></div></div>';
+  renderDrawer('deliveryRepairDrawer', 'deliveryRepairBackdrop', 'deliveryRepairTitle', 'deliveryRepairContent', Boolean(state.deliveryRepairDrawerOpen && project), projectName + ' · 补齐资料', body);
+}
 function renderDeliverables() {
   const stepBar = $('deliveryStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(10);
@@ -1442,6 +1354,9 @@ function renderDeliverables() {
         return proj?.customer_id === selectedCustomer;
       })
     : allDeliverables;
+
+  const packageProjects = selectedCustomer ? projects.filter(item => item.customer_id === selectedCustomer) : null;
+  renderDeliveryCommandCenter(deliverables, packageProjects);
 
   const controls = $('deliverableControls');
   if (controls) controls.innerHTML = '<div class="filter-summary"><span>交付资料按项目和类型归档</span></div>';
@@ -1660,6 +1575,214 @@ function renderMonitoringPage() {
     successNode.innerHTML = successes.slice(0, 5).map(item => `<button type="button" class="monitoring-success-item" onclick="openUsageDrawer('${escapeJs(item.id || item.trace_id)}')"><strong>${text(item.asset_name || item.asset_id || '-')}</strong><span>${text(item._tool)} · ${text(item.latency_ms ?? '-')} ms</span><code>${text(item.trace_id || '-')}</code></button>`).join('') || '<div class="empty-state">暂无成功调用记录。</div>';
   }
 }
+function governanceTaskBadge(priority) {
+  if (priority <= 1) return '<span class="badge danger">P0 阻断</span>';
+  if (priority === 2) return '<span class="badge warning">P1 待处理</span>';
+  return '<span class="badge info">P2 优化</span>';
+}
+
+function governanceTasks() {
+  const tasks = [];
+  const policies = list(state.policies);
+  const accessItems = list(state.access);
+  const assets = list(state.assets);
+  const events = [...list(state.events), ...governanceFailureEvents()].map(item => ({ ...item, _type: classifyCallEvent(item), _tool: eventToolName(item) }));
+  const failures = events.filter(item => item._type !== 'success');
+
+  governanceFailureEvents().forEach(item => tasks.push({
+    id: 'publish_' + (item.trace_id || item.id || tasks.length),
+    priority: 1,
+    type: '发布准入阻断',
+    title: item.check || '发布验收失败',
+    desc: '验收未通过会阻断 MCP 交付，建议先打开 Trace 定位失败原因。',
+    customer: item.customer_name || '交付项目',
+    project: item.project_name || item.asset_name || '发布验收',
+    asset: item.asset_name || item.asset_id || 'MCP',
+    tool: item._tool || eventToolName(item),
+    trace: item.trace_id || '',
+    actionLabel: '查看 Trace',
+    action: "navigateToPage('monitoring', { eventId: '" + escapeJs(item.trace_id || item.id || '') + "' })"
+  }));
+
+  accessItems.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error').forEach(item => tasks.push({
+    id: 'access_' + item.id,
+    priority: 1,
+    type: '接入健康异常',
+    title: item.name || '接入项异常',
+    desc: item.last_health_detail?.message || item.description || '凭证、证书或上游连接需要复核。',
+    customer: item.customer_name || item.customer_id || '未知客户',
+    project: item.project_name || item.project_id || '未分配项目',
+    asset: item.type || '接入项',
+    tool: item.environment || 'gateway',
+    trace: item.last_health_detail?.trace_id || '',
+    actionLabel: '验证接入',
+    action: "switchAccessTab('access-test')"
+  }));
+
+  policies.filter(item => item.status !== 'enabled').forEach(item => tasks.push({
+    id: 'policy_' + item.id,
+    priority: 2,
+    type: '规则未启用',
+    title: item.name || '网关策略待启用',
+    desc: '策略未启用会影响鉴权、限流、脱敏和审计闭环。',
+    customer: item.customer_name || '平台客户',
+    project: item.project_name || item.project_id || '未分配项目',
+    asset: '网关策略',
+    tool: item.auth_mode || 'auth',
+    trace: '',
+    actionLabel: '编辑规则',
+    action: "editPolicy('" + escapeJs(item.id || '') + "')"
+  }));
+
+  assets.filter(asset => !policies.some(policy => policy.project_id === asset.project_id)).forEach(asset => tasks.push({
+    id: 'coverage_' + asset.id,
+    priority: 2,
+    type: '策略缺失',
+    title: asset.name || 'MCP 缺少治理策略',
+    desc: '建议补齐鉴权、限流、脱敏和审计开关后再进入正式交付。',
+    customer: asset.customer_name || asset.customer_id || '未知客户',
+    project: asset.project_name || asset.project_id || '未分配项目',
+    asset: asset.name || asset.id || 'MCP',
+    tool: 'gateway_policy',
+    trace: '',
+    actionLabel: '新增规则',
+    action: "document.getElementById('createPolicyBtn')?.click()"
+  }));
+
+  const authGroups = new Map();
+  failures.filter(item => ['401', '403'].includes(item._type)).forEach(item => {
+    const key = [item.customer_name || item.customer_id || '未知客户', item.asset_name || item.asset_id || 'MCP'].join('|');
+    if (!authGroups.has(key)) authGroups.set(key, []);
+    authGroups.get(key).push(item);
+  });
+  authGroups.forEach(group => {
+    const latest = group[0];
+    tasks.push({
+      id: 'auth_' + (latest.trace_id || latest.id || group.length),
+      priority: 1,
+      type: '授权失败聚合',
+      title: `${latest.asset_name || latest.asset_id || 'MCP'} 出现 ${group.length} 次授权失败`,
+      desc: '401/403 代表客户凭证、策略范围或调用方身份需要治理。',
+      customer: latest.customer_name || latest.customer_id || '未知客户',
+      project: latest.project_name || latest.project_id || '未分配项目',
+      asset: latest.asset_name || latest.asset_id || 'MCP',
+      tool: latest._tool || '-',
+      trace: latest.trace_id || '',
+      actionLabel: '跳转监控',
+      action: "navigateToPage('monitoring', { eventId: '" + escapeJs(latest.id || latest.trace_id || '') + "' })"
+    });
+  });
+
+  return tasks.sort((a, b) => a.priority - b.priority || String(a.type).localeCompare(String(b.type))).slice(0, 8);
+}
+
+function governanceCoverageItems() {
+  const policies = list(state.policies);
+  const accessItems = list(state.access);
+  const failures = [...list(state.events), ...governanceFailureEvents()].map(item => ({ ...item, _type: classifyCallEvent(item) })).filter(item => item._type !== 'success');
+  return list(state.assets).slice(0, 12).map(asset => {
+    const policy = policies.find(item => item.project_id === asset.project_id);
+    const access = accessItems.find(item => item.project_id === asset.project_id || item.customer_id === asset.customer_id);
+    const hasFailure = failures.some(item => item.asset_id === asset.id || item.asset_name === asset.name || item.project_id === asset.project_id);
+    const hasMasking = Boolean(policy?.masking_rules && policy.masking_rules !== '[]');
+    const hasAudit = policy?.audit_enabled !== 0;
+    const healthyAccess = access && !['disabled', 'revoked', 'expired', 'error'].includes(access.status) && access.last_health_status !== 'error';
+    let status = 'partial';
+    if (!policy) status = 'missing';
+    else if (hasFailure || !healthyAccess) status = 'risk';
+    else if (policy.status === 'enabled' && hasMasking && hasAudit) status = 'covered';
+    return { asset, policy, access, status, hasMasking, hasAudit, healthyAccess };
+  });
+}
+
+function governanceStatusLabel(status) {
+  return { covered: '已覆盖', partial: '部分覆盖', risk: '风险', missing: '未配置' }[status] || status;
+}
+
+function renderGovernanceCoverageMatrix(items) {
+  const node = $('governanceCoverageMatrix');
+  if (!node) return;
+  node.innerHTML = items.length ? items.map(item => `<article class="governance-coverage-cell is-${item.status}">
+    <div><strong>${text(item.asset.customer_name || item.asset.customer_id || '未知客户')}</strong><span>${text(item.asset.name || item.asset.id || '-')}</span></div>
+    <b>${governanceStatusLabel(item.status)}</b>
+    <small>鉴权 ${item.policy ? '已配' : '缺失'} · 限流 ${item.policy?.rate_limit || '-'} · 脱敏 ${item.hasMasking ? '已配' : '待补'} · 审计 ${item.hasAudit ? '开启' : '关闭'}</small>
+  </article>`).join('') : '<div class="empty-state">暂无 MCP 资产可生成覆盖矩阵。</div>';
+}
+
+function governanceAuditItems() {
+  const policyItems = list(state.policyChanges).map((item, index) => ({
+    id: 'policy_' + (item.id || item.changed_at || index),
+    time: item.changed_at || '-',
+    type: '规则变更',
+    title: item.policy_id || '网关策略',
+    desc: `${item.field || '-'}：${item.old_value || '-'} -> ${item.new_value || '-'}`,
+    actor: item.changed_by || '-'
+  }));
+  const accessItems = list(state.accessAudit).map((item, index) => ({
+    id: 'access_' + (item.id || item.changed_at || index),
+    time: item.changed_at || '-',
+    type: '接入变更',
+    title: item.access_id || '接入项',
+    desc: `${item.field || '-'}：${item.old_value || '-'} -> ${item.new_value || '-'}`,
+    actor: item.changed_by || '-'
+  }));
+  const failureItems = governanceFailureEvents().map((item, index) => ({
+    id: 'failure_' + (item.trace_id || item.id || index),
+    time: item.created_at || '-',
+    type: '发布阻断',
+    title: item.check || '验收失败',
+    desc: `Trace ID：${item.trace_id || '-'}`,
+    actor: '验收流程'
+  }));
+  return [...policyItems, ...accessItems, ...failureItems].sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, 8);
+}
+
+function renderGovernanceAuditTimeline(items) {
+  const node = $('governanceAuditTimeline');
+  if (!node) return;
+  node.innerHTML = items.length ? items.map(item => `<div class="governance-audit-item"><span>${text(item.type)}</span><strong>${text(item.title)}</strong><p>${text(item.desc)}</p><small>${text(item.time)} · ${text(item.actor)}</small></div>`).join('') : '<div class="empty-state">暂无审计证据。</div>';
+}
+
+function renderGovernanceImpactPanel(tasks) {
+  const node = $('governanceImpactPanel');
+  if (!node) return;
+  const customers = new Set(tasks.map(item => item.customer).filter(Boolean));
+  const projects = new Set(tasks.map(item => item.project).filter(Boolean));
+  const assets = new Set(tasks.map(item => item.asset).filter(Boolean));
+  const tools = new Set(tasks.map(item => item.tool).filter(Boolean));
+  node.innerHTML = `<div class="governance-impact-grid"><div><span>客户</span><strong>${customers.size}</strong></div><div><span>项目</span><strong>${projects.size}</strong></div><div><span>MCP</span><strong>${assets.size}</strong></div><div><span>Tool</span><strong>${tools.size}</strong></div></div><div class="governance-impact-list">${tasks.slice(0, 4).map(item => `<p><strong>${text(item.customer)}</strong><span>${text(item.project)} / ${text(item.asset)} / ${text(item.tool)}</span></p>`).join('') || '<p><strong>暂无风险影响</strong><span>当前治理状态稳定</span></p>'}</div>`;
+}
+
+function renderGovernanceCommandCenter() {
+  if (isCustomerView()) return;
+  const tasks = governanceTasks();
+  const coverageItems = governanceCoverageItems();
+  const auditItems = governanceAuditItems();
+  const p0Count = tasks.filter(item => item.priority <= 1).length;
+  const coveredCount = coverageItems.filter(item => item.status === 'covered').length;
+  const coverageRate = coverageItems.length ? Math.round(coveredCount / coverageItems.length * 100) : 0;
+  const auditCompleteness = Math.min(100, Math.round((auditItems.length / Math.max(1, tasks.length + 2)) * 100));
+  const healthScore = Math.max(0, 100 - p0Count * 12 - tasks.filter(item => item.priority === 2).length * 5 - coverageItems.filter(item => item.status === 'missing').length * 6);
+
+  renderMetricSummary('governanceHealthSummary', [
+    { label: '治理健康分', value: healthScore, meta: healthScore >= 80 ? '可进入稳定交付' : '存在阻断或规则缺口' },
+    { label: 'P0 阻断项', value: p0Count, meta: p0Count ? '优先处理待办队列顶部' : '暂无高危阻断' },
+    { label: '策略覆盖率', value: `${coverageRate}%`, meta: `${coveredCount}/${coverageItems.length || 0} 个 MCP 完整覆盖` },
+    { label: '审计完整度', value: `${auditCompleteness}%`, meta: `${auditItems.length} 条可追溯证据` }
+  ]);
+
+  const queue = $('governanceTaskQueue');
+  if (queue) {
+    queue.innerHTML = tasks.length ? tasks.map(item => `<article class="governance-task-card priority-${item.priority}">
+      <div class="governance-task-main"><div>${governanceTaskBadge(item.priority)}<span class="governance-task-type">${text(item.type)}</span></div><strong>${text(item.title)}</strong><p>${text(item.desc)}</p><small>${text(item.customer)} / ${text(item.project)} / ${text(item.asset)}${item.trace ? ` · Trace ${text(item.trace)}` : ''}</small></div>
+      <div class="governance-task-actions"><button type="button" class="primary-btn small" onclick="${item.action}">${text(item.actionLabel)}</button><button type="button" class="ghost-btn small" onclick="navigateToPage('governance')">标记跟进</button></div>
+    </article>`).join('') : '<div class="empty-state">暂无治理待办。当前 MCP 策略、接入和审计状态稳定。</div>';
+  }
+
+  renderGovernanceImpactPanel(tasks);
+  renderGovernanceCoverageMatrix(coverageItems);
+  renderGovernanceAuditTimeline(auditItems);
+}
 function renderAccess() {
   const allAccess = list(state.access);
   const blocked = allAccess.filter(item => ['disabled', 'revoked', 'expired', 'error'].includes(item.status) || item.last_health_status === 'error');
@@ -1862,9 +1985,44 @@ function renderProjectDrawer() {
   const id = state.selectedProjectId;
   const detail = state.projectDetails?.[id] || {};
   const project = detail.project || list(state.projects).find(item => item.id === id) || null;
-  renderDrawer('projectDrawer', 'projectDrawerBackdrop', 'projectDrawerTitle', 'projectDrawerContent', Boolean(state.projectDrawerOpen && id), project?.name || '项目详情', `<div class="drawer-panel"><h4>项目概况</h4><p>${text(project?.customer_name || project?.customer_id || '-')} \u00b7 ${text(project?.stage || '-')}</p><p>${text(project?.description || '暂无项目说明')}</p></div><div class="drawer-panel"><h4>当前进度</h4><p>负责人：${text(project?.owner || '-')}</p><p>截止时间：${text(project?.due_date || '-')}</p><p>业务资料：${list(detail.sources).length || list(state.sources).filter(item => item.project_id === id).length} 份</p></div>`);
+  const draft = state.projectDrafts?.[id] || {
+    name: project?.name || '',
+    status: project?.status || project?.stage || 'draft',
+    implementer: project?.implementer || project?.owner || '',
+    progress: project?.progress ?? '',
+    deadline: project?.deadline || project?.due_date || '',
+    description: project?.description || ''
+  };
+  const body = `<div class="drawer-panel"><h4>项目编辑</h4>
+    <label>项目名称<input id="projectNameInput" value="${escapeHtml(draft.name)}" oninput="updateProjectDraft('${escapeJs(id)}', { name: this.value })"></label>
+    <label>项目说明<textarea id="projectDescriptionInput" oninput="updateProjectDraft('${escapeJs(id)}', { description: this.value })">${escapeHtml(draft.description)}</textarea></label>
+    <label>实施负责人<input id="projectImplementerInput" value="${escapeHtml(draft.implementer)}" oninput="updateProjectDraft('${escapeJs(id)}', { implementer: this.value })"></label>
+    <label>项目进度<input id="projectProgressInput" type="number" min="0" max="100" value="${escapeHtml(String(draft.progress))}" oninput="updateProjectDraft('${escapeJs(id)}', { progress: this.value })"></label>
+    <label>交付日期<input id="projectDeadlineInput" type="date" value="${escapeHtml(draft.deadline)}" oninput="updateProjectDraft('${escapeJs(id)}', { deadline: this.value })"></label>
+    <div class="row-actions"><button type="button" class="primary-btn small" onclick="saveProjectDraft()">保存项目</button></div>
+  </div><div class="drawer-panel"><h4>项目概况</h4><p>${text(project?.customer_name || project?.customer_id || '-')} · ${text(draft.status || '-')}</p><p>业务资料：${list(detail.sources).length || list(state.sources).filter(item => item.project_id === id).length} 份</p></div>`;
+  renderDrawer('projectDrawer', 'projectDrawerBackdrop', 'projectDrawerTitle', 'projectDrawerContent', Boolean(state.projectDrawerOpen && id), project?.name || '项目详情', body);
 }
-
+function renderDeliveryPackageEditor() {
+  if (!state.projectDrawerOpen || !state.selectedProjectId || isCustomerView()) return;
+  const node = $('projectDrawerContent');
+  const project = list(state.projects).find(item => item.id === state.selectedProjectId);
+  if (!node || !project) return;
+  const record = list(state.deliveryPackageRecords).find(item => item.project_id === project.id) || {};
+  const projectAssets = list(state.assets).filter(item => item.project_id === project.id);
+  const assetIds = new Set(projectAssets.map(item => item.id));
+  const hasPublishedMcp = list(state.releases).some(item => assetIds.has(item.asset_id) && item.status === 'published');
+  const requiredTypes = ['config', 'test-report', 'run-guide'];
+  const hasRequiredMaterials = requiredTypes.every(type => list(state.deliverables).some(item => item.project_id === project.id && item.type === type && item.status === 'ready'));
+  const canPublishDelivery = hasPublishedMcp && hasRequiredMaterials;
+  const recipient = project.customer_name || project.customer_id || '项目所属客户';
+  const title = record.title || `${project.name} 交付包`;
+  const note = record.delivery_note || '';
+  const published = Number(record.customer_visible) === 1;
+  const blockedHint = !hasPublishedMcp ? '请先上线 MCP 版本，再发布交付包。' : !hasRequiredMaterials ? '请先补齐配置包、验收报告和运行说明。' : '';
+  // \u53d1\u5e03\u4ea4\u4ed8\u5305\u7ed9\u5ba2\u6237
+  node.insertAdjacentHTML('beforeend', `<div class="drawer-panel"><h4>交付包发布</h4><p>收件客户：${text(recipient)}。发布后仅该客户可见。</p><label>交付标题<input id="deliveryPackageTitle" value="${escapeHtml(title)}"></label><label>交付说明<textarea id="deliveryPackageNote">${escapeHtml(note)}</textarea></label>${blockedHint ? `<p class="muted-line">${blockedHint}</p>` : ''}<div class="row-actions"><button type="button" class="primary-btn small" onclick="saveDeliveryPackage('${escapeJs(project.id)}', 1)" ${canPublishDelivery ? '' : 'disabled'}>发布交付包给客户</button><button type="button" class="ghost-btn small" onclick="saveDeliveryPackage('${escapeJs(project.id)}', 0)">${published ? '撤回交付' : '保存草稿'}</button></div></div>`);
+}
 function renderPublishDrawer() {
   const release = adminReleases().find(item => item.id === state.selectedReleaseId);
   const isPublished = release?.status === 'published';
@@ -2376,6 +2534,19 @@ function renderCustomerReleaseTimeline() {
   renderCardList('customerReleaseTimeline', cards, '最近还没有新的交付版本');
 }
 
+
+export function renderCustomerWorkBuddy() {
+  const select = $('customerWorkBuddyAssetSelect');
+  const deployButton = $('customerWorkBuddyDeployBtn');
+  if (!select || !deployButton) return;
+  const assets = customerAssets().filter(asset => list(asset.tools).some(tool => tool && typeof tool === 'object' && (tool.name || tool.display_name)));
+  const selectedId = select.value;
+  select.innerHTML = assets.length
+    ? assets.map(asset => `<option value="${escapeJs(asset.id)}">${text(displayAssetName(asset.name))} (${list(asset.tools).length} Tool)</option>`).join('')
+    : '<option value="">&#26242;&#26080;&#21487;&#32852;&#35843;&#30340;&#24050;&#20132;&#20184; MCP &#36164;&#20135;</option>';
+  if (assets.some(asset => asset.id === selectedId)) select.value = selectedId;
+  deployButton.disabled = !assets.length;
+}
 function renderCustomerDashboard() {
   const dashboard = state.customerDashboard || {};
   const assets = customerAssets();
@@ -2870,6 +3041,54 @@ function harmonizeAdminCopy() {
   if (currentUser) currentUser.textContent = state.user ? `${state.user.display_name || state.user.username || '用户'} \u00b7 ${isCustomerView() ? '客户侧' : '工厂侧'}` : '未登录';
 }
 
+function renderSettingsCenter() {
+  const root = $('settingsHealthSummary');
+  if (!root) return;
+  const keys = list(state.access);
+  const activeKeys = keys.filter(item => item.status === 'active').length;
+  const expiringKeys = keys.filter(item => item.expires_at && new Date(item.expires_at).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000).length;
+  const billing = adminBilling();
+  renderMetricSummary('settingsHealthSummary', [
+    { label: '\u6709\u6548 API \u51ed\u8bc1', value: activeKeys, meta: keys.length + '\u4e2a\u63a5\u5165\u65b9\u7eb3\u5165\u7ba1\u7406' },
+    { label: '\u8fd130 \u5929\u5230\u671f', value: expiringKeys, meta: expiringKeys ? '\u9700\u8981\u5b89\u6392\u8f6e\u6362' : '\u6682\u65e0\u5230\u671f\u98ce\u9669' },
+    { label: 'AI \u5f15\u64ce', value: state.aiConfig?.configured ? '\u5df2\u914d\u7f6e' : '\u672a\u914d\u7f6e', meta: state.aiConfig?.model || '\u670d\u52a1\u7aef\u51ed\u8bc1\u7ba1\u7406' },
+    { label: '\u5f85\u786e\u8ba4\u8d26\u5355', value: billing.filter(item => item.status === 'pending').length, meta: '\u8d26\u671f\u4e0e\u989d\u5ea6\u5f02\u5e38\u4f18\u5148\u5904\u7406' }
+  ]);
+
+  const activeTab = state.settingsTab || 'overview';
+  document.querySelectorAll('[data-settings-tab]').forEach(button => button.classList.toggle('active', button.dataset.settingsTab === activeTab));
+  document.querySelectorAll('[data-settings-pane]').forEach(panel => { panel.hidden = panel.dataset.settingsPane !== activeTab; });
+
+  const aiPanel = $('settingsAiWorkBuddyPanel');
+  if (aiPanel) {
+    const configured = Boolean(state.aiConfig?.configured);
+    aiPanel.innerHTML = '<div class="panel-head"><div><h3>AI \u4e0e WorkBuddy</h3><small class="muted-line">\u8bbe\u7f6e\u9875\u53ea\u5c55\u793a\u670d\u52a1\u72b6\u6001\uff0c\u4e0d\u663e\u793a\u6216\u4f20\u9012\u6a21\u578b\u5bc6\u94a5\u3002</small></div><span>' + badge(configured ? 'active' : 'pending') + '</span></div><div class="settings-ai-grid"><div class="settings-default-card"><span>AI \u5f15\u64ce\u72b6\u6001</span><strong>' + (configured ? '\u5df2\u914d\u7f6e' : '\u672a\u914d\u7f6e') + '</strong><p>' + text(state.aiConfig?.model || '\u8bf7\u5728\u670d\u52a1\u7aef .env \u4e2d\u914d\u7f6e\u6a21\u578b') + '</p></div><div class="settings-default-card"><span>\u51ed\u8bc1\u4fdd\u7ba1</span><strong>\u4ec5\u670d\u52a1\u7aef\u4fdd\u5b58</strong><p>\u6d4f\u89c8\u5668\u4e0d\u4fdd\u5b58 API Key\uff0c\u4f01\u4e1a\u7528\u6237\u4e0d\u53ef\u89c1\u3002</p></div><div class="settings-default-card"><span>WorkBuddy \u8054\u8c03</span><strong>\u6309\u8d44\u4ea7\u8303\u56f4\u6388\u6743</strong><p>\u7ba1\u7406\u5458\u4ece\u201c\u4e0a\u7ebf MCP \u7248\u672c\u201d\u8fdb\u5165\uff0c\u5ba2\u6237\u4ece\u201c\u63a5\u5165\u914d\u7f6e\u201d\u6d4b\u8bd5\u5df2\u4ea4\u4ed8\u8d44\u4ea7\u3002</p></div></div>';
+  }
+
+  const notificationPanel = $('settingsNotificationPanel');
+  if (notificationPanel) {
+    const preferences = state.settingsNotificationPreferences || {};
+    const items = [
+      ['credentialExpiry', '\u51ed\u8bc1\u5230\u671f\u63d0\u9192', '\u5728 API Key \u5230\u671f\u524d 30 \u5929\u63d0\u9192\u7ba1\u7406\u5458'],
+      ['callFailure', '\u8c03\u7528\u5f02\u5e38\u63d0\u9192', '\u5f53 MCP \u8c03\u7528\u5f02\u5e38\u6216\u5931\u8d25\u65f6\u8fdb\u5165\u8fd0\u884c\u76d1\u63a7\u5f85\u529e'],
+      ['deliveryReady', '\u4ea4\u4ed8\u5b8c\u6210\u63d0\u9192', '\u4ea4\u4ed8\u5305\u5168\u90e8\u5c31\u7eea\u540e\u63d0\u9192\u8fdb\u884c\u53d1\u5e03']
+    ];
+    notificationPanel.innerHTML = '<div class="panel-head"><div><h3>\u901a\u77e5\u7b56\u7565</h3><small class="muted-line">POC \u73af\u5883\u4e2d\u4fdd\u5b58\u672c\u6b21\u4f1a\u8bdd\u504f\u597d\uff0c\u6b63\u5f0f\u73af\u5883\u53ef\u5bf9\u63a5\u4f01\u4e1a\u6d88\u606f\u901a\u77e5\u901a\u9053\u3002</small></div></div><div class="settings-notification-list">' + items.map(item => '<button type="button" class="settings-notification-toggle ' + (preferences[item[0]] ? 'is-enabled' : '') + '" onclick="toggleSettingsNotification(\'' + item[0] + '\')"><span><strong>' + item[1] + '</strong><small>' + item[2] + '</small></span><b>' + (preferences[item[0]] ? '\u5df2\u5f00\u542f' : '\u5df2\u5173\u95ed') + '</b></button>').join('') + '</div>';
+  }
+}
+
+window.switchSettingsTab = function switchSettingsTab(tab) {
+  if (!['overview', 'access', 'ai', 'billing', 'knowledge'].includes(tab)) return;
+  state.settingsTab = tab;
+  renderSettingsCenter();
+};
+
+window.toggleSettingsNotification = function toggleSettingsNotification(key) {
+  const preferences = state.settingsNotificationPreferences || {};
+  if (!(key in preferences)) return;
+  state.settingsNotificationPreferences = { ...preferences, [key]: !preferences[key] };
+  renderSettingsCenter();
+};
 export function renderAll() {
   if (typeof document === 'undefined') return;
   harmonizeAdminCopy();
@@ -2884,6 +3103,7 @@ export function renderAll() {
   renderPublish();
   renderDeliverables();
   renderMonitoringPage();
+  renderGovernanceCommandCenter();
   renderAccess();
   renderGateway();
   renderPolicyChanges();
@@ -2891,14 +3111,18 @@ export function renderAll() {
   renderApiKeys();
   renderKnowledge();
   renderBilling();
+  renderSettingsCenter();
   renderCustomerBuilder();
   renderCustomerOverview();
   renderCustomerDashboard();
+  renderCustomerWorkBuddy();
   renderCustomerUsage();
   renderCustomerBilling();
   renderCustomerDeliverables();
   renderCustomerAccess();
   renderProjectDrawer();
+  renderDeliveryPackageEditor();
+  renderDeliveryRepairDrawer();
   renderPublishDrawer();
   renderUsageDrawer();
   renderBillingDrawer();
@@ -3091,13 +3315,9 @@ export function renderReviewWorkbench() {
         html += '</div>';
       });
       html += '</div></div>';
-      // 已决定的候选也提供操作按钮
-      html += '<div class="row-actions" style="padding:0 16px 16px">';
       if (selected.manual_screen_decision === 'approve') {
-        html += '<button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button>';
+        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div>';
       }
-      html += '<button type="button" class="ghost-btn small" onclick="resetCandidateScreen(\'' + escapeJs(selected.id) + '\')">重新审核</button>';
-      html += '</div>';
     } else {
       const riskBadge = selected.risk_level === 'high' ? '<span class="badge danger">高风险</span>' : selected.risk_level === 'medium' ? '<span class="badge warning">中风险</span>' : '<span class="badge success">低风险</span>';
       html += riskBadge + '</div>';

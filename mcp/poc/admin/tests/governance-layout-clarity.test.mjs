@@ -13,7 +13,7 @@ const styles = await readFile(stylesFilePath, 'utf8');
 
 assert.match(html, /switchAccessTab\('access-audit'\)">变更/u);
 assert.match(html, /<div class="panel-head"><h3>变更记录<\/h3><\/div>/u);
-assert.match(html, /switchAccessTab\('access-overview'\)">总览/u);
+assert.match(html, /switchAccessTab\('access-overview'\)">接入台账/u);
 assert.match(html, /switchAccessTab\('access-health'\)">健康/u);
 
 assert.match(styles, /\.access-overview-grid/u);

@@ -15,13 +15,13 @@ export const state = {
   projects: [],
   sources: [],
   assets: [],
-  pocRuntimes: [],
   releases: [],
   policies: [],
   policyChanges: [],
   events: [],
   billing: [],
   deliverables: [],
+  deliveryPackageRecords: [],
   access: [],
   accessHealth: [],
   accessAudit: [],
@@ -67,6 +67,8 @@ export const state = {
   usageDrawerOpen: false,
   billingDrawerOpen: false,
   deliverableDrawerOpen: false,
+  deliveryRepairDrawerOpen: false,
+  deliveryRepairProjectId: '',
   knowledgeDrawerOpen: false,
   projectDetailLoading: false,
   projectSaving: false,
@@ -143,11 +145,10 @@ export const state = {
   reviews: [],
   toolDrafts: [],
   governanceDemoOverview: null,
-  // 复盘与复用（嵌入 MCP 资产页）
-  retroSummary: null,
-  retroReasons: [],
-  reuseSuggestions: [],
+  pendingWorkBuddyAssetId: '',
   selectedCandidateId: '',
+  settingsTab: 'overview',
+  settingsNotificationPreferences: { credentialExpiry: true, callFailure: true, deliveryReady: true },
   currentPage: 'summary'
 };
 
@@ -160,9 +161,9 @@ export const navItems = [
   { id: 'tooling', label: '人工确认 Tool 边界', icon: '🔧', desc: '步骤 5：确认 Tool 名称、参数边界、读写权限与安全规则', roles: ['admin'] },
   { id: 'tool-draft', label: '生成 Tool 草稿', icon: '📝', desc: '步骤 6：Tool 边界确认后生成 Tool 草稿，供 MCP 组装使用', roles: ['admin'] },
   { id: 'mcp-compose', label: '人工确认 MCP 组成', icon: '🧱', desc: '步骤 7：按业务场景确认 MCP 由哪些 Tool 组成', roles: ['admin'] },
-  { id: 'assets', label: '生成 MCP 草稿', icon: '📦', desc: '步骤 8：组装 MCP 草稿，管理 MCP 资产、复用建议与复盘', roles: ['admin'] },
-  { id: 'publish', label: '测试发布', icon: '🚀', desc: '步骤 9：沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
-  { id: 'delivery', label: '交付管理', icon: '📋', desc: '步骤 10：交付团队归档与复盘，配置包、测试报告、调用日志等交付物', roles: ['admin'] },
+  { id: 'assets', label: '生成 MCP 草稿', icon: '📦', desc: '步骤 8：组装 MCP 草稿并管理 MCP 资产', roles: ['admin'] },
+  { id: 'publish', label: '上线 MCP 版本', icon: '🚀', desc: '步骤 9：沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
+  { id: 'delivery', label: '交付包管理', icon: '📋', desc: '步骤 10：交付团队归档与复盘，配置包、测试报告、调用日志等交付物', roles: ['admin'] },
   { id: 'monitoring', label: '调用监控', icon: '📈', desc: '步骤 11：异常优先查看 Tool 调用、Trace ID 和诊断动作', roles: ['admin'] },
   { id: 'governance', label: '治理统计', icon: '🛡️', desc: '步骤 12：网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
   { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
@@ -183,7 +184,7 @@ export function getNavItems() {
 }
 
 export const statusText = {
-  published: '已发布',
+  published: '已上线',
   running: '运行中',
   connected: '已连接',
   indexed: '已索引',
