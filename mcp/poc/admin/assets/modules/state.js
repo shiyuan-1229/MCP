@@ -40,10 +40,7 @@ export const state = {
   customerTrends: null,
   accessGuide: null,
   // 客户侧：AI 需求生成 MCP
-  localIntakeSources: readStoredJson('mcp_local_intake_sources', []),
-  localOpenapiSpecs: readStoredJson('mcp_local_openapi_specs', []),
-  localAssets: readStoredJson('mcp_local_assets', []),
-  builderRequests: readStoredJson('mcp_builder_requests', []),
+  builderRequests: [],
   customerBuilderHistory: readStoredJson('mcp_customer_builder_history', []),
   customerBuilderMessages: [],
   customerBuilderDraft: localStorage.getItem('mcp_customer_builder_draft') || '',
@@ -74,9 +71,6 @@ export const state = {
   projectSaving: false,
   projectDetails: {},
   projectDrafts: {},
-  releaseOverrides: readStoredJson('mcp_release_overrides', {}),
-  billingOverrides: readStoredJson('mcp_billing_overrides', {}),
-  accessOverrides: readStoredJson('mcp_access_overrides', {}),
   projectFilters: {
     customer: 'all',
     stage: 'all',
@@ -112,7 +106,6 @@ export const state = {
     timeRange: '24h',
     query: ''
   },
-  monitoringIssueStatuses: readStoredJson('mcp_monitoring_issue_statuses', {}),
   monitoringFocusId: null,
   billingFilters: {
     customer: 'all',

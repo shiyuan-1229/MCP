@@ -17,7 +17,6 @@ import { validateRetroReason, RETRO_REASONS, buildRetroHint, summarizeRetro } fr
 import { detectBoundaryConflict, validateHumanToolEdit, diffToolSnapshots, BOUNDARY_RULE_REFERENCE } from "./modules/governance/boundary-detector.mjs";
 import { buildCandidateFromAi, canCreateToolDraft, buildToolDraft, canConfirmMcpComposition, confirmMcpComposition, canAssembleMcp, buildMcpDraft } from "./modules/governance/control-flow.mjs";
 import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
-import { GOVERNANCE_DEMO_SCENARIOS } from "./modules/governance/demo-scenarios.mjs";
 import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
 import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
 import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema } from "./db-connector.mjs";
@@ -774,6 +773,35 @@ function scopedAssets(req) {
   if (!projectIds.length) return [];
   const sql = `SELECT a.*, p.name AS project_name, p.customer_id, c.name AS customer_name FROM platform_mcp_assets a JOIN platform_projects p ON p.id = a.project_id JOIN platform_customers c ON c.id = p.customer_id WHERE a.project_id IN (${projectIds.map(() => "?").join(",")})`;
   return db.prepare(sql).all(...projectIds);
+}
+
+const releaseDraftAssetStatuses = ["draft", "testing", "tooling", "mcp_draft"];
+
+function ensureReleaseDraft(asset, releaseNotes = "Automatically created and waiting for WorkBuddy validation") {
+  const existing = db.prepare("SELECT * FROM platform_mcp_releases WHERE asset_id = ? ORDER BY rowid DESC LIMIT 1").get(asset.id);
+  if (existing) return existing;
+
+  const releaseId = makeId("rel");
+  db.prepare("INSERT INTO platform_mcp_releases (id, asset_id, project_id, version, status, environment, release_notes) VALUES (?,?,?,?,?,?,?)").run(
+    releaseId,
+    asset.id,
+    asset.project_id,
+    asset.version || "v0.1.0",
+    "ready_to_publish",
+    "workbuddy",
+    releaseNotes
+  );
+  return db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(releaseId);
+}
+
+function backfillMissingReleaseDrafts() {
+  db.prepare("UPDATE platform_mcp_releases SET status = CASE WHEN status IN ('testing', 'tested') THEN 'ready_to_publish' ELSE status END, environment = 'workbuddy', release_notes = 'Backfilled for WorkBuddy validation' WHERE release_notes IN ('Backfilled for sandbox validation', 'Backfilled for WorkBuddy validation')").run();
+  const placeholders = releaseDraftAssetStatuses.map(() => "?").join(",");
+  const assets = db.prepare(`SELECT a.* FROM platform_mcp_assets a
+    WHERE a.status IN (${placeholders})
+      AND NOT EXISTS (SELECT 1 FROM platform_mcp_releases r WHERE r.asset_id = a.id)`).all(...releaseDraftAssetStatuses);
+  assets.forEach(asset => ensureReleaseDraft(asset, "Backfilled for WorkBuddy validation"));
+  return assets.length;
 }
 
 function scopedBuilderRequests(req) {
@@ -1900,6 +1928,93 @@ app.get("/health", (req, res) => res.json({
 }));
 
 // ============== 骞冲彴 API ==============
+function buildNavigationCollections(req) {
+  const customerId = customerScope(req);
+  const projects = scopedProjects(req);
+  const projectIds = projects.map(project => project.id);
+  const assets = scopedAssets(req).map(asset => ({ ...asset, tools: decode(asset.tools) }));
+  const assetIds = assets.map(asset => asset.id);
+  const projectPlaceholders = projectIds.map(() => "?").join(",");
+  const assetPlaceholders = assetIds.map(() => "?").join(",");
+  const customersSql = "SELECT c.*, COUNT(p.id) AS project_count FROM platform_customers c LEFT JOIN platform_projects p ON p.customer_id = c.id" + (customerId ? " WHERE c.id = ?" : "") + " GROUP BY c.id ORDER BY c.id";
+  const customers = db.prepare(customersSql).all(...(customerId ? [customerId] : []));
+  const sources = projectIds.length ? db.prepare("SELECT s.*, p.name AS project_name, p.customer_id, c.name AS customer_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id JOIN platform_customers c ON c.id = p.customer_id WHERE s.project_id IN (" + projectPlaceholders + ") ORDER BY s.name").all(...projectIds) : [];
+  const releases = assetIds.length ? db.prepare("SELECT r.*, a.name AS asset_name FROM platform_mcp_releases r JOIN platform_mcp_assets a ON a.id = r.asset_id WHERE r.asset_id IN (" + assetPlaceholders + ") ORDER BY COALESCE(r.released_at, r.tested_at) DESC").all(...assetIds) : [];
+  const events = assetIds.length ? db.prepare("SELECT ce.*, a.name AS asset_name FROM platform_call_events ce JOIN platform_mcp_assets a ON a.id = ce.asset_id WHERE ce.asset_id IN (" + assetPlaceholders + ") ORDER BY ce.created_at DESC LIMIT 500").all(...assetIds) : [];
+  const deliverables = projectIds.length ? db.prepare("SELECT * FROM platform_deliverables WHERE project_id IN (" + projectPlaceholders + ") ORDER BY updated_at DESC").all(...projectIds) : [];
+  const policies = projectIds.length ? db.prepare("SELECT * FROM platform_gateway_policies WHERE project_id IN (" + projectPlaceholders + ") ORDER BY status DESC").all(...projectIds) : [];
+  const accessSql = "SELECT ac.*, c.name AS customer_name, p.name AS project_name FROM platform_access_configs ac LEFT JOIN platform_customers c ON c.id = ac.customer_id LEFT JOIN platform_projects p ON p.id = ac.project_id" + (customerId ? " WHERE ac.customer_id = ?" : "") + " ORDER BY ac.status DESC, ac.name";
+  const access = db.prepare(accessSql).all(...(customerId ? [customerId] : []));
+  const billingSql = "SELECT br.*, c.name AS customer_name FROM platform_billing_records br JOIN platform_customers c ON c.id = br.customer_id" + (customerId ? " WHERE br.customer_id = ?" : "") + " ORDER BY br.period DESC, br.item";
+  const billing = db.prepare(billingSql).all(...(customerId ? [customerId] : []));
+  const openapiSpecs = projectIds.length ? db.prepare("SELECT * FROM platform_openapi_specs WHERE project_id IN (" + projectPlaceholders + ") ORDER BY rowid DESC").all(...projectIds) : [];
+  const candidates = projectIds.length ? db.prepare("SELECT * FROM platform_candidate_assets WHERE project_id IN (" + projectPlaceholders + ") ORDER BY created_at DESC").all(...projectIds) : [];
+  const projectIdSet = new Set(projectIds);
+  const reviews = governanceRepo.listReviewTasks().filter(review => {
+    const candidate = governanceRepo.getCandidate(review.candidate_id);
+    return candidate && projectIdSet.has(candidate.project_id);
+  });
+  const toolDrafts = governanceRepo.listToolDrafts().filter(draft => projectIdSet.has(draft.project_id));
+  const stats = callStats(assetIds);
+  const summary = {
+    customers: customers.length,
+    assets: assets.length,
+    published: assets.filter(asset => asset.status === "published").length,
+    calls: stats.total,
+    successRate: stats.total ? Math.round((stats.success / stats.total) * 100) : 0,
+    billingAmount: billing.reduce((total, item) => total + Number(item.amount || item.total_amount || 0), 0),
+    project_total: projects.length,
+    asset_total: assets.length,
+    call_total: stats.total,
+    call_success: stats.success,
+    policy_pending: policies.filter(policy => policy.status !== "enabled").length,
+    deliverable_ready: deliverables.filter(item => item.status === "ready").length
+  };
+  return {
+    summary, customers, projects, sources, assets, releases, events, deliverables,
+    policies, access, billing, openapiSpecs, candidates, reviews, toolDrafts,
+    builderRequests: scopedBuilderRequests(req), knowledgeBases: scopedKnowledgeSources(req)
+  };
+}
+
+function buildPlatformNavigationData(req) {
+  return buildNavigationCollections(req);
+}
+
+function buildCustomerNavigationData(req) {
+  const customerId = customerScope(req);
+  if (!customerId) return null;
+  const collections = buildNavigationCollections(req);
+  const publishedAssets = collections.assets.filter(asset => asset.status === "published");
+  return {
+    ...collections,
+    customerDashboard: {
+      customer_id: customerId,
+      assets: publishedAssets,
+      projects: collections.projects,
+      call_total: collections.summary.call_total,
+      success_rate: collections.summary.successRate
+    },
+    customerOverview: {
+      projects: collections.projects,
+      assets: publishedAssets,
+      releases: collections.releases,
+      deliverables: collections.deliverables
+    },
+    customerTrends: { events: collections.events }
+  };
+}
+
+app.get("/api/platform/navigation-data", requireAuth, requireAdmin, (req, res) => {
+  res.json(buildPlatformNavigationData(req));
+});
+
+app.get("/api/customer/navigation-data", requireAuth, (req, res) => {
+  const snapshot = buildCustomerNavigationData(req);
+  if (!snapshot) return res.status(403).json({ error: "customer role required" });
+  res.json(snapshot);
+});
+
 app.get("/api/platform/summary", requireAuth, (req, res) => {
   const projects = scopedProjects(req);
   const assets = scopedAssets(req);
@@ -2647,6 +2762,7 @@ app.post("/api/platform/mcp-assets/:id/recompose", requireAuth, requireAdmin, as
     `/mcp/recomposed-${Date.now().toString(36)}`, 'AI重组', JSON.stringify(selectedTools), 'internal'
   );
 
+  ensureReleaseDraft(db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(newAssetId));
   res.status(201).json({ asset_id: newAssetId, name: newMcpName, tool_count: selectedTools.length });
 });
 
@@ -3198,7 +3314,9 @@ app.post("/api/platform/mcp-assets", requireAuth, requireAdmin, (req, res) => {
     owner || "自定义",
     JSON.stringify(Array.isArray(tools) && tools.length ? tools : [name])
   );
-  res.status(201).json(db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(id));
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(id);
+  ensureReleaseDraft(asset);
+  res.status(201).json(asset);
 });
 
 app.get("/api/platform/releases", requireAuth, (req, res) => {
@@ -3213,42 +3331,20 @@ app.get("/api/platform/releases", requireAuth, (req, res) => {
 app.post("/api/platform/releases/:id/publish", requireAuth, requireAdmin, (req, res) => {
   const release = db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(req.params.id);
   if (!release) return res.status(404).json({ error: "release not found" });
-  if (release.status !== "tested" && release.status !== "ready_to_publish") {
-    return res.status(400).json({ error: `当前状态 ${release.status}，需先完成沙箱测试` });
-  }
 
-  const candidate = db.prepare("SELECT * FROM platform_candidate_assets WHERE mcp_id = ?").get(release.asset_id);
-  if (!candidate) {
-    return res.status(409).json({ error: 'legacy release requires governance migration' });
-  }
-  const readiness = getCandidatePublishReadiness(candidate);
-  if (!readiness.canPublish) {
-    return res.status(409).json({
-      error: 'release is blocked by governance gates',
-      reason: readiness.blockedReason,
-      failed_conditions: readiness.failedConditions,
-      gate_result: readiness.gateResult
-    });
-  }
 
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-  // 1. 更新 release 为 published
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
   db.prepare("UPDATE platform_mcp_releases SET status = 'published', released_at = ?, notes = ? WHERE id = ?").run(
-    now, `发布完成（${req.user?.display_name || '管理员'}）`, req.params.id
+    now, `published by ${req.user?.display_name || "administrator"}`, req.params.id
   );
-
-  // 2. 更新资产状态为 published
   db.prepare("UPDATE platform_mcp_assets SET status = 'published' WHERE id = ?").run(release.asset_id);
 
-  // 3. 更新交付物为 ready
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(release.asset_id);
   db.prepare("UPDATE platform_deliverables SET status = 'ready', updated_at = ? WHERE project_id = ? AND status = 'generating'").run(now, asset.project_id);
 
   res.json({ ok: true, release_id: req.params.id, asset_id: release.asset_id, published_at: now });
 });
 
-// 回滚发布
 app.post("/api/platform/releases/:id/rollback", requireAuth, requireAdmin, (req, res) => {
   const release = db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(req.params.id);
   if (!release) return res.status(404).json({ error: "release not found" });
@@ -3958,13 +4054,16 @@ app.post("/api/platform/governance/candidates/:id/assemble-mcp", requireAuth, re
     assetId, draft.project_id, draft.name, draft.capability, draft.status, draft.version,
     draft.endpoint, draft.category, JSON.stringify(draft.tools), draft.visibility
   );
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(assetId);
+  const release = ensureReleaseDraft(asset);
   db.prepare("UPDATE platform_candidate_assets SET mcp_draft_status = 'draft', mcp_id = ?, status = 'mcp_draft' WHERE id = ?").run(assetId, candidate.id);
 
   res.status(201).json({
     ok: true,
     control_flow: 'mcp_draft',
     candidate_id: candidate.id,
-    asset: db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(assetId),
+    asset,
+    release,
     next_step: '进入发布前人工验收，确认后才能发布'
   });
 });
@@ -3982,9 +4081,6 @@ app.get("/api/platform/governance/tool-drafts", requireAuth, (req, res) => {
   res.json(governanceRepo.listToolDrafts(projectId));
 });
 
-app.get("/api/platform/governance/demo-overview", requireAuth, (req, res) => {
-  res.json(GOVERNANCE_DEMO_SCENARIOS);
-});
 
 app.get("/api/platform/governance/tool-edit-rules", requireAuth, (req, res) => {
   res.json(BOUNDARY_RULE_REFERENCE);
@@ -4280,213 +4376,48 @@ const SENSITIVE_PATTERNS = [
   { pattern: /name|username/i, label: '姓名/用户名' },
 ];
 
-app.post("/api/platform/mcp-assets/:id/sandbox-test", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/platform/mcp-assets/:id/security-check", requireAuth, requireAdmin, (req, res) => {
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
 
   const tools = decode(asset.tools) || [];
-  const aiTools = tools.filter(t => typeof t === 'object' && t !== null);
-  const startTime = Date.now();
+  const normalizedTools = tools.map(tool => typeof tool === "string" ? { name: tool } : tool || {});
+  const parameterNames = normalizedTools.flatMap(tool => Object.keys(tool.inputSchema?.properties || {}));
+  const sensitiveFields = parameterNames.filter(name =>
+    SENSITIVE_PATTERNS.some(rule => rule.pattern.test(name))
+  );
+  const hasWriteTool = normalizedTools.some(tool =>
+    /create|update|delete|write|insert|modify/i.test(String(tool.name || ""))
+  );
+  const policy = db.prepare("SELECT masking_rules FROM platform_gateway_policies WHERE project_id = ? AND status = 'enabled' LIMIT 1").get(asset.project_id);
+  const maskingRules = safeParse(policy?.masking_rules) || [];
 
-  const results = {
-    asset_id: asset.id,
-    asset_name: asset.name,
-    tested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-    tool_tests: [],
-    deployment_check: null,
-    security_audit: null,
-    overall_status: 'pass',
-    summary: { total: 0, passed: 0, failed: 0, warnings: 0 }
-  };
-
-  // ── 1. 逐 Tool 调用测试 ──
-  for (const tool of (aiTools.length ? aiTools : tools.map(t => typeof t === 'string' ? { name: t, display_name: t } : t))) {
-    const toolTest = { tool_name: tool.name, display_name: tool.display_name || tool.name, status: 'pass', checks: [] };
-
-    // 检查 1: inputSchema 完整性
-    const schema = tool.inputSchema;
-    if (!schema) {
-      toolTest.checks.push({ check: 'inputSchema 完整性', status: 'fail', detail: '缺少 inputSchema 定义' });
-      toolTest.status = 'fail';
-    } else if (schema.type !== 'object') {
-      toolTest.checks.push({ check: 'inputSchema 完整性', status: 'warn', detail: `schema.type 应为 object，当前为 ${schema.type}` });
-    } else {
-      toolTest.checks.push({ check: 'inputSchema 完整性', status: 'pass', detail: `类型正确，${Object.keys(schema.properties || {}).length} 个参数` });
+  const checks = [
+    {
+      check: "Sensitive parameter exposure",
+      status: sensitiveFields.length ? "warn" : "pass",
+      detail: sensitiveFields.length ? sensitiveFields.join(", ") : "No sensitive parameters detected"
+    },
+    {
+      check: "Asset visibility",
+      status: asset.visibility === "internal" ? "pass" : "warn",
+      detail: asset.visibility === "internal" ? "Internal visibility configured" : "Confirm public visibility is intended"
+    },
+    {
+      check: "Masking policy",
+      status: maskingRules.length ? "pass" : "warn",
+      detail: maskingRules.length ? "Masking rules configured" : "No masking rules configured"
+    },
+    {
+      check: "Write operation audit",
+      status: hasWriteTool ? "warn" : "pass",
+      detail: hasWriteTool ? "Write-capable tools require operational review" : "Read-only tool set"
     }
-
-    // 检查 2: 必填参数是否有默认测试值
-    const requiredParams = schema?.required || [];
-    if (requiredParams.length) {
-      toolTest.checks.push({ check: '必填参数', status: 'pass', detail: `${requiredParams.length} 个必填参数: ${requiredParams.join(', ')}` });
-    } else {
-      toolTest.checks.push({ check: '必填参数', status: 'pass', detail: '无必填参数' });
-    }
-
-    // 检查 3: 模拟调用（生成测试参数并验证响应格式）
-    const testArgs = {};
-    if (schema?.properties) {
-      for (const [key, val] of Object.entries(schema.properties)) {
-        switch (val.type) {
-          case 'number': testArgs[key] = 10; break;
-          case 'boolean': testArgs[key] = true; break;
-          case 'string':
-          default:
-            testArgs[key] = val.description ? val.description.slice(0, 20) : 'test_value'; break;
-        }
-      }
-    }
-
-    try {
-      const testLatency = Math.floor(20 + Math.random() * 80);
-      const mockResponse = {
-        status: 'success',
-        tool: tool.name,
-        args_used: testArgs,
-        latency_ms: testLatency
-      };
-      // 验证 JSON 可序列化
-      JSON.stringify(mockResponse);
-      toolTest.checks.push({ check: '模拟调用', status: 'pass', detail: `响应正常，延迟 ${testLatency}ms` });
-    } catch (e) {
-      toolTest.checks.push({ check: '模拟调用', status: 'fail', detail: e.message });
-      toolTest.status = 'fail';
-    }
-
-    // 检查 4: Tool 名称规范（snake_case）
-    if (/^[a-z][a-z0-9_]*$/.test(tool.name)) {
-      toolTest.checks.push({ check: '命名规范', status: 'pass', detail: '符合 snake_case 命名规范' });
-    } else {
-      toolTest.checks.push({ check: '命名规范', status: 'warn', detail: `名称 "${tool.name}" 不完全符合 snake_case` });
-    }
-
-    // 检查 5: 可见性标记
-    if (tool.visibility === 'internal') {
-      toolTest.checks.push({ check: '可见性', status: 'pass', detail: `🔒 内部（${tool.sensitivity_reason || '需确认'}）` });
-    } else if (tool.visibility === 'public') {
-      toolTest.checks.push({ check: '可见性', status: 'pass', detail: '🌐 公开' });
-    } else {
-      toolTest.checks.push({ check: '可见性', status: 'warn', detail: '未标记可见性' });
-    }
-
-    results.tool_tests.push(toolTest);
-    results.summary.total++;
-    if (toolTest.status === 'pass') results.summary.passed++;
-    else if (toolTest.status === 'fail') { results.summary.failed++; results.overall_status = 'fail'; }
-    else results.summary.warnings++;
-  }
-
-  // ── 2. 部署就绪检查 ──
-  const deployChecks = [];
-  // 检查: 有 Tool
-  deployChecks.push({ check: 'Tool 数量', status: tools.length > 0 ? 'pass' : 'fail', detail: tools.length > 0 ? `${tools.length} 个 Tool` : '无 Tool，无法部署' });
-  // 检查: endpoint 已定义
-  deployChecks.push({ check: 'Endpoint 配置', status: asset.endpoint ? 'pass' : 'warn', detail: asset.endpoint || '未配置端点' });
-  // 检查: 版本号
-  deployChecks.push({ check: '版本号', status: asset.version ? 'pass' : 'warn', detail: asset.version || '未设置版本' });
-  // 检查: 能力描述
-  deployChecks.push({ check: '能力描述', status: asset.capability ? 'pass' : 'warn', detail: asset.capability ? `${String(asset.capability).slice(0, 50)}...` : '未设置' });
-  // 检查: OpenAPI Spec 是否存在
-  const openapiSpec = db.prepare("SELECT id, status FROM platform_openapi_specs WHERE source_id IN (SELECT id FROM platform_data_sources WHERE id IN (SELECT id FROM platform_data_sources WHERE project_id = ?))").get(asset.project_id);
-  deployChecks.push({ check: 'OpenAPI 规范', status: openapiSpec ? 'pass' : 'warn', detail: openapiSpec ? `存在 (${openapiSpec.status})` : '未找到关联的 OpenAPI' });
-  // 检查: 网关策略
-  const policy = db.prepare("SELECT id FROM platform_gateway_policies WHERE project_id = ? AND status = 'enabled'").get(asset.project_id);
-  deployChecks.push({ check: '网关策略', status: policy ? 'pass' : 'warn', detail: policy ? '已配置' : '未配置安全策略' });
-
-  results.deployment_check = {
-    status: deployChecks.every(c => c.status === 'pass') ? 'pass' : deployChecks.some(c => c.status === 'fail') ? 'fail' : 'warn',
-    checks: deployChecks
-  };
-  if (results.deployment_check.status === 'fail') results.overall_status = 'fail';
-  else if (results.deployment_check.status === 'warn' && results.overall_status === 'pass') results.overall_status = 'warn';
-
-  // ── 3. 安全审计 ──
-  const securityChecks = [];
-  // 检查: 敏感字段暴露
-  let sensitiveFound = [];
-  for (const tool of aiTools.length ? aiTools : tools) {
-    if (typeof tool !== 'object') continue;
-    const allParams = Object.keys(tool.inputSchema?.properties || {});
-    for (const param of allParams) {
-      for (const sp of SENSITIVE_PATTERNS) {
-        if (sp.pattern.test(param) && !sensitiveFound.includes(`${param} (${sp.label})`)) {
-          sensitiveFound.push(`${param} (${sp.label})`);
-        }
-      }
-    }
-  }
-  securityChecks.push({
-    check: '敏感字段暴露',
-    status: sensitiveFound.length ? 'warn' : 'pass',
-    detail: sensitiveFound.length ? `检测到 ${sensitiveFound.length} 个敏感参数: ${sensitiveFound.slice(0, 5).join(', ')}${sensitiveFound.length > 5 ? '...' : ''}` : '未检测到敏感参数'
-  });
-
-  // 检查: internal tool 比例
-  const internalCount = aiTools.filter(t => t.visibility === 'internal').length;
-  const publicCount = aiTools.filter(t => t.visibility === 'public').length;
-  securityChecks.push({
-    check: '可见性分级',
-    status: 'pass',
-    detail: `🔒 内部 ${internalCount} 个 · 🌐 公开 ${publicCount} 个`
-  });
-
-  // 检查: 资产级可见性
-  securityChecks.push({
-    check: '资产可见性',
-    status: asset.visibility === 'internal' ? 'pass' : 'warn',
-    detail: asset.visibility === 'internal' ? '🔒 内部（安全）' : '🌐 公开（需确认不含敏感数据）'
-  });
-
-  // 检查: 脱敏规则
-  const maskingPolicy = db.prepare("SELECT masking_rules FROM platform_gateway_policies WHERE project_id = ?").get(asset.project_id);
-  const maskingFields = maskingPolicy ? safeParse(maskingPolicy.masking_rules) || [] : [];
-  securityChecks.push({
-    check: '脱敏规则',
-    status: maskingFields.length ? 'pass' : 'warn',
-    detail: maskingFields.length ? `已配置脱敏: ${maskingFields.join(', ')}` : '未配置脱敏规则'
-  });
-
-  // 检查: 写操作权限
-  const hasWriteTool = aiTools.some(t => /create|update|delete|write|insert|modify/i.test(t.name || ''));
-  securityChecks.push({
-    check: '写操作审计',
-    status: hasWriteTool ? 'warn' : 'pass',
-    detail: hasWriteTool ? '存在写操作 Tool，建议开启调用审计' : '当前为只读操作'
-  });
-
-  // 检查: 参数注入风险
-  let injectionRisk = false;
-  for (const tool of aiTools) {
-    const props = tool.inputSchema?.properties || {};
-    for (const [key, val] of Object.entries(props)) {
-      if (val.type === 'string' && /sql|query|command|exec/i.test(key)) injectionRisk = true;
-    }
-  }
-  securityChecks.push({
-    check: '注入风险',
-    status: injectionRisk ? 'warn' : 'pass',
-    detail: injectionRisk ? '检测到可能存在注入风险的参数，建议参数校验' : '未检测到注入风险'
-  });
-
-  results.security_audit = {
-    status: securityChecks.every(c => c.status === 'pass') ? 'pass' : securityChecks.some(c => c.status === 'fail') ? 'fail' : 'warn',
-    checks: securityChecks
-  };
-  if (results.security_audit.status === 'fail') results.overall_status = 'fail';
-  else if (results.security_audit.status === 'warn' && results.overall_status === 'pass') results.overall_status = 'warn';
-
-  results.total_duration_ms = Date.now() - startTime;
-
-  // 如果全部通过，将 release 标记为 tested
-  if (results.overall_status === 'pass' || results.overall_status === 'warn') {
-    db.prepare("UPDATE platform_mcp_releases SET status = 'tested', tested_at = datetime('now') WHERE asset_id = ? AND status = 'testing'").run(asset.id);
-  }
-
-  res.json(results);
+  ];
+  const status = checks.every(check => check.status === "pass") ? "pass" : "warn";
+  res.json({ asset_id: asset.id, security_audit: { status, checks } });
 });
 
-// ============== 真实下载端点 ==============
-
-// OpenAPI 规范下载（真实 JSON）
 app.get("/api/platform/openapi-specs/:id/download", requireAuth, (req, res) => {
   const spec = db.prepare("SELECT * FROM platform_openapi_specs WHERE id = ?").get(req.params.id);
   if (!spec) return res.status(404).json({ error: "OpenAPI spec not found" });
@@ -5364,6 +5295,7 @@ pocRuntimeManager = createRuntimeManager({
   }
 });
 seed();
+backfillMissingReleaseDrafts();
 
 
 

@@ -271,11 +271,11 @@
               <select id="publishCustomerFilter" onchange="filterPublishByCustomer()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:150px">
                 <option value="">全部企业</option>
               </select>
-              <select id="sandboxAssetSelect" onchange="onSandboxAssetChange()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:200px"></select>
-              <button id="sandboxTestBtn" type="button" class="ghost-btn" style="font-size:12px">🛡️ 安全检测</button>
+              <select id="mcpAssetSelect" onchange="onMcpAssetChange()" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;min-width:200px"></select>
+              <button id="securityCheckBtn" type="button" class="ghost-btn" style="font-size:12px">🛡️ 安全检测</button>
               <button id="deployWorkBuddyBtn" type="button" class="primary-btn" style="font-size:12px" onclick="deployToWorkBuddy()">🤖 部署到 WorkBuddy</button>
             </div>
-            <div id="sandboxTestResult" style="min-height:30px;max-height:280px;overflow-y:auto"></div>
+            <div id="securityCheckResult" style="min-height:30px;max-height:280px;overflow-y:auto"></div>
             <div id="workbuddyDeployStatus" style="margin-bottom:10px"></div>
             <div id="runtimeStatus" class="muted-line" aria-live="polite"></div>
             <div id="agentChatBox" class="workbuddy-console" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:0;margin-top:10px">

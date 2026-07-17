@@ -115,22 +115,7 @@ function initWebSocket() {
   };
 }
 
-function handleWebSocketMessage(data) {
-  if (data.type === 'builder_metrics_update') {
-    // 更新 builder metrics
-    if (data.metrics) {
-      state.builderMetrics = data.metrics;
-      // 触发导航栏重新渲染以更新徽章
-      renderNav();
-    }
-  } else if (data.type === 'review_update') {
-    // 更新审核状态
-    if (data.reviews) {
-      state.reviews = data.reviews;
-      renderNav();
-    }
-  }
-}
+function handleWebSocketMessage(data) { if (['builder_metrics_update', 'review_update'].includes(data.type)) loadAll().then(renderAll).catch(() => {}); }
 
 // 初始化 WebSocket 连接
 window.initWebSocket = initWebSocket;
@@ -150,333 +135,56 @@ function getDefaultPageForRole(role = 'customer', requestedPage = '') {
   return allowedItems[0].id;
 }
 
-function mergeById(primary = [], secondary = []) {
-  const map = new Map();
-  [...list(primary), ...list(secondary)].forEach(item => {
-    if (item?.id) map.set(item.id, item);
-  });
-  return [...map.values()];
-}
-
-function persistLocalCollection(key, items) {
-  try {
-    localStorage.setItem(key, JSON.stringify(list(items)));
-  } catch {}
-}
-
-function refreshLocalAdminCollections() {
-  const serverSources = list(state.sources).filter(item => !item?.is_local_builder_source);
-  const serverSpecs = list(state.openapiSpecs).filter(item => !item?.is_local_builder_spec);
-  const serverAssets = list(state.assets).filter(item => !item?.is_local_builder_asset);
-  state.sources = mergeById(serverSources, state.localIntakeSources);
-  state.openapiSpecs = mergeById(serverSpecs, state.localOpenapiSpecs);
-  state.assets = mergeById(serverAssets, state.localAssets);
-}
-
-function upsertLocalIntakeSource(source) {
-  state.localIntakeSources = mergeById(list(state.localIntakeSources).filter(item => item.id !== source.id), [source]);
-  persistLocalCollection('mcp_local_intake_sources', state.localIntakeSources);
-  refreshLocalAdminCollections();
-  return source;
-}
-
-function upsertLocalOpenapiSpec(spec) {
-  state.localOpenapiSpecs = mergeById(list(state.localOpenapiSpecs).filter(item => item.id !== spec.id), [spec]);
-  persistLocalCollection('mcp_local_openapi_specs', state.localOpenapiSpecs);
-  refreshLocalAdminCollections();
-  return spec;
-}
-
-function upsertLocalAsset(asset) {
-  state.localAssets = mergeById(list(state.localAssets).filter(item => item.id !== asset.id), [asset]);
-  persistLocalCollection('mcp_local_assets', state.localAssets);
-  refreshLocalAdminCollections();
-  return asset;
-}
-
-function findProjectContextForBuilderRequest(request = {}) {
-  const referenceIds = list(request.result?.references).map(item => item.id);
-  const matchedAsset = list(state.assets).find(asset => referenceIds.includes(asset.id));
-  if (matchedAsset) {
-    const matchedProject = list(state.projects).find(project => project.id === matchedAsset.project_id);
-    return {
-      project_id: matchedAsset.project_id || matchedProject?.id || '',
-      project_name: matchedAsset.project_name || matchedProject?.name || '客户定制需求',
-      customer_name: matchedProject?.customer_name || request.customer_name || '客户'
-    };
-  }
-
-  const byCustomer = list(state.projects).find(project =>
-    project.customer_id === request.customer_id ||
-    project.customer_name === request.customer_name ||
-    String(project.customer_name || '').includes(String(request.customer_name || ''))
-  );
-  if (byCustomer) {
-    return {
-      project_id: byCustomer.id,
-      project_name: byCustomer.name || '客户定制需求',
-      customer_name: byCustomer.customer_name || request.customer_name || '客户'
-    };
-  }
-
-  return {
-    project_id: '',
-    project_name: '客户定制需求',
-    customer_name: request.customer_name || '客户'
-  };
-}
-
-function buildLocalIntakeSourceFromRequest(request = {}) {
-  const context = findProjectContextForBuilderRequest(request);
-  return {
-    id: `src_builder_${request.id}`,
-    project_id: context.project_id,
-    project_name: context.project_name,
-    customer_name: context.customer_name,
-    name: `${request.result?.name || '目标 MCP 草案'} 需求单`,
-    type: '需求描述',
-    auth_mode: '自然语言输入',
-    status: 'submitted',
-    recognition_status: 'draft',
-    builder_request_id: request.id,
-    prompt: request.prompt || '',
-    source_name: `${request.result?.name || '目标 MCP 草案'} 需求单`,
-    is_local_builder_source: true,
-    created_at: request.created_at || new Date().toISOString().slice(0, 19).replace('T', ' ')
-  };
-}
-
-function buildLocalOpenapiSpecFromRequest(source = {}, request = {}, sampleContent = '') {
-  const tools = list(request.result?.tools);
-  const paths = {};
-  tools.forEach((tool, index) => {
-    const path = `/builder/${source.id}/${index + 1}`;
-    const method = /创建|提交|执行|催单|核销|提醒/.test(tool.name || '') ? 'post' : 'get';
-    paths[path] = {
-      [method]: {
-        operationId: `builder_${source.id}_${index + 1}`,
-        summary: tool.name || `tool_${index + 1}`,
-        description: tool.note || '',
-        ...(method === 'post' ? {
-          requestBody: {
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    request_id: { type: 'string', description: '客户业务请求标识' },
-                    payload: { type: 'object', description: '业务参数' }
-                  }
-                }
-              }
-            }
-          }
-        } : {
-          parameters: [{ name: 'query', in: 'query', schema: { type: 'string' }, description: '查询关键词或业务标识' }]
-        }),
-        responses: {
-          '200': {
-            description: `${tool.name || 'Tool'} 返回结果`
-          }
-        }
-      }
-    };
-  });
-
-  return {
-    id: `spec_builder_${source.id}`,
-    source_id: source.id,
-    project_id: source.project_id,
-    source_name: source.name,
-    title: `${request.result?.name || '目标 MCP 草案'} OpenAPI 草案`,
-    spec: {
-      openapi: '3.0.0',
-      info: {
-        title: request.result?.name || '目标 MCP 草案',
-        version: '0.1.0',
-        description: [request.result?.summary, request.result?.scenario, sampleContent ? `补充说明：${sampleContent}` : ''].filter(Boolean).join(' | ')
-      },
-      paths
-    },
-    status: 'draft',
-    generated_at: new Date().toISOString(),
-    is_local_builder_spec: true,
-    builder_request_id: request.id
-  };
-}
-
-function buildLocalAssetFromRequest(source = {}, request = {}) {
-  const tools = list(request.result?.tools).map((tool, index) => ({
-    name: `builder_tool_${index + 1}`,
-    display_name: tool.name,
-    description: tool.note,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        payload: { type: 'object', description: '业务输入参数' }
-      }
-    }
-  }));
-  return {
-    id: `mcp_builder_${source.id}`,
-    project_id: source.project_id,
-    project_name: source.project_name,
-    source_id: source.id,
-    source_name: source.name,
-    name: request.result?.name || '目标 MCP 草案',
-    capability: request.result?.scenario || '客户定制需求生成的 MCP 草案',
-    status: 'draft',
-    version: 'v0.1.0',
-    endpoint: `/mcp/builder/${source.id}`,
-    category: '定制',
-    visibility: 'internal',
-    tools,
-    is_local_builder_asset: true,
-    builder_request_id: request.id
-  };
-}
-
-function runLocalBuilderRecognition(source, sampleContent = '') {
-  const request = list(state.builderRequests).find(item => item.id === source.builder_request_id);
-  if (!request) throw new Error('关联的客户需求不存在');
-  const spec = buildLocalOpenapiSpecFromRequest(source, request, sampleContent);
-  upsertLocalOpenapiSpec(spec);
-  upsertLocalIntakeSource({
-    ...source,
-    recognition_status: 'done',
-    status: 'generating',
-    updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ')
-  });
-  return spec;
-}
-
-function updateLocalBuilderRequest(requestId, patch = {}) {
-  state.builderRequests = list(state.builderRequests).map(item =>
-    item.id === requestId ? { ...item, ...patch } : item
-  );
-  persistLocalCollection('mcp_builder_requests', state.builderRequests);
-  return list(state.builderRequests).find(item => item.id === requestId) || null;
-}
-
 async function acceptBuilderRequestIntoIntake(requestId) {
-  const request = list(state.builderRequests).find(item => item.id === requestId);
-  if (!request) throw new Error('Builder request not found');
+  const result = await api(`/api/platform/builder/requests/${requestId}/accept`, { method: 'POST' });
+  await loadAll();
+  state.currentPage = 'intake';
+  renderAll();
+  return result?.source || null;
+}
 
-  if (request.customer_id) {
-    const result = await api(`/api/platform/builder/requests/${requestId}/accept`, { method: 'POST' });
-    await loadAll();
-    state.currentPage = 'intake';
-    renderAll();
-    showToast('已将客户需求转入资料接入。', 'success');
-    return result?.source || null;
-  }
+function buildLiveGovernanceOverview(snapshot) {
+  const candidates = list(snapshot.candidates);
+  const reviews = list(snapshot.reviews);
+  const toolDrafts = list(snapshot.toolDrafts);
+  const assets = list(snapshot.assets);
+  const releases = list(snapshot.releases);
+  const events = list(snapshot.events);
+  const acceptanceFailures = events.filter(event => event.status !== 'success').map(event => ({
+    trace_id: event.trace_id || event.id,
+    mcp_id: event.asset_id,
+    check: event.tool_name || event.asset_name || 'MCP call',
+    status_code: event.status_code || '-',
+    status: event.status
+  }));
+  return { valueMetrics: { asset_cycle_days: 0, risk_items_intercepted: candidates.filter(candidate => candidate.risk_level === 'high').length, reused_assets: 0, repeated_work_reduction: 0, publishable_mcps: releases.filter(release => release.status === 'ready_to_publish').length }, candidates, reviews, toolDrafts, mcpDrafts: assets.filter(asset => ['draft', 'tooling', 'mcp_draft'].includes(asset.status)), acceptanceFailures, reviewExamples: reviews.slice(0, 3) };
+}
 
-  const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  const draftSource = buildLocalIntakeSourceFromRequest(request);
-  const existing = list(state.localIntakeSources).find(item =>
-    item.builder_request_id === requestId || item.id === draftSource.id
-  );
-
-  const source = upsertLocalIntakeSource({
-    ...draftSource,
-    ...existing,
-    updated_at: timestamp
+function applyNavigationData(snapshot) {
+  Object.assign(state, {
+    summary: snapshot.summary || null, customers: Array.isArray(snapshot.customers) ? snapshot.customers : [], projects: Array.isArray(snapshot.projects) ? snapshot.projects : [], sources: Array.isArray(snapshot.sources) ? snapshot.sources : [], assets: Array.isArray(snapshot.assets) ? snapshot.assets : [], releases: Array.isArray(snapshot.releases) ? snapshot.releases : [], events: Array.isArray(snapshot.events) ? snapshot.events : [], deliverables: Array.isArray(snapshot.deliverables) ? snapshot.deliverables : [], policies: Array.isArray(snapshot.policies) ? snapshot.policies : [], access: Array.isArray(snapshot.access) ? snapshot.access : [], billing: Array.isArray(snapshot.billing) ? snapshot.billing : [], openapiSpecs: Array.isArray(snapshot.openapiSpecs) ? snapshot.openapiSpecs : [], knowledgeBases: Array.isArray(snapshot.knowledgeBases) ? snapshot.knowledgeBases : [], builderRequests: Array.isArray(snapshot.builderRequests) ? snapshot.builderRequests : [], candidates: Array.isArray(snapshot.candidates) ? snapshot.candidates : [], reviews: Array.isArray(snapshot.reviews) ? snapshot.reviews : [], toolDrafts: Array.isArray(snapshot.toolDrafts) ? snapshot.toolDrafts : [], customerDashboard: snapshot.customerDashboard || state.customerDashboard, customerOverview: snapshot.customerOverview || state.customerOverview, customerTrends: snapshot.customerTrends || state.customerTrends
   });
+}
 
-  updateLocalBuilderRequest(requestId, { updated_at: timestamp, status: 'accepted', intake_source_id: source.id });
-  return source;
+async function loadNavigationData() {
+  const path = isCustomerView() ? '/api/customer/navigation-data' : '/api/platform/navigation-data';
+  const snapshot = await api(path);
+  applyNavigationData(snapshot);
+  return snapshot;
 }
 
 async function loadAll() {
+  const snapshot = await loadNavigationData();
   if (isCustomerView()) {
-    const [dashboard, overview, trends, events, deliverables, access, billing, builderRequests, candidates, reviews] = await Promise.all([
-      api('/api/customer/dashboard'),
-      api('/api/customer/overview'),
-      api('/api/customer/usage/trends'),
-      api('/api/platform/call-events'),
-      api('/api/platform/deliverables'),
-      api('/api/platform/access-configs'),
-      api('/api/platform/billing'),
-      api('/api/platform/builder/requests').catch(() => []),
-    api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
-    api('/api/platform/governance/reviews').catch(() => ({ items: [] }))
-    ]);
-    const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
-    Object.assign(state, {
-      customerDashboard: dashboard,
-      customerOverview: overview,
-      customerTrends: trends,
-      assets: Array.isArray(dashboard?.assets) ? dashboard.assets : [],
-      events: eventList,
-      deliverables,
-      access,
-      billing,
-      builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
-    candidates: Array.isArray(candidates?.items) ? candidates.items : [],
-    reviews: Array.isArray(reviews?.items) ? reviews.items : [],
-      accessGuide: null
-    });
-    return;
+    const [dashboard, overview, trends] = await Promise.all([api('/api/customer/dashboard'), api('/api/customer/overview'), api('/api/customer/usage/trends')]);
+    Object.assign(state, { customerDashboard: dashboard, customerOverview: overview, customerTrends: trends, assets: Array.isArray(dashboard?.assets) ? dashboard.assets : state.assets, accessGuide: null });
+    return snapshot;
   }
-
-  const [summary, customers, projects, sources, assets, releases, policies, events, billing, deliverables, deliveryPackageRecords, access, accessHealth, accessAudit, accessWebhook, policyChanges, knowledgeBases, openapiSpecs, aiConfig, builderMetrics, builderRequests, candidates, reviews, toolDrafts, governanceDemoOverview] = await Promise.all([
-    api('/api/platform/summary'),
-    api('/api/platform/customers'),
-    api('/api/platform/projects'),
-    api('/api/platform/data-sources'),
-    api('/api/platform/mcp-assets'),
-    api('/api/platform/releases'),
-    api('/api/platform/gateway-policies'),
-    api('/api/platform/call-events'),
-    api('/api/platform/billing'),
-    api('/api/platform/deliverables'),
-    api('/api/platform/delivery-packages'),
-    api('/api/platform/access-configs'),
-    api('/api/platform/access-configs/health-summary'),
-    api('/api/platform/access-configs/audit-summary'),
-    api('/api/platform/access-configs/webhook-summary'),
-    api('/api/platform/policy-changes'),
-    api('/api/platform/knowledge-bases'),
-    api('/api/platform/openapi-specs'),
-    api('/api/platform/ai-config').catch(() => ({ configured: false })),
-    api('/api/platform/builder/metrics').catch(() => null),
-    api('/api/platform/builder/requests').catch(() => []),
-    api('/api/platform/governance/candidates').catch(() => ({ items: [] })),
-    api('/api/platform/governance/reviews').catch(() => ({ items: [] })),
-    api('/api/platform/governance/tool-drafts').catch(() => []),
-    api('/api/platform/governance/demo-overview').catch(() => null)
+  const [deliveryPackageRecords, accessHealth, accessAudit, accessWebhook, policyChanges, aiConfig, builderMetrics] = await Promise.all([
+    api('/api/platform/delivery-packages'), api('/api/platform/access-configs/health-summary'), api('/api/platform/access-configs/audit-summary'), api('/api/platform/access-configs/webhook-summary'), api('/api/platform/policy-changes'), api('/api/platform/ai-config').catch(() => ({ configured: false })), api('/api/platform/builder/metrics').catch(() => null)
   ]);
-
-  const eventList = Array.isArray(events?.data) ? events.data : Array.isArray(events) ? events : [];
-
-  Object.assign(state, {
-    summary,
-    customers,
-    projects,
-    sources: Array.isArray(sources) ? sources : [],
-    assets: Array.isArray(assets) ? assets : [],
-    releases,
-    policies,
-    events: eventList,
-    billing,
-    deliverables,
-    deliveryPackageRecords: Array.isArray(deliveryPackageRecords) ? deliveryPackageRecords : [],
-    access,
-    accessHealth: accessHealth || [],
-    accessAudit: accessAudit || [],
-    accessWebhook: accessWebhook || [],
-    policyChanges,
-    knowledgeBases: Array.isArray(knowledgeBases) ? knowledgeBases : [],
-    openapiSpecs: Array.isArray(openapiSpecs) ? openapiSpecs : [],
-    aiConfig: aiConfig || { configured: false },
-    builderMetrics: builderMetrics || null,
-    builderRequests: Array.isArray(builderRequests) ? builderRequests : [],
-    candidates: Array.isArray(candidates?.items) ? candidates.items : [],
-    reviews: Array.isArray(reviews?.items) ? reviews.items : [],
-    toolDrafts: Array.isArray(toolDrafts) ? toolDrafts : [],
-    governanceDemoOverview: governanceDemoOverview || null
-  });
-  refreshLocalAdminCollections();
+  Object.assign(state, { deliveryPackageRecords: Array.isArray(deliveryPackageRecords) ? deliveryPackageRecords : [], accessHealth: Array.isArray(accessHealth) ? accessHealth : [], accessAudit: Array.isArray(accessAudit) ? accessAudit : [], accessWebhook: Array.isArray(accessWebhook) ? accessWebhook : [], policyChanges: Array.isArray(policyChanges) ? policyChanges : [], aiConfig: aiConfig || { configured: false }, builderMetrics: builderMetrics || null, governanceDemoOverview: buildLiveGovernanceOverview(snapshot) });
+  return snapshot;
 }
 
 window.refreshData = async function refreshData() { await loadAll(); renderAll(); };
@@ -707,16 +415,6 @@ function setReleaseOverride(id, patch) {
   };
   persistReleaseOverrides();
   renderAll();
-}
-
-function markReleaseTested(id = state.selectedReleaseId) {
-  if (state.user?.role !== 'admin') {
-    showToast(permissionDeniedMessage, 'error');
-    return;
-  }
-  const testedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  setReleaseOverride(id, { status: 'tested', tested_at: testedAt, testedBy: state.user?.display_name || '管理员' });
-  showToast('已标记为测试通过。', 'success');
 }
 
 function publishRelease(id = state.selectedReleaseId) {
@@ -2015,7 +1713,6 @@ window.updateProject = updateProject;
 window.saveProjectDraft = saveProjectDraft;
 window.openPublishDrawer = openPublishDrawer;
 window.closePublishDrawer = closePublishDrawer;
-window.markReleaseTested = markReleaseTested;
 window.publishRelease = publishRelease;
 window.rollbackRelease = rollbackRelease;
 window.openUsageDrawer = openUsageDrawer;
@@ -2125,20 +1822,6 @@ function openAiRecognizeModal(sourceId) {
       }
 
       try {
-        if (source.is_local_builder_source) {
-          const spec = runLocalBuilderRecognition(source, sampleContent);
-          updateLocalBuilderRequest(source.builder_request_id, {
-            status: 'processing',
-            updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ')
-          });
-          state.selectedOpenapiSpecId = spec.id;
-          state.currentPage = 'recognition';
-          document.body.removeChild(overlay);
-          renderAll();
-          showToast(`已根据客户需求生成 ${Object.keys(spec.spec?.paths || {}).length} 个接口草案。`, 'success');
-          return;
-        }
-
         const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
           method: 'POST',
           body: JSON.stringify({ use_ai: true, sample_content: sampleContent || source.sample_ddl || '', description: sampleContent || '' })
@@ -2414,46 +2097,6 @@ async function confirmOpenapiSpec(specId) {
   if (state.user?.role !== 'admin') { showToast(permissionDeniedMessage, 'error'); return; }
   try {
     const localSpec = (state.openapiSpecs || []).find(item => item.id === specId);
-    if (localSpec?.is_local_builder_spec) {
-      const source = (state.sources || []).find(item => item.id === localSpec.source_id);
-      const request = list(state.builderRequests).find(item => item.id === localSpec.builder_request_id);
-      if (!source || !request) {
-        throw new Error('Local builder draft is missing source or request context');
-      }
-
-      const confirmedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      const asset = buildLocalAssetFromRequest(source, request);
-
-      upsertLocalOpenapiSpec({
-        ...localSpec,
-        status: 'confirmed',
-        confirmed_at: confirmedAt
-      });
-      upsertLocalAsset({
-        ...asset,
-        updated_at: confirmedAt
-      });
-      upsertLocalIntakeSource({
-        ...source,
-        status: 'confirmed',
-        recognition_status: 'done',
-        updated_at: confirmedAt
-      });
-      updateLocalBuilderRequest(request.id, {
-        status: 'converted',
-        updated_at: confirmedAt,
-        result: {
-          ...request.result,
-          status: '已转入资料接入并生成 MCP 草案'
-        }
-      });
-
-      state.currentPage = 'candidates';
-      renderAll();
-      showToast(`OpenAPI 草案已确认，已生成 ${list(asset.tools).length} 个 MCP Tool。`, 'success');
-      return;
-    }
-
     const result = await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
     await loadAll();
     // 自动跳转到候选业务能力页
@@ -2918,7 +2561,6 @@ window.deleteTool = deleteTool;
 window.addTool = addTool;
 window.refreshDbSource = refreshDbSource;
 window.sendAgentMessage = sendAgentMessage;
-window.runSandboxTest = runSandboxTest;
 window.deployToWorkBuddy = deployToWorkBuddy;
 window.onSandboxAssetChange = onSandboxAssetChange;
 
@@ -3277,69 +2919,6 @@ async function sendAgentMessage() {
 window.resetAgentChat = function() { _agentHistory = []; const mb = $('agentMessages'); if (mb) mb.innerHTML = '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px 0">选择 MCP 资产后，输入问题测试 AI 是否能正确调用 Tool</div>'; };
 
 // 沙箱综合测试
-async function runSandboxTest() {
-  const select = $('sandboxAssetSelect');
-  const resultEl = $('sandboxTestResult');
-  if (!select || !select.value) { showToast('请先选择要测试的资产', 'warning'); return; }
-
-  resultEl.innerHTML = '<div style="padding:14px;color:#64748b">⏳ 正在执行沙箱综合测试（逐 Tool 调用 + 部署就绪检查 + 安全审计）...</div>';
-
-  try {
-    const result = await api(`/api/platform/mcp-assets/${select.value}/sandbox-test`, { method: 'POST' });
-    let html = '';
-
-    // 总览
-    const statusColor = { pass: '#16a34a', warn: '#ca8a04', fail: '#dc2626' };
-    const statusIcon = { pass: '✅', warn: '⚠️', fail: '❌' };
-    const statusLabel = { pass: '全部通过', warn: '有警告', fail: '存在失败' };
-    const overall = result.overall_status;
-    html += `<div style="background:${overall === 'pass' ? '#f0fdf4' : overall === 'warn' ? '#fffbeb' : '#fef2f2'};border:1px solid ${overall === 'pass' ? '#bbf7d0' : overall === 'warn' ? '#fde68a' : '#fecaca'};border-radius:8px;padding:14px;margin-bottom:12px">`;
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">`;
-    html += `<strong style="font-size:16px;color:${statusColor[overall]}">${statusIcon[overall]} 测试结果：${statusLabel[overall]}</strong>`;
-    html += `<span style="font-size:12px;color:#64748b">耗时 ${result.total_duration_ms}ms · ${new Date(result.tested_at).toLocaleString('zh-CN')}</span>`;
-    html += `</div>`;
-    html += `<div style="display:flex;gap:20px;font-size:13px">`;
-    html += `<span>Tool 测试：<strong style="color:${statusColor.pass}">${result.summary.passed}</strong>/${result.summary.total} 通过</span>`;
-    if (result.summary.failed) html += `<span style="color:${statusColor.fail}">失败 ${result.summary.failed}</span>`;
-    if (result.summary.warnings) html += `<span style="color:${statusColor.warn}">警告 ${result.summary.warnings}</span>`;
-    html += `</div></div>`;
-
-    // Tool 测试详情
-    html += `<details open class="tool-test-details"><summary>🔧 Tool 测试详情（${result.tool_tests.length}）</summary>`;
-    html += result.tool_tests.map(t => {
-      const tc = statusColor[t.status] || '#64748b';
-      return `<div class="tool-test-result"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:${tc};font-weight:600">${statusIcon[t.status] || '○'}</span><strong>${escapeHtml(t.display_name)}</strong><code style="font-size:11px;color:var(--primary)">${escapeHtml(t.tool_name)}</code></div>${t.checks.map(c => `<div style="font-size:12px;padding:2px 0 2px 20px;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('')}</div>`;
-    }).join('');
-    html += `</details>`;
-
-    // 部署检查
-    if (result.deployment_check) {
-      const dc = result.deployment_check;
-      html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">${statusIcon[dc.status]} 📦 部署就绪检查（${statusLabel[dc.status]}）</summary>`;
-      html += dc.checks.map(c => `<div style="font-size:12px;padding:3px 0;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('');
-      html += `</details>`;
-    }
-
-    // 安全审计
-    if (result.security_audit) {
-      const sa = result.security_audit;
-      html += `<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600;margin-bottom:6px">${statusIcon[sa.status]} 🛡️ 安全审计（${statusLabel[sa.status]}）</summary>`;
-      html += sa.checks.map(c => `<div style="font-size:12px;padding:3px 0;color:${statusColor[c.status] || '#64748b'}">${statusIcon[c.status] || '○'} <strong>${escapeHtml(c.check)}</strong>: ${escapeHtml(c.detail)}</div>`).join('');
-      html += `</details>`;
-    }
-
-    resultEl.innerHTML = html;
-    await loadAll();
-    renderAll();
-
-    if (overall === 'pass') showToast('沙箱测试全部通过！资产已标记为测试通过，可进入发布流程。', 'success');
-    else if (overall === 'warn') showToast('沙箱测试完成，存在警告项请关注。', 'warning');
-    else showToast('沙箱测试存在失败项，请修复后重试。', 'error');
-  } catch (error) {
-    resultEl.innerHTML = `<div style="color:#dc2626;padding:14px">❌ 测试失败: ${escapeHtml(error.message)}</div>`;
-    showToast(error.message, 'error');
-  }
-}
 window.selectOpenapiSpec = selectOpenapiSpec;
 window.confirmOpenapiSpec = confirmOpenapiSpec;
 window.viewSourceOpenapi = viewSourceOpenapi;
@@ -3374,9 +2953,8 @@ function bindEvents() {
   });
   $('loginBtn').addEventListener('click', login);
   $('logoutBtn').addEventListener('click', logout);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshCustomerLiveData(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.user) loadAll().then(renderAll).catch(() => {}); });
   $('simulateBtn')?.addEventListener('click', simulate);
-  $('sandboxTestBtn')?.addEventListener('click', runSandboxTest);
   $('createDataSourceBtn')?.addEventListener('click', createDataSource);
   $('createPolicyBtn').addEventListener('click', createPolicy);
   $('accessTestBtn')?.addEventListener('click', runAccessTest);
