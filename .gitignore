@@ -31,3 +31,6 @@ __pycache__/
 
 # NUL artifact (Windows)
 nul
+
+# Generated local MCP runtime processes
+mcp/poc/server/runtime-instances/

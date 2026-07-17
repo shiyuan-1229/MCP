@@ -410,7 +410,8 @@ function renderIntake() {
       const viewFileBtn = `<button type="button" class="ghost-btn small" onclick="viewSourceContent('${escapeJs(item.id)}')">查看文件</button>`;
       const viewDraftBtn = hasOpenapiDraft ? `<button type="button" class="ghost-btn small" onclick="viewSourceOpenapi('${escapeJs(item.id)}')">查看草案</button>` : '';
       const refreshBtn = isDbConn ? `<button type="button" class="ghost-btn small" onclick="refreshDbSource('${escapeJs(item.id)}')">刷新</button>` : '';
-      const actionBtn = `<div class="row-actions intake-row-actions">${viewFileBtn}${viewDraftBtn}${refreshBtn}<button type="button" class="primary-btn small" onclick="triggerRecognition('${escapeJs(item.id)}')">${recStatus === 'done' ? '重新识别' : '开始识别'}</button></div>`;
+      const deleteBtn = `<button type="button" class="ghost-btn small danger" onclick="deleteDataSource('${escapeJs(item.id)}')">删除</button>`;
+      const actionBtn = `<div class="row-actions intake-row-actions">${viewFileBtn}${viewDraftBtn}${refreshBtn}<button type="button" class="primary-btn small" onclick="triggerRecognition('${escapeJs(item.id)}')">${recStatus === 'done' ? '重新识别' : '开始识别'}</button>${deleteBtn}</div>`;
       const outputInfo = recStatus === 'done' ? '<span class="badge success">草案已生成</span>' : '<span class="muted-line">-</span>';
       html += `<tr class="intake-source-row"><td style="padding-left:8px;text-align:center">${checkbox}</td><td style="padding-left:20px"><strong>${text(item.name || '未命名资料')}</strong>${tag}</td><td>${text(item.project_name || '-')}</td><td><span class="cap-chip">${text(item.type || '-')}</span></td><td>${text(item.auth_mode || '-')}</td><td>${statusBadge}</td><td>${recBadge}</td><td>${outputInfo}</td><td>${actionBtn}</td></tr>`;
     });
@@ -528,7 +529,9 @@ function renderRecognition() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${!isConfirmed ? `<button type="button" class="primary-btn small" onclick="confirmOpenapiSpec('${spec.id}')">确认草案</button>` : '<span class="badge success">已确认</span>'}
         <button type="button" class="ghost-btn small" onclick="downloadOpenapiSpec('${spec.id}')">下载 JSON</button>
-        <button type="button" class="ghost-btn small" onclick="jumpToTooling()">进入 Tool 映射</button>
+        ${isConfirmed
+          ? `<button type="button" class="ghost-btn small" onclick="jumpToCandidateCapabilities('${spec.id}')">查看候选业务能力 →</button>`
+          : '<span class="muted-line">请先确认草案，再进入候选业务能力与人工初筛</span>'}
       </div>
     `;
   }
@@ -694,6 +697,19 @@ window.candidateScreenDecision = async function(candidateId, action) {
   }
 };
 
+window.resubmitCandidateScreen = async function(candidateId) {
+  try {
+    await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/resubmit-manual-screen', {
+      method: 'POST',
+      body: JSON.stringify({ reason: '人工已完成修改，提交候选接口重新初筛' })
+    });
+    await window.refreshData();
+    showToast('已进入待人工初筛队列，请重新确认通过、拒绝或继续修改。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+};
+
 window.confirmCandidateTool = async function(candidateId) {
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   const reason = $('toolReason_' + candidateId)?.value?.trim();
@@ -841,18 +857,72 @@ window.assembleCandidateMcp = async function(candidateId) {
 // ============================================================
 // 3. 候选业务能力 — AI 从资料中提取的业务能力候选（只读展示）
 // ============================================================
+function candidateCustomerInfo(candidate) {
+  const project = list(state.projects).find(item => item.id === candidate.project_id);
+  const customer = list(state.customers).find(item => item.id === (candidate.customer_id || project?.customer_id));
+  return {
+    id: candidate.customer_id || project?.customer_id || '',
+    name: candidate.customer_name || project?.customer_name || customer?.name || '未归属企业'
+  };
+}
+
+function filterCandidatesByCustomer(candidates) {
+  const selected = state.candidateCustomerFilter || '';
+  const byCustomer = selected ? candidates.filter(candidate => candidateCustomerInfo(candidate).id === selected) : candidates;
+  const sourceFilter = state.candidateSourceFilter || '';
+  return sourceFilter ? byCustomer.filter(candidate => candidate.source_ref === sourceFilter) : byCustomer;
+}
+
+function renderCandidateCustomerFilter(candidates, controlId) {
+  const selected = state.candidateCustomerFilter || '';
+  const customers = [];
+  const seen = new Set();
+  candidates.forEach(candidate => {
+    const customer = candidateCustomerInfo(candidate);
+    if (customer.id && !seen.has(customer.id)) {
+      seen.add(customer.id);
+      customers.push(customer);
+    }
+  });
+  const sourceSpec = state.candidateSourceFilter ? list(state.openapiSpecs).find(item => item.id === state.candidateSourceFilter) : null;
+  const sourceHint = sourceSpec
+    ? '<span class="muted-line">来源草案：' + text(sourceSpec.source_name || sourceSpec.title || sourceSpec.id) + '</span><button type="button" class="ghost-btn small" onclick="window.clearCandidateSourceFilter()">查看该企业全部候选</button>'
+    : '';
+  return '<div class="panel" style="margin-bottom:14px;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+    '<strong style="font-size:13px">企业筛选</strong><select id="' + controlId + '" onchange="window.setCandidateCustomerFilter(this.value)" style="min-width:180px;padding:7px 10px;border:1px solid var(--line);border-radius:6px">' +
+      '<option value="">全部企业</option>' + customers.map(customer => '<option value="' + escapeHtml(customer.id) + '"' + (selected === customer.id ? ' selected' : '') + '>' + escapeHtml(customer.name) + '</option>').join('') +
+    '</select><span class="muted-line">当前显示 ' + filterCandidatesByCustomer(candidates).length + ' 条候选</span>' + sourceHint + '</div>';
+}
+
+window.setCandidateCustomerFilter = function(customerId) {
+  state.candidateCustomerFilter = customerId || '';
+  state.selectedCandidateId = null;
+  renderAll();
+};
+
+window.clearCandidateSourceFilter = function() {
+  state.candidateSourceFilter = '';
+  state.selectedCandidateId = null;
+  renderAll();
+};
+
 function renderCandidatesPage() {
   const stepBar = $('candidatesStepBar');
   if (stepBar) stepBar.innerHTML = renderStepBar(3);
   const root = $('candidatesBoard');
   if (!root) return;
-  const candidates = list(state.candidates);
-  if (!candidates.length) {
+  const allCandidates = list(state.candidates);
+  const candidates = filterCandidatesByCustomer(allCandidates);
+  if (!allCandidates.length) {
     root.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
       '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 →</button></div></article>';
     return;
   }
-  root.innerHTML = candidates.map(candidate => {
+  if (!candidates.length) {
+    root.innerHTML = renderCandidateCustomerFilter(allCandidates, 'candidateCapabilityCustomerFilter') + '<article class="panel"><strong>该企业暂无候选业务能力</strong><p class="muted-line">请切换企业，或先从资料接入完成 AI 识别。</p></article>';
+    return;
+  }
+  root.innerHTML = renderCandidateCustomerFilter(allCandidates, 'candidateCapabilityCustomerFilter') + candidates.map(candidate => {
     const aiTools = jsonList(candidate.ai_tools_snapshot);
     const hits = jsonList(candidate.sensitive_hits);
     const screenDecided = candidate.manual_screen_decision && candidate.manual_screen_decision !== 'pending';
@@ -3272,6 +3342,7 @@ export function renderReviewWorkbench() {
   if (!screenRoot) return;
 
   const allCandidates = list(state.candidates);
+  const scopedCandidates = filterCandidatesByCustomer(allCandidates);
   if (!allCandidates.length) {
     screenRoot.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
       '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 -></button></div></article>';
@@ -3279,11 +3350,15 @@ export function renderReviewWorkbench() {
   }
 
   const selected = state.selectedCandidateId
-    ? allCandidates.find(c => c.id === state.selectedCandidateId)
+    ? scopedCandidates.find(c => c.id === state.selectedCandidateId)
     : null;
-  const pendingCandidates = allCandidates.filter(c => !c.manual_screen_decision || c.manual_screen_decision === 'pending');
+  const pendingCandidates = scopedCandidates.filter(c => !c.manual_screen_decision || c.manual_screen_decision === 'pending');
 
-  let html = '';
+  let html = renderCandidateCustomerFilter(allCandidates, 'candidateReviewCustomerFilter');
+  if (!scopedCandidates.length) {
+    screenRoot.innerHTML = html + '<article class="panel"><strong>该企业暂无待处理候选</strong><p class="muted-line">请切换企业，或先完成资料识别。</p></article>';
+    return;
+  }
   html += '<div style="margin-bottom:14px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'candidates\')">← 返回候选业务能力</button></div>';
 
   if (selected) {
@@ -3322,6 +3397,10 @@ export function renderReviewWorkbench() {
       html += '</div></div>';
       if (selected.manual_screen_decision === 'approve') {
         html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div>';
+      } else if (selected.manual_screen_decision === 'modify') {
+        const resubmitTasks = list(state.reviews).filter(task => task.candidate_id === selected.id && task.status === 'open' && task.review_type === 'resubmit_review');
+        html += '<div style="margin:0 16px 12px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px"><strong style="font-size:13px;color:#0369a1">修改已保存，等待重新初筛</strong><p class="muted-line" style="margin:4px 0 0">系统已保留修改记录并创建 ' + resubmitTasks.length + ' 条重审任务。点击下方按钮后，候选会回到“待人工初筛”队列。</p></div>';
+        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="resubmitCandidateScreen(\'' + escapeJs(selected.id) + '\')">提交到人工初筛队列</button></div>';
       }
     } else {
       const riskBadge = selected.risk_level === 'high' ? '<span class="badge danger">高风险</span>' : selected.risk_level === 'medium' ? '<span class="badge warning">中风险</span>' : '<span class="badge success">低风险</span>';
@@ -3379,7 +3458,7 @@ export function renderReviewWorkbench() {
   }
 
   // 候选列表
-  const listCandidates = selected ? allCandidates.filter(c => c.id !== selected.id) : allCandidates;
+  const listCandidates = selected ? scopedCandidates.filter(c => c.id !== selected.id) : scopedCandidates;
   if (listCandidates.length) {
     html += '<div class="panel" style="margin-bottom:10px"><div class="panel-head"><h3>' + (selected ? '其他候选业务能力' : '选择候选业务能力查看接口详情') + '</h3>' + (!selected && pendingCandidates.length ? '<small class="muted-line">' + pendingCandidates.length + ' 个待初筛</small>' : '') + '</div></div>';
     html += listCandidates.map(c => {

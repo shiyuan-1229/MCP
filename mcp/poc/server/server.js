@@ -20,7 +20,7 @@ import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 import { GOVERNANCE_DEMO_SCENARIOS } from "./modules/governance/demo-scenarios.mjs";
 import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
 import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
-import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema } from "./db-connector.mjs";
+import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema, describeConnectionError } from "./db-connector.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -986,9 +986,12 @@ function repairLvchengDemoText(database) {
 }
 function seed() {
   const hasUsers = count("platform_users") > 0;
-  if (!hasUsers) {
-    db.prepare("DELETE FROM platform_sessions").run();
+  if (hasUsers) {
+    // 已初始化的工作区保留用户的删除和业务修改，不能在每次重启时重新写入演示资料。
+    repairLvchengDemoText(db);
+    return;
   }
+  db.prepare("DELETE FROM platform_sessions").run();
 
   const customers = [
     ["cust_retail", "美佳零售集团", "美佳", "零售连锁", "AI 经营问答", "running"],
@@ -2126,7 +2129,8 @@ app.post("/api/platform/db/fetch-schema", requireAuth, requireAdmin, async (req,
     const schema = await dbFetchSchema({ host, port, user, password, database }, { includeSample: include_sample !== false });
     res.json(schema);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const diagnostic = describeConnectionError(err, req.body || {});
+    res.status(502).json({ error: diagnostic.message, diagnostic });
   }
 });
 
@@ -2140,6 +2144,9 @@ app.post("/api/platform/db/import", requireAuth, requireAdmin, async (req, res) 
 
     // 读取数据库结构
     const schema = await dbFetchSchema({ host, port, user, password, database });
+    if (!schema.object_count) {
+      return res.status(422).json({ error: schema.diagnostic.message, diagnostic: schema.diagnostic });
+    }
 
     // 创建数据源
     const dsId = makeId("ds");
@@ -2154,7 +2161,7 @@ app.post("/api/platform/db/import", requireAuth, requireAdmin, async (req, res) 
       (id, source_id, project_id, analysis_json, openapi_spec_id, tools_json, categories_json, model, usage_json, raw_content, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))`).run(
       analysisId, dsId, project_id,
-      JSON.stringify({ type: 'db_schema', database, table_count: schema.table_count, total_rows: schema.total_rows }),
+      JSON.stringify({ type: 'db_schema', database: schema.database, schemas: schema.schemas, table_count: schema.table_count, view_count: schema.view_count, routine_count: schema.routine_count, trigger_count: schema.trigger_count, object_count: schema.object_count, total_rows: schema.total_rows }),
       '', '[]', '{}', 'db-connector', JSON.stringify({}), schema.full_content
     );
 
@@ -2162,11 +2169,18 @@ app.post("/api/platform/db/import", requireAuth, requireAdmin, async (req, res) 
       source_id: dsId,
       source_name: dsName,
       table_count: schema.table_count,
+      view_count: schema.view_count,
+      routine_count: schema.routine_count,
+      trigger_count: schema.trigger_count,
+      object_count: schema.object_count,
+      schemas: schema.schemas,
+      truncated: schema.truncated,
       total_rows: schema.total_rows,
       tables: schema.tables.map(t => ({ name: t.table_name, rows: t.table_rows, columns: t.column_count, comment: t.table_comment }))
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const diagnostic = describeConnectionError(err, req.body || {});
+    res.status(502).json({ error: diagnostic.message, diagnostic });
   }
 });
 
@@ -2215,6 +2229,45 @@ app.post("/api/platform/data-sources", requireAuth, requireAdmin, (req, res) => 
   });
 });
 
+app.delete("/api/platform/data-sources/:id", requireAuth, requireAdmin, (req, res) => {
+  const source = db.prepare("SELECT * FROM platform_data_sources WHERE id = ?").get(req.params.id);
+  if (!source) return res.status(404).json({ error: "data source not found" });
+  const specs = db.prepare("SELECT id FROM platform_openapi_specs WHERE source_id = ?").all(source.id);
+  const refs = [source.id, ...specs.map(item => item.id)];
+  const placeholders = refs.map(() => "?").join(",");
+  const candidates = db.prepare(`SELECT id, mcp_id, status FROM platform_candidate_assets WHERE source_ref IN (${placeholders})`).all(...refs);
+  const protectedCandidates = candidates.filter(item => item.mcp_id || ['mcp_draft', 'published'].includes(item.status));
+  if (protectedCandidates.length) {
+    return res.status(409).json({
+      error: "资料已生成 MCP 草稿或正式发布资产，不能直接删除",
+      protected_candidate_ids: protectedCandidates.map(item => item.id)
+    });
+  }
+
+  const candidateIds = candidates.map(item => item.id);
+  const remove = db.transaction(() => {
+    if (candidateIds.length) {
+      const candidateMarks = candidateIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM platform_review_tasks WHERE candidate_id IN (${candidateMarks})`).run(...candidateIds);
+      db.prepare(`DELETE FROM platform_modification_logs WHERE candidate_id IN (${candidateMarks})`).run(...candidateIds);
+      db.prepare(`DELETE FROM platform_governance_decisions WHERE candidate_id IN (${candidateMarks})`).run(...candidateIds);
+      db.prepare(`DELETE FROM platform_tool_drafts WHERE source_candidate_id IN (${candidateMarks})`).run(...candidateIds);
+      db.prepare(`DELETE FROM platform_candidate_assets WHERE id IN (${candidateMarks})`).run(...candidateIds);
+    }
+    const collections = db.prepare("SELECT id FROM kb_collections WHERE source_id = ?").all(source.id);
+    for (const collection of collections) {
+      db.prepare("DELETE FROM kb_chunks WHERE collection_id = ?").run(collection.id);
+      db.prepare("DELETE FROM kb_documents WHERE collection_id = ?").run(collection.id);
+    }
+    db.prepare("DELETE FROM kb_collections WHERE source_id = ?").run(source.id);
+    db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(source.id);
+    db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ?").run(source.id);
+    db.prepare("DELETE FROM platform_data_sources WHERE id = ?").run(source.id);
+  });
+  remove();
+  res.json({ ok: true, deleted_source_id: source.id, deleted_candidate_count: candidateIds.length });
+});
+
 // 能力预览：AI 快速扫描 → 列出发现的能力（不做封装）
 app.post("/api/platform/data-sources/:id/preview", requireAuth, requireAdmin, async (req, res) => {
   const source = db.prepare("SELECT s.*, p.name AS project_name FROM platform_data_sources s JOIN platform_projects p ON p.id = s.project_id WHERE s.id = ?").get(req.params.id);
@@ -2226,9 +2279,11 @@ app.post("/api/platform/data-sources/:id/preview", requireAuth, requireAdmin, as
     // 获取样本内容（与 recognize 相同的逻辑）
     let effectiveSample = req.body?.sample_content || '';
     if (!effectiveSample) {
-      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model = 'db-connector' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      const dbCache = db.prepare("SELECT raw_content FROM ai_analysis_results WHERE source_id = ? AND model IN ('db-connector', 'file-upload') AND raw_content != '' ORDER BY created_at DESC LIMIT 1").get(source.id);
       if (dbCache?.raw_content) {
         effectiveSample = dbCache.raw_content;
+      } else if (source.sample_ddl) {
+        effectiveSample = source.sample_ddl;
       } else {
         const lvchengSrc = getLvchengSeedSources().find(s => s.id === source.id);
         if (lvchengSrc) effectiveSample = lvchengSrc.sampleContent;
@@ -2376,7 +2431,7 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
     let effectiveSample = sampleContent;
     if (!effectiveSample) {
       // 查 ai_analysis_results 中的缓存内容（db-connector 或 file-upload）
-      const cache = db.prepare("SELECT raw_content, model FROM ai_analysis_results WHERE source_id = ? AND raw_content != '' ORDER BY created_at DESC LIMIT 1").get(source.id);
+      const cache = db.prepare("SELECT raw_content, model FROM ai_analysis_results WHERE source_id = ? AND model IN ('db-connector', 'file-upload') AND raw_content != '' ORDER BY created_at DESC LIMIT 1").get(source.id);
       if (cache?.raw_content) {
         effectiveSample = cache.raw_content;
       } else {
@@ -2404,7 +2459,8 @@ app.post("/api/platform/data-sources/:id/recognize", requireAuth, requireAdmin, 
 
     // 删除旧的 spec 和 AI 分析记录（如果有），重新生成
     db.prepare("DELETE FROM platform_openapi_specs WHERE source_id = ?").run(source.id);
-    db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ?").run(source.id);
+    // 保留数据库/文件的原始输入缓存，确保“重新识别”仍能读取真实 DDL 或文件文本。
+    db.prepare("DELETE FROM ai_analysis_results WHERE source_id = ? AND model NOT IN ('db-connector', 'file-upload')").run(source.id);
     const specId = makeId("spec");
     db.prepare("INSERT INTO platform_openapi_specs (id, source_id, project_id, title, spec, status, generated_at) VALUES (?,?,?,?,?,?, datetime('now'))").run(
       specId, source.id, source.project_id,
@@ -3157,10 +3213,11 @@ app.post("/api/platform/data-sources/:id/refresh-db", requireAuth, requireAdmin,
 
   try {
     const schema = await dbFetchSchema({ host: config.host, port: config.port || '3306', user: config.user, password: config.password, database: config.database });
+    if (!schema.object_count) return res.status(422).json({ error: schema.diagnostic.message, diagnostic: schema.diagnostic });
     // 更新缓存的 DDL
     db.prepare("UPDATE ai_analysis_results SET raw_content = ?, analysis_json = ?, created_at = datetime('now') WHERE source_id = ? AND model = 'db-connector'").run(
       schema.full_content,
-      JSON.stringify({ type: 'db_schema', database: config.database, table_count: schema.table_count, total_rows: schema.total_rows, refreshed_at: new Date().toISOString().slice(0, 19).replace('T', ' ') }),
+      JSON.stringify({ type: 'db_schema', database: schema.database, schemas: schema.schemas, table_count: schema.table_count, view_count: schema.view_count, routine_count: schema.routine_count, trigger_count: schema.trigger_count, object_count: schema.object_count, total_rows: schema.total_rows, refreshed_at: new Date().toISOString().slice(0, 19).replace('T', ' ') }),
       source.id
     );
     // 如果没有 db-connector 记录则新建
@@ -3171,11 +3228,11 @@ app.post("/api/platform/data-sources/:id/refresh-db", requireAuth, requireAdmin,
         (id, source_id, project_id, analysis_json, model, usage_json, raw_content, created_at)
         VALUES (?,?,?,?,?,?,?, datetime('now'))`).run(
         analysisId, source.id, source.project_id,
-        JSON.stringify({ type: 'db_schema', database: config.database, table_count: schema.table_count, total_rows: schema.total_rows }),
+        JSON.stringify({ type: 'db_schema', database: schema.database, schemas: schema.schemas, table_count: schema.table_count, view_count: schema.view_count, routine_count: schema.routine_count, trigger_count: schema.trigger_count, object_count: schema.object_count, total_rows: schema.total_rows }),
         'db-connector', JSON.stringify({}), schema.full_content
       );
     }
-    res.json({ ok: true, table_count: schema.table_count, total_rows: schema.total_rows });
+    res.json({ ok: true, table_count: schema.table_count, view_count: schema.view_count, routine_count: schema.routine_count, trigger_count: schema.trigger_count, object_count: schema.object_count, total_rows: schema.total_rows, schemas: schema.schemas, truncated: schema.truncated });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3668,27 +3725,10 @@ app.post("/api/platform/governance/candidates/:id/manual-screen", requireAuth, (
   }
   const { action, reason, notes, modified_fields } = validation.normalized;
   const by = req.user?.display_name || req.user?.username || '';
+  const decisionReason = reason || notes;
 
-  const ok = governanceRepo.updateManualScreen({
-    id: candidate.id,
-    decision: action,
-    reason: reason || notes,
-    by
-  });
-  if (!ok) return res.status(500).json({ error: "failed to record manual screening" });
-
-  res.json({
-    ok: true,
-    candidate_id: candidate.id,
-    manual_screen_status: action,
-    manual_screen_decision: action,
-    manual_screen_reason: reason || notes,
-    manual_screen_by: by,
-    modified_fields
-  });
-
-  // 如果 action = modify，保存修改的字段到候选记录
-  if (action === 'modify' && modified_fields && modified_fields.length) {
+  // 修改字段必须先落库，再把候选标记为“修改后重审”，避免页面显示旧内容。
+  if (action === 'modify' && Array.isArray(modified_fields) && modified_fields.length) {
     const allowedFields = {
       business_domain: 'business_domain',
       business_action: 'business_action',
@@ -3699,10 +3739,10 @@ app.post("/api/platform/governance/candidates/:id/manual-screen", requireAuth, (
     };
     const updates = [];
     const params = [];
-    for (const mf of modified_fields) {
-      if (mf.field && allowedFields[mf.field] && mf.value !== undefined) {
-        updates.push(`${allowedFields[mf.field]} = ?`);
-        params.push(mf.value);
+    for (const field of modified_fields) {
+      if (field.field && allowedFields[field.field] && field.value !== undefined) {
+        updates.push(`${allowedFields[field.field]} = ?`);
+        params.push(String(field.value));
       }
     }
     if (updates.length) {
@@ -3710,6 +3750,65 @@ app.post("/api/platform/governance/candidates/:id/manual-screen", requireAuth, (
       db.prepare(`UPDATE platform_candidate_assets SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
   }
+
+  const ok = governanceRepo.updateManualScreen({
+    id: candidate.id,
+    decision: action,
+    reason: decisionReason,
+    by
+  });
+  if (!ok) return res.status(500).json({ error: "failed to record manual screening" });
+
+  const openTasks = governanceRepo.listOpenReviewTasksForCandidate(candidate.id, 'candidate_review');
+  let resubmitTask = null;
+  if (action === 'modify') {
+    const parentTask = openTasks[0] || null;
+    if (parentTask) governanceRepo.recordReviewDecision({ reviewId: parentTask.id, decision: 'modify', reason: decisionReason });
+    const modificationLogId = governanceRepo.recordModification({
+      reviewId: parentTask?.id || `manual_screen_${candidate.id}`,
+      candidateId: candidate.id,
+      modifiedFields: modified_fields || [],
+      modifyReason: decisionReason,
+      modifiedBy: by
+    });
+    resubmitTask = governanceRepo.createResubmitTask({
+      candidateId: candidate.id,
+      stage: 'candidate_review',
+      reviewType: 'resubmit_review',
+      reason: `修改后重审：${decisionReason || '原因未填写'}`,
+      assigneeRole: parentTask?.assignee_role || 'developer',
+      parentTaskId: parentTask?.id || null
+    });
+    resubmitTask.modification_log_id = modificationLogId;
+  } else {
+    // 初筛通过或拒绝时，关闭当前阶段的重审任务，避免后续 Tool/MCP 发布被历史任务错误阻断。
+    openTasks.forEach(task => governanceRepo.recordReviewDecision({ reviewId: task.id, decision: action, reason: decisionReason }));
+  }
+
+  res.json({
+    ok: true,
+    candidate_id: candidate.id,
+    manual_screen_status: action,
+    manual_screen_decision: action,
+    manual_screen_reason: decisionReason,
+    manual_screen_by: by,
+    modified_fields,
+    resubmit_task: resubmitTask
+  });
+});
+
+// 已修改候选重新进入人工初筛队列；重审任务保留为可追溯的审核记录。
+app.post("/api/platform/governance/candidates/:id/resubmit-manual-screen", requireAuth, (req, res) => {
+  const candidate = governanceRepo.getCandidate(req.params.id);
+  if (!candidate) return res.status(404).json({ error: "candidate not found" });
+  if (candidate.manual_screen_decision !== 'modify') {
+    return res.status(409).json({ error: "only modified candidates can be resubmitted for manual screening" });
+  }
+  const by = req.user?.display_name || req.user?.username || '';
+  const reason = String(req.body?.reason || '人工已完成修改，重新提交初筛');
+  const ok = governanceRepo.updateManualScreen({ id: candidate.id, decision: 'pending', reason, by });
+  if (!ok) return res.status(500).json({ error: "failed to resubmit manual screening" });
+  res.json({ ok: true, candidate: governanceRepo.getCandidate(candidate.id) });
 });
 
 // 更新候选业务能力字段（供修改后重审、Tool 编辑等使用）
@@ -4900,8 +4999,10 @@ app.get("/favicon.ico", (req, res) => res.status(204).end());
 // 无需登录鉴权，供 WorkBuddy / 测试页面直接调用。生产环境应加 API Key 鉴权。
 
 // 获取所有 MCP 资产 + Tool 清单
-app.get("/api/workbuddy/assets", (req, res) => {
-  const assets = db.prepare("SELECT id, name, capability, version, status, visibility, project_id, tools FROM platform_mcp_assets ORDER BY name").all();
+app.get("/api/workbuddy/assets", requireAuth, (req, res) => {
+  const assets = scopedAssets(req)
+    .filter(asset => !customerScope(req) || asset.status === 'published')
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-CN'));
   const result = assets.map(a => {
     const tools = decode(a.tools).filter(t => typeof t === 'object');
     const project = a.project_id ? db.prepare("SELECT id, customer_id FROM platform_projects WHERE id = ?").get(a.project_id) : null;
@@ -4968,9 +5069,11 @@ app.get("/api/workbuddy/assets/:id/tools", requireAuth, (req, res) => {
 });
 
 // 执行 Tool 调用（POC 阶段为模拟执行）
-app.post("/api/workbuddy/assets/:id/execute", async (req, res) => {
+app.post("/api/workbuddy/assets/:id/execute", requireAuth, async (req, res) => {
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
+  if (!scopedAssets(req).some(item => item.id === asset.id)) return res.status(403).json({ error: "asset access denied" });
+  if (customerScope(req) && asset.status !== 'published') return res.status(403).json({ error: "asset is not delivered" });
   const { tool_name, arguments: args } = req.body || {};
   if (!tool_name) return res.status(400).json({ error: "tool_name required" });
 
@@ -5131,6 +5234,48 @@ function normalizeOpenAIChatUrl(baseUrl) {
     ? `${normalizedBase}/chat/completions`
     : `${normalizedBase}/v1/chat/completions`;
 }
+function selectWorkBuddyTool(tools, message) {
+  const query = String(message || '').toLowerCase();
+  const terms = query.match(/[a-z0-9_]+|[\u4e00-\u9fff]{1,4}/g) || [];
+  return [...tools]
+    .map((tool, index) => {
+      const searchable = `${tool.name || ''} ${tool.display_name || ''} ${tool.description || ''}`.toLowerCase();
+      const score = terms.reduce((total, term) => total + (searchable.includes(term) ? term.length : 0), 0);
+      return { tool, score, index };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.tool || tools[0];
+}
+
+async function runDirectWorkBuddyFallback({ tools, runtime, message, reason }) {
+  const tool = selectWorkBuddyTool(tools, message);
+  const schema = tool.inputSchema || { properties: {}, required: [] };
+  const args = {};
+  for (const name of schema.required || []) {
+    const field = schema.properties?.[name] || {};
+    args[name] = field.type === 'number' ? 1 : field.type === 'boolean' ? true : 'POC_TEST';
+  }
+  const result = runtime
+    ? await callRuntimeTool({ endpoint: runtime.endpoint, toolName: tool.name, args })
+    : { ok: true, result: generateMockResult(tool, args), trace_id: `mock_${Date.now()}`, latency_ms: 0 };
+  if (!result.ok) throw new Error(result.error || 'MCP Tool call failed');
+  const toolCall = {
+    tool_name: tool.name,
+    display_name: tool.display_name || tool.name,
+    arguments: args,
+    result: result.result,
+    trace_id: result.trace_id,
+    latency_ms: result.latency_ms,
+    source: runtime ? 'poc_sse' : 'mock',
+    error: null
+  };
+  return {
+    reply: `已通过${runtime ? '真实 MCP POC' : '安全 Mock Connector'}调用「${toolCall.display_name}」。${result.result?.data?.message || result.result?.message || '调用成功，结果已记录到调用监控。'}`,
+    tool_calls: [toolCall],
+    usage: 0,
+    fallback: true,
+    fallback_reason: reason
+  };
+}
 app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
   const { asset_id, runtime_id, message, history, model_config } = req.body || {};
   if (!asset_id) return res.status(400).json({ error: "asset_id required" });
@@ -5140,7 +5285,9 @@ app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
   if (!asset) return res.status(404).json({ error: "asset not found" });
   if (!scopedAssets(req).some(item => item.id === asset_id)) return res.status(403).json({ error: "asset access denied" });
   if (customerScope(req) && asset.status !== "published") return res.status(403).json({ error: "asset is not delivered" });
-  const runtime = runtime_id ? db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id) : null;
+  const runtime = runtime_id
+    ? db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id)
+    : db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE asset_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1").get(asset_id);
 
   const tools = normalizeWorkBuddyTools(decode(asset.tools));
   if (!tools.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
@@ -5149,6 +5296,14 @@ app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
   const aiUrl = model_config?.url || process.env.AI_API_BASE || '';
   const aiKey = model_config?.apiKey || process.env.AI_API_KEY || '';
   const aiModel = model_config?.model || process.env.AI_MODEL || 'gpt-5.4-mini';
+  if (!aiKey) {
+    return res.json(await runDirectWorkBuddyFallback({
+      tools,
+      runtime,
+      message,
+      reason: 'AI 引擎未配置，已切换到 MCP 直连模式'
+    }));
+  }
   if (!aiKey) return res.status(400).json({ error: "AI 引擎未配置 API Key" });
 
   // 构建 OpenAI 兼容的 function 定义
@@ -5302,7 +5457,16 @@ ${toolList}
     });
   } catch (err) {
     console.error(`WorkBuddy chat failed: ${err.message}`);
-    res.status(502).json({ error: "AI service request failed. Check the model endpoint and try again." });
+    try {
+      res.json(await runDirectWorkBuddyFallback({
+        tools,
+        runtime,
+        message,
+        reason: 'AI 服务异常，已切换到 MCP 直连模式'
+      }));
+    } catch (fallbackError) {
+      res.status(502).json({ error: `WorkBuddy 对话失败：${fallbackError.message}` });
+    }
   }
 });
 

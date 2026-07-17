@@ -369,10 +369,15 @@
       loadAssets();
     }
 
+    function authHeaders() {
+      const token = localStorage.getItem('mcp_token') || '';
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
     // ============ 加载 MCP 资产 ============
     async function loadAssets() {
       try {
-        const resp = await fetch('/api/workbuddy/assets');
+        const resp = await fetch('/api/workbuddy/assets', { headers: authHeaders() });
         const assets = await resp.json();
         const sel = document.getElementById('assetSelect');
         assets.forEach(a => {
@@ -405,7 +410,7 @@
       if (!id) { currentAsset = null; currentTools = []; return; }
 
       try {
-        const resp = await fetch(`/api/workbuddy/assets/${id}/tools`);
+        const resp = await fetch(`/api/workbuddy/assets/${id}/tools`, { headers: authHeaders() });
         const data = await resp.json();
         currentAsset = { id: data.asset_id, name: data.asset_name };
         currentTools = data.tools;
@@ -430,7 +435,7 @@
         });
 
         // 更新资产信息
-        const assetResp = await fetch('/api/workbuddy/assets');
+        const assetResp = await fetch('/api/workbuddy/assets', { headers: authHeaders() });
         const assets = await assetResp.json();
         const asset = assets.find(a => a.id === id);
         if (asset) {
@@ -511,7 +516,7 @@
         // 调用 /api/workbuddy/chat 端点
         const resp = await fetch('/api/workbuddy/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({
             asset_id: currentAsset.id,
             message: text,

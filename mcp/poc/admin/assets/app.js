@@ -1522,7 +1522,7 @@ async function createDataSource() {
           <label style="font-size:12px">端口<input id="dbPort" placeholder="3306" value="3306" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
           <label style="font-size:12px">用户名<input id="dbUser" placeholder="dev" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
           <label style="font-size:12px">密码<input id="dbPassword" type="password" placeholder="密码" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
-          <label style="font-size:12px;grid-column:span 2">数据库名称<input id="dbDatabase" placeholder="lvchengcdp_member" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"></label>
+          <label style="font-size:12px;grid-column:span 2">Schema 名称<input id="dbDatabase" placeholder="lvchengcdp_member；多个用逗号分隔，* 为全部可访问 Schema" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:13px;margin-top:3px"><span style="display:block;color:#64748b;margin-top:3px">导入表、视图、存储过程、函数和触发器的定义；只读取每张表最多 2 行样例，不会复制整库数据。</span></label>
         </div>
         <button type="button" class="ghost-btn small" id="dbTestBtn" style="margin-top:8px">🔌 测试连接</button>
         <span id="dbTestResult" style="margin-left:8px;font-size:12px"></span>
@@ -1552,7 +1552,7 @@ async function createDataSource() {
       if (dbForm) dbForm.style.display = '';
       $('uploadHint').textContent = '通过数据库连接实时读取表结构';
       $('formatTags').innerHTML = '<span class="format-tag">MySQL 直连</span><span class="format-tag">自动读取 DDL</span>';
-      $('formatTip').textContent = '输入数据库连接信息，系统将自动读取所有表结构和样例数据，供 AI 识别';
+      $('formatTip').textContent = '输入数据库连接信息，系统将读取可访问 Schema 中的表、视图、存储过程、函数和触发器定义，以及极少量样例数据，供 AI 识别。多个 Schema 用逗号分隔；填写 * 可导入全部可访问的业务 Schema。';
 
       // 绑定测试连接
       if (dbTestBtn) {
@@ -1573,7 +1573,7 @@ async function createDataSource() {
             const result = await api('/api/platform/db/test-connection', { method: 'POST', body: JSON.stringify(cfg) });
             $('dbTestResult').innerHTML = result.ok
               ? '<span style="color:#16a34a">✅ 连接成功</span>'
-              : `<span style="color:#dc2626">❌ ${escapeHtml(result.message)}</span>`;
+              : `<span style="color:#dc2626">❌ ${escapeHtml(result.message)}</span>${(result.guidance || []).map(item => `<div class="muted-line" style="margin-top:4px">• ${escapeHtml(item)}</div>`).join('')}`;
           } catch (e) {
             $('dbTestResult').innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(e.message)}</span>`;
           }
@@ -1697,18 +1697,34 @@ async function createDataSource() {
             }
           }
 
-          const response = await api('/api/platform/data-sources', {
-            method: 'POST',
-            body: JSON.stringify({
+          let response;
+          if (type === 'Database Connection') {
+            const database = $('dbDatabase')?.value?.trim();
+            const connection = {
               project_id,
               name,
-              type,
-              auth_mode,
-              ddl_content: ddlContent,
-              ddl_file_name: ddlFileName,
-              ddl_file_size: ddlFileSize
-            })
-          });
+              host: $('dbHost')?.value?.trim(),
+              port: $('dbPort')?.value?.trim() || '3306',
+              user: $('dbUser')?.value?.trim(),
+              password: $('dbPassword')?.value || '',
+              database
+            };
+            if (!connection.host || !connection.user || !connection.database) throw new Error('请填写完整数据库连接信息和 Schema 名称');
+            response = await api('/api/platform/db/import', { method: 'POST', body: JSON.stringify(connection) });
+          } else {
+            response = await api('/api/platform/data-sources', {
+              method: 'POST',
+              body: JSON.stringify({
+                project_id,
+                name,
+                type,
+                auth_mode,
+                ddl_content: ddlContent,
+                ddl_file_name: ddlFileName,
+                ddl_file_size: ddlFileSize
+              })
+            });
+          }
 
           await loadAll();
           renderAll();
@@ -1717,7 +1733,10 @@ async function createDataSource() {
 
           // 根据后端解析结果显示友好提示
           let msg = `「${name}」已导入（${typeLabel}）。`;
-          if (response?.parsed && type === 'Database') {
+          if (type === 'Database Connection') {
+            msg += ` 已读取 ${response.table_count || 0} 张表、${response.view_count || 0} 个视图、${response.routine_count || 0} 个存储过程/函数、${response.trigger_count || 0} 个触发器，AI 可以开始识别。`;
+            if (response.truncated) msg += ' 对象数量超过安全上限，已截取前 300 个对象；如需全部导入，请按 Schema 分批导入。';
+          } else if (response?.parsed && type === 'Database') {
             const p = response.parsed;
             if (p.total_tables > 0) {
               msg += ` ✅ 已解析 ${p.total_tables} 张表，共 ${p.total_columns} 个字段。`;
@@ -2139,7 +2158,9 @@ function openAiRecognizeModal(sourceId) {
           return;
         }
 
-        const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
+        // 第一步只做能力预览；确认勾选后才在下方“开始封装”调用 recognize 生成 OpenAPI/Tool。
+        // recognize 的返回值没有 capabilities 字段，曾导致页面把已识别结果错误显示为 0。
+        const result = await api(`/api/platform/data-sources/${sourceId}/preview`, {
           method: 'POST',
           body: JSON.stringify({ use_ai: true, sample_content: sampleContent || source.sample_ddl || '', description: sampleContent || '' })
         });
@@ -2457,14 +2478,17 @@ async function confirmOpenapiSpec(specId) {
     const result = await api(`/api/platform/openapi-specs/${specId}/confirm`, { method: 'PUT' });
     await loadAll();
     // 自动跳转到候选业务能力页
+    const spec = (state.openapiSpecs || []).find(s => s.id === specId);
+    const source = (state.sources || []).find(item => item.id === spec?.source_id);
+    const project = (state.projects || []).find(item => item.id === spec?.project_id);
+    state.candidateSourceFilter = specId;
+    state.candidateCustomerFilter = source?.customer_id || project?.customer_id || '';
+    state.selectedCandidateId = null;
     state.currentPage = 'candidates';
     renderAll();
     // 查找关联的资产
-    const spec = (state.openapiSpecs || []).find(s => s.id === specId);
-    const sourceId = spec?.source_id;
-    const asset = (state.assets || []).find(a => a.id === `mcp_ai_${sourceId}`);
-    const toolCount = asset ? list(asset.tools).length : 0;
-    showToast(`OpenAPI 已确认，自动生成 ${toolCount} 个 MCP Tool，已进入候选业务能力。`, 'success');
+    const candidateCount = Array.isArray(result?.candidates) ? result.candidates.length : (state.candidates || []).filter(item => item.source_ref === specId).length;
+    showToast(`OpenAPI 已确认，已生成 ${candidateCount} 个候选业务能力；请先完成人工初筛。`, 'success');
   } catch (error) { showToast(error.message, 'error'); }
 }
 
@@ -2479,9 +2503,25 @@ function viewSourceOpenapi(sourceId) {
   }
 }
 
-function jumpToTooling() {
-  state.currentPage = 'tooling';
+function jumpToCandidateCapabilities(specId = '') {
+  const spec = (state.openapiSpecs || []).find(item => item.id === specId);
+  if (!spec) {
+    showToast('未找到对应的 OpenAPI 草案', 'error');
+    return;
+  }
+  if (spec.status !== 'confirmed') {
+    showToast('请先确认 OpenAPI 草案，系统才会生成候选业务能力进入人工初筛。', 'warning');
+    return;
+  }
+  const source = (state.sources || []).find(item => item.id === spec.source_id);
+  const project = (state.projects || []).find(item => item.id === spec.project_id);
+  state.candidateSourceFilter = spec.id;
+  state.candidateCustomerFilter = source?.customer_id || project?.customer_id || '';
+  state.selectedCandidateId = null;
+  state.currentPage = 'candidates';
+  const count = (state.candidates || []).filter(item => item.source_ref === spec.id).length;
   renderAll();
+  showToast(`已进入该草案对应的 ${count} 个候选业务能力，请先完成候选接口人工初筛。`, 'success');
 }
 
 function jumpToAssets(assetId = '') {
@@ -2573,17 +2613,33 @@ async function refreshDbSource(sourceId) {
     { key: 'port', label: '端口', default: '3306' },
     { key: 'user', label: '用户名' },
     { key: 'password', label: '密码', type: 'password' },
-    { key: 'database', label: '数据库名' }
+    { key: 'database', label: 'Schema 名称（多个用逗号分隔，* 为全部可访问 Schema）' }
   ], { host: '', port: '3306', user: '', password: '', database: '' }, async data => {
     if (!data.host || !data.user || !data.database) { showToast('请填写完整连接信息', 'warning'); return; }
     try {
       const result = await api(`/api/platform/data-sources/${sourceId}/refresh-db`, { method: 'POST', body: JSON.stringify(data) });
       await loadAll();
       renderAll();
-      showToast(`数据库已刷新：${result.table_count} 张表，${result.total_rows} 行`, 'success');
+      showToast(`数据库已刷新：${result.table_count || 0} 张表、${result.view_count || 0} 个视图、${result.routine_count || 0} 个存储过程/函数、${result.trigger_count || 0} 个触发器`, 'success');
     } catch (error) { showToast(error.message, 'error'); }
   });
 }
+
+async function deleteDataSource(sourceId) {
+  const source = (state.sources || []).find(item => item.id === sourceId);
+  if (!source) return;
+  confirmDialog(`确认删除「${source.name}」吗？未生成 MCP 的识别、候选、审核和 Tool 草稿会一并删除。已生成 MCP 草稿或已发布资产的资料会被保护，不能误删。`, async () => {
+    try {
+      const result = await api(`/api/platform/data-sources/${sourceId}`, { method: 'DELETE' });
+      await loadAll();
+      renderAll();
+      showToast(`已删除资料及 ${result.deleted_candidate_count || 0} 条下游候选`, 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  });
+}
+window.deleteDataSource = deleteDataSource;
 
 // AI 重组 MCP — 从 Tool 库勾选工具封装为新 MCP
 async function aiRecomposeMcp() {
@@ -2883,6 +2939,7 @@ function jumpToPage(pageId) {
   if (!allPages.includes(pageId)) return;
   // 检查权限
   if (state.user?.role !== 'admin') return;
+  if (pageId === 'candidates') state.candidateSourceFilter = '';
   state.currentPage = pageId;
   renderAll();
 }
@@ -3343,7 +3400,7 @@ async function runSandboxTest() {
 window.selectOpenapiSpec = selectOpenapiSpec;
 window.confirmOpenapiSpec = confirmOpenapiSpec;
 window.viewSourceOpenapi = viewSourceOpenapi;
-window.jumpToTooling = jumpToTooling;
+window.jumpToCandidateCapabilities = jumpToCandidateCapabilities;
 window.jumpToAssets = jumpToAssets;
 window.jumpToPublish = jumpToPublish;
 window.jumpToPage = jumpToPage;
