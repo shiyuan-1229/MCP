@@ -87,6 +87,17 @@ async function chatCompletion(messages, options = {}) {
 // ============================================================
 // 安全提取 JSON（从大模型返回文本中提取 JSON 对象/数组）
 // ============================================================
+export async function generateDeliveryMaterialDraft(type, snapshot, requirements) {
+  const { buildDeliveryPrompt } = await import('./modules/delivery-ai/prompts.mjs');
+  const { system, user } = buildDeliveryPrompt(type, snapshot, requirements);
+  const response = await chatCompletion([
+    { role: 'system', content: system },
+    { role: 'user', content: user }
+  ], { temperature: 0.2, max_tokens: 4000, timeout: 120000 });
+  const draft = extractJSON(response.content);
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('AI delivery response must be a JSON object');
+  return { draft, prompt: user, model: getAI_MODEL(), usage: response.usage };
+}
 function extractJSON(text) {
   if (!text) return null;
   // 去掉 ```json ... ``` 包裹

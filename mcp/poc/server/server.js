@@ -1,13 +1,14 @@
 // MCP Forge admin server
 import express from "express";
 import multer from "multer";
+import { ZipArchive } from "archiver";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import fs from "fs";
 import Database from "better-sqlite3";
 import WebSocket, { WebSocketServer } from "ws";
-import { runFullPipeline, analyzeBusinessData, previewCapabilities, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig } from "./ai-engine.mjs";
+import { runFullPipeline, analyzeBusinessData, previewCapabilities, analysisToOpenAPISpec, analysisToTools, isAIConfigured, getAIConfig, generateDeliveryMaterialDraft } from "./ai-engine.mjs";
 import { getLvchengSeedSources } from "./lvcheng-seed-data.mjs";
 import { createGovernanceRepository } from "./modules/governance/repository.mjs";
 import { buildReviewTasksForCandidate, decideReviewLevel, getStageMetadata, evaluateToolReview, getToolReviewChecklist, checkCandidatePublishReadiness, handleReviewDecision } from "./modules/governance/review-orchestrator.mjs";
@@ -20,6 +21,8 @@ import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
 import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
 import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema, describeConnectionError } from "./db-connector.mjs";
+import { buildDeliveryFactSnapshot } from "./modules/delivery-ai/context.mjs";
+import { transitionVersion, validateDeliveryDraft } from "./modules/delivery-ai/validation.mjs";
 
 // 加载 .env
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
@@ -367,6 +370,29 @@ function runMigrations() {
   try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN content_type TEXT"); } catch {}
   try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN file_content BLOB"); } catch {}
   try { db.exec("ALTER TABLE platform_deliverables ADD COLUMN origin TEXT"); } catch {}
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_deliverable_versions (
+    id TEXT PRIMARY KEY,
+    deliverable_id TEXT NOT NULL,
+    version_number INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft','pending_review','approved','rejected','published')),
+    content TEXT NOT NULL,
+    content_format TEXT NOT NULL DEFAULT 'json',
+    generation_context TEXT,
+    fact_snapshot TEXT,
+    prompt TEXT,
+    model TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    parent_version_id TEXT,
+    change_summary TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    approved_by TEXT,
+    approved_at TEXT,
+    rejection_reason TEXT,
+    UNIQUE(deliverable_id, version_number)
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_deliverable_versions_delivery ON platform_deliverable_versions(deliverable_id, version_number DESC)");
   db.exec("CREATE TABLE IF NOT EXISTS platform_delivery_packages (\n    project_id TEXT PRIMARY KEY,\n    title TEXT,\n    delivery_note TEXT,\n    customer_visible INTEGER DEFAULT 0,\n    published_at TEXT,\n    published_by TEXT,\n    updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n  )");  db.exec(`CREATE TABLE IF NOT EXISTS platform_billing_records (
     id TEXT PRIMARY KEY,
     customer_id TEXT NOT NULL,
@@ -3464,10 +3490,10 @@ app.get("/api/platform/call-events", requireAuth, (req, res) => {
   res.json({ total, page: Number(page), pageSize: Number(pageSize), data: db.prepare(sql).all(...params) });
 });
 
-const deliveryMaterialTypes = new Set(['config', 'test-report', 'run-guide']);
+const deliveryMaterialTypes = new Set(['config', 'test-report', 'run-guide', 'skill-package']);
 
 function deliveryMaterialName(project, type) {
-  const label = { config: '配置包', 'test-report': '验收报告', 'run-guide': '运行说明' }[type] || '交付资料';
+  const label = { config: '配置包', 'test-report': '验收报告', 'run-guide': '运行说明', 'skill-package': 'Skills delivery package' }[type] || '交付资料';
   return String(project.name || project.id) + ' ' + label;
 }
 
@@ -3502,13 +3528,183 @@ app.put("/api/platform/delivery-packages/:projectId", requireAuth, requireAdmin,
   if (customerVisible) {
     const publishedAsset = db.prepare("SELECT 1 FROM platform_mcp_assets WHERE project_id = ? AND status = 'published' LIMIT 1").get(project.id);
     if (!publishedAsset) return res.status(409).json({ error: "published MCP asset required before delivery package publishing" });
-    const readyTypes = new Set(db.prepare("SELECT type FROM platform_deliverables WHERE project_id = ? AND status = 'ready' AND type IN ('config','test-report','run-guide')").all(project.id).map(item => item.type));
-    const missingTypes = ['config', 'test-report', 'run-guide'].filter(type => !readyTypes.has(type));
-    if (missingTypes.length) return res.status(409).json({ error: "required delivery materials missing: " + missingTypes.join(', ') });
-  }
+    const approvedTypes = new Set(db.prepare(`
+      SELECT DISTINCT d.type
+      FROM platform_deliverables d
+      JOIN platform_deliverable_versions v ON v.deliverable_id = d.id
+      WHERE d.project_id = ?
+        AND d.type IN ('config','test-report','run-guide','skill-package')
+        AND v.status IN ('approved','published')
+    `).all(project.id).map(item => item.type));
+    const missingTypes = ['config', 'test-report', 'run-guide', 'skill-package'].filter(type => !approvedTypes.has(type));
+    if (missingTypes.length) return res.status(409).json({ error: "approved delivery versions missing: " + missingTypes.join(', ') });  }
 
   db.prepare("INSERT INTO platform_delivery_packages (project_id,title,delivery_note,customer_visible,published_at,published_by,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET title=excluded.title,delivery_note=excluded.delivery_note,customer_visible=excluded.customer_visible,published_at=CASE WHEN excluded.customer_visible=1 THEN CURRENT_TIMESTAMP ELSE NULL END,published_by=CASE WHEN excluded.customer_visible=1 THEN excluded.published_by ELSE NULL END,updated_at=CURRENT_TIMESTAMP").run(project.id, body.title || "", body.delivery_note || "", customerVisible, req.user.display_name);
+  if (customerVisible) {
+    db.prepare(`UPDATE platform_deliverable_versions
+      SET status = 'published'
+      WHERE status = 'approved'
+        AND id IN (
+          SELECT v.id
+          FROM platform_deliverable_versions v
+          JOIN platform_deliverables d ON d.id = v.deliverable_id
+          WHERE d.project_id = ?
+            AND v.version_number = (
+              SELECT MAX(v2.version_number)
+              FROM platform_deliverable_versions v2
+              WHERE v2.deliverable_id = v.deliverable_id
+                AND v2.status IN ('approved','published')
+            )
+        )`).run(project.id);
+  }
   res.json(db.prepare("SELECT * FROM platform_delivery_packages WHERE project_id = ?").get(project.id));
+});
+function createDeliveryVersion(deliverable, input) {
+  const latest = db.prepare("SELECT COALESCE(MAX(version_number), 0) AS version_number FROM platform_deliverable_versions WHERE deliverable_id = ?").get(deliverable.id);
+  const id = makeId("delver");
+  db.prepare(`INSERT INTO platform_deliverable_versions (
+    id, deliverable_id, version_number, status, content, content_format,
+    generation_context, fact_snapshot, prompt, model, input_tokens, output_tokens,
+    parent_version_id, change_summary, created_by
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id, deliverable.id, latest.version_number + 1, "draft", JSON.stringify(input.content), "json",
+    input.generationContext || "", JSON.stringify(input.factSnapshot || {}), input.prompt || null, input.model || null,
+    Number(input.usage?.input_tokens) || 0, Number(input.usage?.output_tokens) || 0,
+    input.parentVersionId || null, input.changeSummary || "AI generated draft", input.createdBy
+  );
+  return db.prepare("SELECT * FROM platform_deliverable_versions WHERE id = ?").get(id);
+}
+
+function findDeliveryVersion(id) {
+  return db.prepare(`SELECT v.*, d.project_id, d.type, d.name AS deliverable_name
+    FROM platform_deliverable_versions v
+    JOIN platform_deliverables d ON d.id = v.deliverable_id
+    WHERE v.id = ?`).get(id);
+}
+
+function deliveryVersionPayload(version, includeAudit = false) {
+  const payload = {
+    id: version.id,
+    deliverable_id: version.deliverable_id,
+    version_number: version.version_number,
+    status: version.status,
+    content: safeParse(version.content) || {},
+    content_format: version.content_format,
+    parent_version_id: version.parent_version_id,
+    change_summary: version.change_summary,
+    created_by: version.created_by,
+    created_at: version.created_at,
+    approved_by: version.approved_by,
+    approved_at: version.approved_at,
+    rejection_reason: version.rejection_reason
+  };
+  if (includeAudit) {
+    payload.generation_context = version.generation_context || "";
+    payload.fact_snapshot = safeParse(version.fact_snapshot) || {};
+    payload.model = version.model || null;
+    payload.input_tokens = version.input_tokens || 0;
+    payload.output_tokens = version.output_tokens || 0;
+  }
+  return payload;
+}
+
+function getScopedDeliverable(req, deliverableId) {
+  const deliverable = db.prepare("SELECT * FROM platform_deliverables WHERE id = ?").get(deliverableId);
+  if (!deliverable || !scopedProjectById(req, deliverable.project_id)) return null;
+  return deliverable;
+}
+
+app.post("/api/platform/deliverables/:id/ai-drafts", requireAuth, requireAdmin, async (req, res) => {
+  const deliverable = getScopedDeliverable(req, req.params.id);
+  if (!deliverable) return res.status(404).json({ error: "deliverable not found" });
+  if (!isAIConfigured()) return res.status(503).json({ error: "AI delivery generation is not configured" });
+  try {
+    const snapshot = buildDeliveryFactSnapshot(db, deliverable.project_id);
+    const requirements = String(req.body?.requirements || "").trim();
+    const generated = await generateDeliveryMaterialDraft(deliverable.type, snapshot, requirements);
+    const content = validateDeliveryDraft(deliverable.type, generated.draft, snapshot);
+    const version = createDeliveryVersion(deliverable, {
+      content,
+      generationContext: requirements,
+      factSnapshot: snapshot,
+      prompt: generated.prompt,
+      model: generated.model,
+      usage: generated.usage,
+      createdBy: req.user.display_name
+    });
+    res.status(201).json(deliveryVersionPayload(version, true));
+  } catch (error) {
+    res.status(422).json({ error: error instanceof Error ? error.message : "AI delivery generation failed" });
+  }
+});
+
+app.get("/api/platform/deliverables/:id/versions", requireAuth, (req, res) => {
+  const deliverable = getScopedDeliverable(req, req.params.id);
+  if (!deliverable) return res.status(404).json({ error: "deliverable not found" });
+  const admin = req.user.role === "admin";
+  const query = admin
+    ? "SELECT * FROM platform_deliverable_versions WHERE deliverable_id = ? ORDER BY version_number DESC"
+    : "SELECT * FROM platform_deliverable_versions WHERE deliverable_id = ? AND status IN ('approved','published') ORDER BY version_number DESC";
+  res.json(db.prepare(query).all(deliverable.id).map(version => deliveryVersionPayload(version, admin)));
+});
+
+app.put("/api/platform/deliverable-versions/:id", requireAuth, requireAdmin, (req, res) => {
+  const source = findDeliveryVersion(req.params.id);
+  if (!source || !scopedProjectById(req, source.project_id)) return res.status(404).json({ error: "delivery version not found" });
+  if (!["draft", "rejected"].includes(source.status)) return res.status(409).json({ error: "only draft or rejected versions can be edited" });
+  const content = typeof req.body?.content === "string" ? safeParse(req.body.content) : req.body?.content;
+  const snapshot = safeParse(source.fact_snapshot) || buildDeliveryFactSnapshot(db, source.project_id);
+  try {
+    const version = createDeliveryVersion({ id: source.deliverable_id }, {
+      content: validateDeliveryDraft(source.type, content, snapshot),
+      generationContext: source.generation_context || "",
+      factSnapshot: snapshot,
+      parentVersionId: source.id,
+      changeSummary: String(req.body?.change_summary || "Administrator edit"),
+      createdBy: req.user.display_name
+    });
+    res.status(201).json(deliveryVersionPayload(version, true));
+  } catch (error) {
+    res.status(422).json({ error: error instanceof Error ? error.message : "delivery version update failed" });
+  }
+});
+
+app.post("/api/platform/deliverable-versions/:id/submit", requireAuth, requireAdmin, (req, res) => {
+  const version = findDeliveryVersion(req.params.id);
+  if (!version || !scopedProjectById(req, version.project_id)) return res.status(404).json({ error: "delivery version not found" });
+  try {
+    transitionVersion(version.status, "pending_review");
+    db.prepare("UPDATE platform_deliverable_versions SET status = ? WHERE id = ?").run("pending_review", version.id);
+    res.json(deliveryVersionPayload(findDeliveryVersion(version.id), true));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "invalid delivery version transition" });
+  }
+});
+
+app.post("/api/platform/deliverable-versions/:id/approve", requireAuth, requireAdmin, (req, res) => {
+  const version = findDeliveryVersion(req.params.id);
+  if (!version || !scopedProjectById(req, version.project_id)) return res.status(404).json({ error: "delivery version not found" });
+  try {
+    transitionVersion(version.status, "approved");
+    db.prepare("UPDATE platform_deliverable_versions SET status = ?, approved_by = ?, approved_at = datetime('now'), rejection_reason = NULL WHERE id = ?").run("approved", req.user.display_name, version.id);
+    res.json(deliveryVersionPayload(findDeliveryVersion(version.id), true));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "invalid delivery version transition" });
+  }
+});
+
+app.post("/api/platform/deliverable-versions/:id/reject", requireAuth, requireAdmin, (req, res) => {
+  const version = findDeliveryVersion(req.params.id);
+  if (!version || !scopedProjectById(req, version.project_id)) return res.status(404).json({ error: "delivery version not found" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "rejection reason required" });
+  try {
+    transitionVersion(version.status, "rejected");
+    db.prepare("UPDATE platform_deliverable_versions SET status = ?, rejection_reason = ? WHERE id = ?").run("rejected", reason, version.id);
+    res.json(deliveryVersionPayload(findDeliveryVersion(version.id), true));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "invalid delivery version transition" });
+  }
 });
 app.get("/api/platform/deliverables", requireAuth, (req, res) => {
   const ids = scopedProjects(req).map(p => p.id);
@@ -4559,6 +4755,21 @@ app.get("/api/platform/openapi-specs/:id/download", requireAuth, (req, res) => {
 });
 
 // 交付物文件下载（生成真实内容）
+function latestApprovedDeliveryVersion(deliverableId) {
+  return db.prepare("SELECT * FROM platform_deliverable_versions WHERE deliverable_id = ? AND status IN ('approved','published') ORDER BY version_number DESC LIMIT 1").get(deliverableId);
+}
+
+function renderApprovedDeliveryVersion(deliverable, version) {
+  const content = safeParse(version.content) || {};
+  if (deliverable.type === "config") {
+    const base = safeParse(generateConfigPackage(deliverable)) || {};
+    return { body: JSON.stringify({ ...base, delivery_notes: content.notes_markdown || "" }, null, 2), filename: `mcp-forge-config-${deliverable.id}.json`, contentType: "application/json" };
+  }
+  if (deliverable.type === "test-report") return { body: generateTestReport(deliverable, content.summary_markdown || ""), filename: `mcp-forge-test-report-${deliverable.id}.html`, contentType: "text/html; charset=utf-8" };
+  if (deliverable.type === "run-guide") return { body: content.markdown || "", filename: `mcp-forge-run-guide-${deliverable.id}.md`, contentType: "text/markdown; charset=utf-8" };
+  if (deliverable.type === "skill-package") return { skill: content.skill_markdown || "", config: generateSkillPackage(deliverable).config, readme: content.readme_markdown || "" };
+  throw new Error("approved delivery version has an unsupported type");
+}
 app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
   const item = db.prepare("SELECT * FROM platform_deliverables WHERE id = ?").get(req.params.id);
   if (!item) return res.status(404).json({ error: "Deliverable not found" });
@@ -4573,12 +4784,46 @@ app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
   }
 
   const type = item.type || 'report';
+  const approvedVersion = item.file_content ? null : latestApprovedDeliveryVersion(item.id);
+  const hasAiVersion = item.file_content ? false : Boolean(db.prepare("SELECT 1 FROM platform_deliverable_versions WHERE deliverable_id = ? LIMIT 1").get(item.id));
+  if (req.user.role !== "admin" && hasAiVersion && !approvedVersion) {
+    return res.status(409).json({ error: "approved version required before customer download" });
+  }
   let content, filename, contentType;
 
   if (item.file_content) {
     content = item.file_content;
     filename = item.file_name || 'mcp-forge-deliverable-' + item.id;
     contentType = item.content_type || 'application/octet-stream';
+  } else if (approvedVersion && type === 'skill-package') {
+    const files = renderApprovedDeliveryVersion(item, approvedVersion);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="mcp-forge-skills-${item.id}.zip"`);
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    archive.on('error', error => res.destroy(error));
+    archive.pipe(res);
+    archive.append(files.skill, { name: 'SKILL.md' });
+    archive.append(files.config, { name: 'mcp-config.json' });
+    archive.append(files.readme, { name: 'README.md' });
+    archive.finalize();
+    return;
+  } else if (approvedVersion) {
+    const rendered = renderApprovedDeliveryVersion(item, approvedVersion);
+    content = rendered.body;
+    filename = rendered.filename;
+    contentType = rendered.contentType;
+  } else if (type === 'skill-package') {
+    const files = generateSkillPackage(item);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="mcp-forge-skills-${item.id}.zip"`);
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    archive.on('error', error => res.destroy(error));
+    archive.pipe(res);
+    archive.append(files.skill, { name: 'SKILL.md' });
+    archive.append(files.config, { name: 'mcp-config.json' });
+    archive.append(files.readme, { name: 'README.md' });
+    archive.finalize();
+    return;
   } else if (type === 'config-package' || type === 'config') {
     content = generateConfigPackage(item);
     filename = `mcp-forge-config-${item.id}.json`;
@@ -4630,6 +4875,69 @@ app.get("/api/platform/deliverables/:id/download", requireAuth, (req, res) => {
   res.send(content);
 });
 
+function createSkillPackageName(project) {
+  const source = String(project?.name || project?.id || "mcp-delivery").trim();
+  const slug = source
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  if (slug) return slug;
+  return "mcp-skill-" + crypto.createHash("sha256").update(source).digest("hex").slice(0, 8);
+}
+
+function generateSkillPackage(deliverable) {
+  const project = db.prepare("SELECT * FROM platform_projects WHERE id = ?").get(deliverable.project_id);
+  const assets = db.prepare("SELECT * FROM platform_mcp_assets WHERE project_id = ? AND status = 'published'").all(deliverable.project_id);
+  const tools = assets.flatMap(asset => decode(asset.tools).map(tool => ({
+    mcp: asset.name,
+    name: typeof tool === "string" ? tool : tool.name,
+    description: typeof tool === "string" ? "" : tool.description || ""
+  })));
+  const skill = [
+    "---",
+    "name: " + createSkillPackageName(project),
+    "description: Instructions for using the delivered MCP tools.",
+    "---",
+    "",
+    "# " + (project?.name || "MCP") + " Skill",
+    "",
+    "## When to use",
+    "Use this skill for approved business workflows supported by this MCP.",
+    "",
+    "## Rules",
+    "- Call only the listed MCP tools.",
+    "- Request missing business parameters before a tool call.",
+    "- Do not expose credentials or sensitive results.",
+    "",
+    "## Available tools",
+    ...tools.map(tool => "- " + tool.mcp + "." + tool.name + (tool.description ? ": " + tool.description : "")),
+    "",
+    "## Example",
+    "Confirm the user intent and parameters, then call the matching MCP tool."
+  ].join("\n");
+  const config = JSON.stringify({
+    project_id: deliverable.project_id,
+    generated_at: new Date().toISOString(),
+    mcp_servers: assets.map(asset => ({
+      name: asset.name,
+      version: asset.version,
+      endpoint: asset.endpoint || "/mcp/" + asset.name,
+      tools: decode(asset.tools)
+    }))
+  }, null, 2);
+  const readme = [
+    "# Skills Delivery Package",
+    "",
+    "1. Add SKILL.md to the target agent skill directory.",
+    "2. Register mcp-config.json with the enterprise MCP client.",
+    "3. Configure the delivery credentials supplied separately.",
+    "4. Run a WorkBuddy test using a published MCP asset."
+  ].join("\n");
+  return { skill, config, readme };
+}
+
 function generateConfigPackage(deliverable) {
   const project = deliverable.project_id ? db.prepare("SELECT * FROM platform_projects WHERE id = ?").get(deliverable.project_id) : null;
   const assets = project ? db.prepare("SELECT * FROM platform_mcp_assets WHERE project_id = ? AND status IN ('published','testing')").all(project.id) : [];
@@ -4665,47 +4973,18 @@ function generateConfigPackage(deliverable) {
   }, null, 2);
 }
 
-function generateTestReport(deliverable) {
-  const events = db.prepare("SELECT * FROM platform_call_events ORDER BY created_at DESC LIMIT 20").all();
-  const passCount = events.filter(e => e.status === 'success').length;
-  const totalLatency = events.reduce((s, e) => s + (e.latency_ms || 0), 0);
-  return `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>MCP Forge 测试报告</title>
-<style>
-body{font-family:-apple-system,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;color:#1a1a2e}
-h1{border-bottom:2px solid #2563eb;padding-bottom:8px}
-h2{color:#1e293b;margin-top:28px}
-.meta{background:#f1f5f9;padding:12px 16px;border-radius:6px;font-size:13px}
-table{width:100%;border-collapse:collapse;margin:14px 0}
-th,td{border:1px solid #e2e8f0;padding:8px 12px;text-align:left;font-size:13px}th{background:#f8fafc}
-.pass{color:#16a34a}.fail{color:#dc2626}.warn{color:#ca8a04}
-.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
-.summary-card{background:#f8fafc;border-radius:8px;padding:16px;text-align:center}
-.summary-card .num{font-size:28px;font-weight:700;color:#2563eb}
-.summary-card .label{font-size:12px;color:#64748b;margin-top:4px}
-</style></head><body>
-<h1>MCP Forge 测试发布报告</h1>
-<div class="meta">
-<strong>交付物：</strong>${escapeHtml(deliverable.name || deliverable.id)} &nbsp;|&nbsp;
-<strong>生成时间：</strong>${new Date().toLocaleString('zh-CN')} &nbsp;|&nbsp;
-<strong>格式：</strong>HTML 可打印报告
-</div>
-<div class="summary">
-<div class="summary-card"><div class="num">${events.length}</div><div class="label">总调用量</div></div>
-<div class="summary-card"><div class="num pass">${passCount}</div><div class="label">成功</div></div>
-<div class="summary-card"><div class="num">${events.length - passCount}</div><div class="label">失败</div></div>
-<div class="summary-card"><div class="num">${totalLatency ? Math.round(totalLatency / events.length) : 0}ms</div><div class="label">平均耗时</div></div>
-</div>
-<h2>调用明细</h2>
-<table><thead><tr><th>#</th><th>时间</th><th>MCP 资产</th><th>调用方</th><th>状态</th><th>耗时</th><th>Trace ID</th></tr></thead>
-<tbody>${events.map((e,i) => `<tr>
-<td>${i+1}</td><td>${e.created_at || '-'}</td><td>${e.asset_id || '-'}</td><td>${e.caller || '-'}</td>
-<td class="${e.status==='success'?'pass':'fail'}">${e.status}</td>
-<td>${e.latency_ms || '-'}ms</td><td style="font-family:monospace;font-size:11px">${e.trace_id || '-'}</td>
-</tr>`).join('')}</tbody></table>
-<h2>结论</h2>
-<p>本报告由 <strong>MCP Forge 测试发布工作台</strong> 自动生成。所有测试均在沙箱环境中执行，覆盖鉴权校验、脱敏规则、超时控制和错误恢复。</p>
-</body></html>`;
+function generateTestReport(deliverable, summaryMarkdown = "") {
+  const assetIds = db.prepare("SELECT id FROM platform_mcp_assets WHERE project_id = ?").all(deliverable.project_id).map(asset => asset.id);
+  const events = assetIds.length
+    ? db.prepare(`SELECT * FROM platform_call_events WHERE asset_id IN (${assetIds.map(() => "?").join(",")}) ORDER BY created_at DESC LIMIT 20`).all(...assetIds)
+    : [];
+  const passCount = events.filter(event => event.status === "success").length;
+  const averageLatency = events.length ? Math.round(events.reduce((total, event) => total + (event.latency_ms || 0), 0) / events.length) : 0;
+  const narrative = summaryMarkdown
+    ? `<section><h2>AI 交付摘要</h2><div>${escapeHtml(summaryMarkdown).replace(/\n/g, "<br>")}</div></section>`
+    : "";
+  const rows = events.map((event, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(event.created_at || "-")}</td><td>${escapeHtml(event.asset_id || "-")}</td><td>${escapeHtml(event.caller || "-")}</td><td>${escapeHtml(event.status || "-")}</td><td>${event.latency_ms || 0}ms</td><td>${escapeHtml(event.trace_id || "-")}</td></tr>`).join("");
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>MCP Forge 验收报告</title><style>body{font-family:system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}</style></head><body><h1>MCP Forge 验收报告</h1><p>交付物：${escapeHtml(deliverable.name || deliverable.id)}</p><dl><dt>调用总数</dt><dd>${events.length}</dd><dt>成功数</dt><dd>${passCount}</dd><dt>平均耗时</dt><dd>${averageLatency}ms</dd></dl>${narrative}<table><thead><tr><th>#</th><th>时间</th><th>MCP 资产</th><th>调用方</th><th>状态</th><th>耗时</th><th>Trace ID</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
 }
 
 function generateCallLog(deliverable) {

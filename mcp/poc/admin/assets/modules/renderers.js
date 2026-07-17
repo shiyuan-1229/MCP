@@ -1295,6 +1295,7 @@ function renderPublish() {
 // ============================================================
 
 const deliveryTypeLabels = {
+  'skill-package': 'Skills delivery package',
   config: '配置包',
   'test-report': '验收报告',
   'run-guide': '运行说明',
@@ -1309,7 +1310,7 @@ function deliveryPackages(deliverables = list(state.deliverables), projectScope 
   const assets = list(state.assets);
   const releases = adminReleases();
   const events = list(state.events);
-  const requiredTypes = ['config', 'test-report', 'run-guide'];
+  const requiredTypes = ['config', 'test-report', 'run-guide', 'skill-package'];
   const projectIds = new Set((projectScope ? projectScope.map(item => item.id) : [...projects.map(item => item.id), ...deliverables.map(item => item.project_id), ...assets.map(item => item.project_id)]).filter(Boolean));
 
   return [...projectIds].map(projectId => {
@@ -1366,7 +1367,7 @@ function renderDeliveryCommandCenter(deliverables, projectScope = null) {
   const packageNode = $('deliveryPackageRows');
   if (packageNode) {
     packageNode.innerHTML = packages.length ? packages.map(item => {
-      const requiredFiles = ['config', 'test-report', 'run-guide'].map(type => {
+      const requiredFiles = ['config', 'test-report', 'run-guide', 'skill-package'].map(type => {
         const file = item.files.find(entry => entry.type === type && entry.status === 'ready');
         return `<span class="delivery-package-file ${file ? 'is-ready' : 'is-missing'}">${file ? '✓' : '○'} ${deliveryTypeLabels[type]}</span>`;
       }).join('');
@@ -1387,9 +1388,8 @@ function renderDeliveryRepairDrawer() {
     'test-report': '根据测试发布结果、Tool 验证和 Trace 生成。',
     'run-guide': '根据接入地址、鉴权范围和运行环境生成。'
   };
-  const autoRows = missingTypes.length ? missingTypes.map(type => '<article class="delivery-repair-item"><div><strong>' + text(deliveryTypeLabels[type]) + '</strong><p>' + text(sourceMap[type]) + '</p></div><button type="button" class="primary-btn small" onclick="generateDeliveryMaterial(\'' + projectKey + '\', \'' + type + '\')">自动生成</button></article>').join('') : '<div class="empty-state">必交资料已齐全，如需补充客户签收单或实施文档，可在下方上传。</div>';
-  const body = '<div class="drawer-panel"><h4>必交资料</h4><p>当前完整度 ' + text(deliveryPackage?.readiness || '0/3') + '，自动生成后会立即刷新项目交付包。</p><div class="delivery-repair-list">' + autoRows + '</div></div>' +
-    '<div class="drawer-panel"><h4>上传人工资料</h4><p>上传的文件会作为真实交付物保存并可直接下载。选择必交类型时，该文件会计入交付完整度。</p><div class="delivery-upload-form"><select id="deliveryUploadType" aria-label="交付资料类型"><option value="manual-document">其他人工资料</option><option value="config">配置包</option><option value="test-report">验收报告</option><option value="run-guide">运行说明</option></select><input id="deliveryUploadFile" type="file" aria-label="选择交付文件"><button type="button" class="primary-btn" onclick="uploadDeliveryMaterial(\'' + projectKey + '\')">上传文件</button></div></div>';
+  const autoRows = missingTypes.length ? missingTypes.map(type => '<article class="delivery-repair-item"><div><strong>' + text(deliveryTypeLabels[type]) + '</strong><p>' + text(sourceMap[type]) + '</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="primary-btn small" onclick="prepareAiDeliveryMaterial(\'' + projectKey + '\', \'' + type + '\')">AI 撰写</button><button type="button" class="ghost-btn small" onclick="generateDeliveryMaterial(\'' + projectKey + '\', \'' + type + '\')">模板生成</button></div></article>').join('') : '<div class="empty-state">必交资料已齐全，如需补充客户签收单或实施文档，可在下方上传。</div>';  const body = '<div class="drawer-panel"><h4>必交资料</h4><p>当前完整度 ' + text(deliveryPackage?.readiness || '0/3') + '，自动生成后会立即刷新项目交付包。</p><div class="delivery-repair-list">' + autoRows + '</div></div>' +
+    '<div class="drawer-panel"><h4>上传人工资料</h4><p>上传的文件会作为真实交付物保存并可直接下载。选择必交类型时，该文件会计入交付完整度。</p><div class="delivery-upload-form"><select id="deliveryUploadType" aria-label="交付资料类型"><option value="manual-document">其他人工资料</option><option value="config">配置包</option><option value="test-report">验收报告</option><option value="run-guide">Run guide</option><option value="skill-package">Skills delivery package</option></select><input id="deliveryUploadFile" type="file" aria-label="选择交付文件"><button type="button" class="primary-btn" onclick="uploadDeliveryMaterial(\'' + projectKey + '\')">上传文件</button></div></div>';
   renderDrawer('deliveryRepairDrawer', 'deliveryRepairBackdrop', 'deliveryRepairTitle', 'deliveryRepairContent', Boolean(state.deliveryRepairDrawerOpen && project), projectName + ' · 补齐资料', body);
 }
 function renderDeliverables() {
@@ -2079,7 +2079,7 @@ function renderDeliveryPackageEditor() {
   const projectAssets = list(state.assets).filter(item => item.project_id === project.id);
   const assetIds = new Set(projectAssets.map(item => item.id));
   const hasPublishedMcp = list(state.releases).some(item => assetIds.has(item.asset_id) && item.status === 'published');
-  const requiredTypes = ['config', 'test-report', 'run-guide'];
+  const requiredTypes = ['config', 'test-report', 'run-guide', 'skill-package'];
   const hasRequiredMaterials = requiredTypes.every(type => list(state.deliverables).some(item => item.project_id === project.id && item.type === type && item.status === 'ready'));
   const canPublishDelivery = hasPublishedMcp && hasRequiredMaterials;
   const recipient = project.customer_name || project.customer_id || '项目所属客户';
@@ -2152,11 +2152,20 @@ function renderBillingDrawer() {
 function renderDeliverableDrawer() {
   const item = list(state.deliverables).find(entry => entry.id === state.selectedDeliverableId);
   const canDownload = item?.status === 'ready';
-  const body = `<div class="drawer-panel"><h4>交付摘要</h4><p>类型：${text(item?.type || '-')}</p><p>状态：${text(displayStatus(item?.status || 'draft'))}</p><p>最近更新：${text(item?.updated_at || '-')}</p><p>说明：${text(item?.notes || '暂无补充说明')}</p></div>
-    <div class="drawer-panel"><h4>操作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${canDownload ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${item?.id}')">下载文件</button>` : '<span class="muted-line">当前状态不可下载</span>'}
-      <button type="button" class="ghost-btn small" onclick="copyDeliverableSummary('${item?.id}')">复制摘要</button>
-    </div></div>`;
+  const aiType = ['config', 'test-report', 'run-guide', 'skill-package'].includes(item?.type);
+  const versions = list(state.selectedDeliverableVersions);
+  const versionTimeline = versions.length ? versions.map(version => {
+    const editable = ['draft', 'rejected'].includes(version.status);
+    const reviewActions = version.status === 'pending_review'
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="primary-btn small" onclick="approveDeliveryVersion('${version.id}')">批准</button><input id="deliveryRejectionReason-${version.id}" placeholder="驳回原因"><button type="button" class="ghost-btn small" onclick="rejectDeliveryVersion('${version.id}')">驳回</button></div>`
+      : '';
+    const editActions = editable
+      ? `<textarea id="deliveryVersionContent-${version.id}" rows="9" aria-label="交付草稿 JSON">${text(JSON.stringify(version.content || {}, null, 2))}</textarea><input id="deliveryVersionSummary-${version.id}" placeholder="本次修改说明" value="${text(version.change_summary || '')}"><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ghost-btn small" onclick="saveDeliveryVersion('${version.id}')">保存新版本</button>${version.status === 'draft' ? `<button type="button" class="primary-btn small" onclick="submitDeliveryVersion('${version.id}')">提交审核</button>` : ''}</div>`
+      : '';
+    return `<article class="drawer-panel"><div style="display:flex;justify-content:space-between;gap:8px"><strong>版本 ${text(version.version_number)}</strong>${badge(version.status || 'draft')}</div><p>${text(version.change_summary || '无修改说明')} · ${text(version.created_by || '-')} · ${text(version.created_at || '-')}</p>${version.rejection_reason ? `<p class="muted-line">驳回原因：${text(version.rejection_reason)}</p>` : ''}${editActions}${reviewActions}</article>`;
+  }).join('') : '<div class="empty-state">暂无 AI 草稿。填写交付要求后生成第一版。</div>';
+  const aiPanel = aiType ? `<div class="drawer-panel"><h4>AI 交付草稿</h4><p>系统会基于项目事实、已发布 MCP 和下方要求生成草稿；工具、端点和版本会在服务端校验。</p><label>客户背景与交付要求<textarea id="deliveryAiRequirements" rows="4" placeholder="例如：面向客户运维团队，强调灰度发布与异常升级路径" oninput="window.__state.deliveryAiRequirements=this.value">${text(state.deliveryAiRequirements || '')}</textarea></label><div style="margin-top:8px"><button type="button" class="primary-btn" onclick="generateAiDeliveryDraft('${item?.id || ''}')" ${state.deliveryVersionSaving ? 'disabled' : ''}>${state.deliveryVersionSaving ? '生成中...' : 'AI 生成草稿'}</button></div></div><section id="deliveryVersionTimeline"><h4>版本与审核记录</h4>${versionTimeline}</section>` : '';
+  const body = `<div class="drawer-panel"><h4>交付摘要</h4><p>类型：${text(item?.type || '-')}</p><p>状态：${text(displayStatus(item?.status || 'draft'))}</p><p>最近更新：${text(item?.updated_at || '-')}</p><p>说明：${text(item?.notes || '暂无补充说明')}</p></div>${aiPanel}<div class="drawer-panel"><h4>操作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">${canDownload ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${item?.id}')">下载文件</button>` : '<span class="muted-line">当前状态不可下载</span>'}<button type="button" class="ghost-btn small" onclick="copyDeliverableSummary('${item?.id}')">复制摘要</button></div></div>`;
   renderDrawer('deliverableDrawer', 'deliverableDrawerBackdrop', 'deliverableDrawerTitle', 'deliverableDrawerContent', Boolean(state.deliverableDrawerOpen && item), item?.name || '交付物详情', body);
 }
 
@@ -2775,7 +2784,7 @@ function renderCustomerDeliverables() {
       && (!filters.query || haystack.includes(String(filters.query).toLowerCase()));
   });
   const readyItems = allItems.filter(item => item.status === 'ready');
-  const preferred = readyItems.filter(item => ['config', 'test-report', 'run-guide'].includes(item.type));
+  const preferred = readyItems.filter(item => ['config', 'test-report', 'run-guide', 'skill-package'].includes(item.type));
   const recommended = (preferred.length ? preferred : readyItems).slice(0, 3);
   const firstProjectId = recommended[0]?.project_id || 'all';
   const assetByProject = new Map(assets.map(asset => [asset.project_id, asset]));

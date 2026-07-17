@@ -796,6 +796,21 @@ async function generateDeliveryMaterial(projectId, type) {
   }
 }
 
+async function prepareAiDeliveryMaterial(projectId, type) {
+  if (!projectId || !type) return;
+  try {
+    const deliverable = await api('/api/platform/deliverables/generate', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, type })
+    });
+    await loadAll();
+    openDeliverableDrawer(deliverable.id);
+    showToast('请填写客户背景与交付要求，再生成 AI 草稿。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
 async function uploadDeliveryMaterial(projectId) {
   const input = $('deliveryUploadFile');
   const type = $('deliveryUploadType')?.value || 'manual-document';
@@ -823,19 +838,97 @@ async function uploadDeliveryMaterial(projectId) {
     showToast(error.message, 'error');
   }
 }
+async function loadDeliverableVersions(id) {
+  if (!id) return;
+  try {
+    state.selectedDeliverableVersions = await api(`/api/platform/deliverables/${id}/versions`);
+    renderAll();
+  } catch (error) {
+    state.selectedDeliverableVersions = [];
+    showToast(error.message, 'error');
+  }
+}
+
 function openDeliverableDrawer(id) {
   if (!id) return;
   state.selectedDeliverableId = id;
+  state.selectedDeliverableVersions = [];
   state.deliverableDrawerOpen = true;
   renderAll();
+  void loadDeliverableVersions(id);
 }
 
 function closeDeliverableDrawer() {
   state.deliverableDrawerOpen = false;
   state.selectedDeliverableId = '';
+  state.selectedDeliverableVersions = [];
   renderAll();
 }
 
+async function generateAiDeliveryDraft(id) {
+  const requirements = $('deliveryAiRequirements')?.value.trim() || '';
+  state.deliveryAiRequirements = requirements;
+  state.deliveryVersionSaving = true;
+  try {
+    await api(`/api/platform/deliverables/${id}/ai-drafts`, { method: 'POST', body: JSON.stringify({ requirements }) });
+    await loadDeliverableVersions(id);
+    await loadAll();
+    renderAll();
+    showToast('AI 草稿已生成，请编辑后提交审核。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    state.deliveryVersionSaving = false;
+    renderAll();
+  }
+}
+
+async function saveDeliveryVersion(versionId) {
+  const raw = $(`deliveryVersionContent-${versionId}`)?.value || '';
+  const changeSummary = $(`deliveryVersionSummary-${versionId}`)?.value.trim() || '管理员编辑';
+  try {
+    const content = JSON.parse(raw);
+    await api(`/api/platform/deliverable-versions/${versionId}`, { method: 'PUT', body: JSON.stringify({ content, change_summary: changeSummary }) });
+    await loadDeliverableVersions(state.selectedDeliverableId);
+    showToast('已保存为新的草稿版本。', 'success');
+  } catch (error) {
+    showToast(error instanceof SyntaxError ? '草稿内容必须是有效 JSON。' : error.message, 'error');
+  }
+}
+
+async function submitDeliveryVersion(versionId) {
+  try {
+    await api(`/api/platform/deliverable-versions/${versionId}/submit`, { method: 'POST' });
+    await loadDeliverableVersions(state.selectedDeliverableId);
+    showToast('草稿已提交审核。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function approveDeliveryVersion(versionId) {
+  try {
+    await api(`/api/platform/deliverable-versions/${versionId}/approve`, { method: 'POST' });
+    await loadDeliverableVersions(state.selectedDeliverableId);
+    await loadAll();
+    renderAll();
+    showToast('交付资料版本已批准。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function rejectDeliveryVersion(versionId) {
+  const reason = $(`deliveryRejectionReason-${versionId}`)?.value.trim() || '';
+  if (!reason) { showToast('请填写驳回原因。', 'warning'); return; }
+  try {
+    await api(`/api/platform/deliverable-versions/${versionId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+    await loadDeliverableVersions(state.selectedDeliverableId);
+    showToast('版本已驳回，可编辑后重新提交。', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
 function mergeKnowledgeDetail(detail) {
   if (!detail?.id) return;
   state.knowledgeDetails = { ...state.knowledgeDetails, [detail.id]: detail };
@@ -1751,6 +1844,7 @@ window.openDeliverableDrawer = openDeliverableDrawer;
 window.openDeliveryRepairDrawer = openDeliveryRepairDrawer;
 window.closeDeliveryRepairDrawer = closeDeliveryRepairDrawer;
 window.generateDeliveryMaterial = generateDeliveryMaterial;
+window.prepareAiDeliveryMaterial = prepareAiDeliveryMaterial;
 window.uploadDeliveryMaterial = uploadDeliveryMaterial;
 window.closeDeliverableDrawer = closeDeliverableDrawer;
 window.openKnowledgeDrawer = openKnowledgeDrawer;
@@ -1764,6 +1858,11 @@ window.rebuildKnowledgeIndex = rebuildKnowledgeIndex;
 window.runKnowledgeRetrievalTest = runKnowledgeRetrievalTest;
 window.downloadDeliverable = downloadDeliverable;
 window.copyDeliverableSummary = copyDeliverableSummary;
+window.generateAiDeliveryDraft = generateAiDeliveryDraft;
+window.saveDeliveryVersion = saveDeliveryVersion;
+window.submitDeliveryVersion = submitDeliveryVersion;
+window.approveDeliveryVersion = approveDeliveryVersion;
+window.rejectDeliveryVersion = rejectDeliveryVersion;
 
 window.testAccessConfig = testAccessConfig;
 window.editAccessConfig = editAccessConfig;

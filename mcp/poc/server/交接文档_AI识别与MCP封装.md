@@ -303,3 +303,55 @@ npm start
 3. **浏览器缓存**：修改前端 JS 后必须更新 `index.html` 中的 `?v=` 版本号，否则浏览器会缓存旧文件
 4. **数据库重建**：删除 `mcp_forge.db` 文件后重启服务器会自动重建并执行 seed
 5. **Responses API**：CCSwitch Codex 使用 `/responses` 端点而非标准的 `/chat/completions`，返回格式也不同（`output_text` 而非 `choices[0].message.content`）
+
+
+---
+
+## Eleven. 2026-07-17 Handoff Status
+
+### Delivered and pushed
+
+- Remote: `origin/main` at `https://github.com/shiyuan-1229/MCP.git`
+- Commit `14b2e43 feat: load navigation from live data`
+- The published change adds role-scoped navigation snapshots, removes the publish governance block, removes sandbox blocking from release publishing, and keeps the security check as an independent action.
+- Verified before push: navigation snapshot source tests, live governance source test, local override source test, release draft test, no-sandbox-gate test, no-governance-gate test, and JavaScript syntax checks.
+- A real administrator publish request returned `ok: true` after the governance gate was removed.
+
+### Uncommitted work: Skills delivery package
+
+The current worktree has uncommitted server and renderer changes for a new `skill-package` deliverable.
+
+Target behavior:
+
+1. Add `skill-package` to the required delivery materials.
+2. Generate a ZIP download containing `SKILL.md`, `mcp-config.json`, and `README.md`.
+3. Require the Skills delivery package, together with config, test report, and run guide, before an admin can publish a delivery package to a customer.
+4. Show the Skills package in the delivery material list and customer downloads.
+
+Current code state:
+
+- `server/server.js` adds the delivery type, ZIP response branch, and `generateSkillPackage()`.
+- `admin/assets/modules/renderers.js` adds the type to delivery completeness calculations and the label `Skills delivery package`.
+- Test added but uncommitted: `admin/tests/skill-delivery-package.test.mjs`. It passes source-level checks.
+- Syntax checks for `server.js` and `renderers.js` passed after the change.
+- End-to-end ZIP content verification is still pending. The delivery record was created successfully, but the local Node service stopped before the download request. Re-check service startup and then download a generated `skill-package` to confirm all three ZIP entries.
+
+### Remaining real-time-data work
+
+The uncommitted test `admin/tests/navigation-static-data-audit.test.mjs` intentionally fails. It found browser-only state still used for billing actions, monitoring issue status, API key creation, and legacy local Builder fallback code. Do not claim that all navigation pages are fully server-persisted until those paths are replaced with server APIs and this audit test passes.
+
+### Local service notes
+
+- The installed Node runtime is version 24.
+- `better-sqlite3` must be rebuilt for this runtime: `npm rebuild better-sqlite3` from `mcp/poc/server`.
+- After code changes, start the service with `node server.js` from `mcp/poc/server` and verify `http://127.0.0.1:3100/health`.
+- Do not stage `server/runtime-instances/`.
+
+### Suggested next-session sequence
+
+1. Check `git status --short` and preserve the uncommitted Skills package files and tests.
+2. Start the service and generate/download a `skill-package`; inspect ZIP entries for `SKILL.md`, `mcp-config.json`, and `README.md`.
+3. Add customer-facing labels for `skill-package` where a fallback type label remains.
+4. Run `node mcp/poc/admin/tests/skill-delivery-package.test.mjs` plus existing delivery regressions.
+5. Commit and push Skills delivery package as a separate commit.
+6. Resume the static-data audit by replacing billing, monitoring, and API key browser-only writes with persisted server endpoints.
