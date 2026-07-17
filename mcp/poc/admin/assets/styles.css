@@ -913,3 +913,103 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
 .settings-notification-toggle.is-enabled { border-color:#99f6e4; }
 .settings-notification-toggle.is-enabled b { color:#0f766e; background:#ccfbf1; }
 @media (max-width:900px) { .settings-command-center { align-items:flex-start; flex-direction:column; } .settings-command-actions { justify-content:flex-start; } .settings-layout { grid-template-columns:1fr; } .settings-tabs { position:static; grid-template-columns:repeat(2,minmax(0,1fr)); } .settings-default-grid,.settings-ai-grid { grid-template-columns:1fr; } }
+
+/* WorkBuddy integration console */
+.workbuddy-console {
+  overflow: hidden;
+  border: 1px solid #d8e1ec !important;
+  border-radius: 12px !important;
+  background: #f5f8fc !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+
+.workbuddy-console__messages {
+  min-height: 244px;
+  padding: 18px !important;
+  gap: 12px !important;
+  background: linear-gradient(180deg, #f7f9fc 0%, #f1f5f9 100%);
+}
+
+.workbuddy-message {
+  max-width: min(82%, 680px);
+  padding: 11px 13px;
+  border: 1px solid #d9e2ee;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2a3d;
+  line-height: 1.65;
+  box-shadow: 0 1px 2px rgba(20, 35, 60, .05);
+}
+
+.workbuddy-message--user {
+  align-self: flex-end;
+  border-color: #284fc5;
+  background: #3157cb !important;
+  color: #ffffff !important;
+  border-radius: 10px 10px 2px 10px;
+}
+
+.workbuddy-message--assistant,
+.workbuddy-message--typing {
+  align-self: flex-start;
+  border-radius: 10px 10px 10px 2px;
+}
+
+.workbuddy-message--typing {
+  color: #53657c !important;
+  font-size: 12px;
+}
+
+.workbuddy-message--error {
+  align-self: flex-start;
+  border-color: #f0c7c7;
+  background: #fff7f7 !important;
+  color: #a12d2d !important;
+  border-radius: 10px 10px 10px 2px;
+}
+
+.workbuddy-execution {
+  align-self: stretch;
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid #d8e1ec;
+  border-left: 3px solid #4a6fcf;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .8);
+  color: #33445e;
+  font-size: 12px;
+}
+
+.workbuddy-execution summary {
+  color: #294fae !important;
+  font-weight: 650 !important;
+}
+
+.workbuddy-console__messages + div {
+  gap: 10px !important;
+  padding: 12px !important;
+  border-top-color: #d8e1ec !important;
+  background: #ffffff;
+}
+
+.workbuddy-console__messages + div input {
+  min-height: 38px;
+  border-radius: 8px !important;
+  border-color: #cbd6e4 !important;
+  box-shadow: none;
+}
+
+.workbuddy-console__messages + div input:focus {
+  border-color: #3157cb !important;
+  box-shadow: 0 0 0 3px rgba(49, 87, 203, .12);
+}
+
+@media (max-width: 640px) {
+  .workbuddy-console__messages { min-height: 210px; padding: 12px !important; }
+  .workbuddy-message { max-width: 92%; }
+  .workbuddy-console__messages + div { align-items: stretch; flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbuddy-console * { transition: none !important; }
+}

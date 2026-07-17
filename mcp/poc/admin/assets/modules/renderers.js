@@ -779,17 +779,20 @@ window.confirmMcpCompositionFromUI = async function(candidateId) {
   const reason = reasonInput?.value?.trim() || '人工确认 MCP 组成';
   const candidate = list(state.candidates).find(item => item.id === candidateId);
   // 读取勾选的 Tool
-  const checks = document.querySelectorAll('.mcp-tool-check-' + candidateId.replace(/[^a-zA-Z0-9_-]/g, ''));
-  const selectedIndices = [];
-  checks.forEach(check => { if (check.checked) selectedIndices.push(parseInt(check.dataset.idx)); });
-  if (!selectedIndices.length) {
-    showToast('请至少选择一个 Tool。', 'warning');
+  const checks = Array.from(document.querySelectorAll('[data-mcp-candidate-id]'))
+    .filter(check => check.dataset.mcpCandidateId === candidateId);
+  const selectedToolNames = checks
+    .filter(check => check.checked)
+    .map(check => check.dataset.toolName)
+    .filter(Boolean);
+  if (!selectedToolNames.length) {
+    showToast('\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a Tool\u3002', 'warning');
     return;
   }
   try {
     await window.controlFlowRequest('/api/platform/governance/candidates/' + candidateId + '/confirm-mcp-composition', {
       method: 'POST',
-      body: JSON.stringify({ tool_draft_ids: [candidate?.tool_draft_id], reason })
+      body: JSON.stringify({ tool_draft_ids: [candidate?.tool_draft_id], selected_tool_names: selectedToolNames, reason })
     });
     await window.refreshData();
     showToast('MCP 组成已确认，现在可以组装 MCP 草稿。', 'success');
@@ -996,13 +999,15 @@ function renderMcpComposePage() {
   root.innerHTML = ready.map(candidate => {
     const humanTools = jsonList(candidate.human_tools_snapshot);
     const compositionConfirmed = candidate.mcp_composition_status === 'confirmed';
+    const compositionTools = jsonList(candidate.mcp_tools_snapshot);
+    const toolsForMcp = compositionConfirmed && compositionTools.length ? compositionTools : humanTools;
     // Tool 选择列表（可勾选/取消）
-    const toolCheckHtml = humanTools.map((tool, idx) => {
+    const toolCheckHtml = toolsForMcp.map((tool, idx) => {
       if (typeof tool !== 'object') return '';
       const name = tool.name || tool.display_name || '-';
       const visChip = tool.visibility === 'public' ? '🌐' : '🔒';
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
-        '<input type="checkbox" class="mcp-tool-check-' + escapeJs(candidate.id) + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
+        '<input type="checkbox" class="mcp-tool-check" data-mcp-candidate-id="' + escapeHtml(candidate.id) + '" data-tool-name="' + escapeHtml(tool.name || '') + '" data-idx="' + idx + '" checked style="cursor:pointer"' + (compositionConfirmed ? ' disabled' : '') + '>' +
         '<strong style="font-size:13px">' + text(name) + '</strong>' +
         '<code style="font-size:11px;color:var(--primary)">' + text(tool.name || '') + '</code>' +
         '<span style="font-size:11px">' + visChip + '</span>' +

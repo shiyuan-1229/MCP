@@ -516,6 +516,7 @@ function runMigrations() {
   ensureColumn('platform_candidate_assets', 'mcp_composition_reason', 'TEXT');
   ensureColumn('platform_candidate_assets', 'mcp_composition_by', 'TEXT');
   ensureColumn('platform_candidate_assets', 'mcp_composition_at', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_tools_snapshot', 'TEXT');
   db.exec(`CREATE TABLE IF NOT EXISTS platform_tool_drafts (
     id TEXT PRIMARY KEY,
     source_candidate_id TEXT NOT NULL,
@@ -630,6 +631,7 @@ function runMigrations() {
     retro_recorded_at TEXT,
     ai_tools_snapshot TEXT,
     human_tools_snapshot TEXT,
+    mcp_tools_snapshot TEXT,
     business_rule_notes TEXT,
     boundary_warning TEXT,
     built_by TEXT,
@@ -657,6 +659,7 @@ function runMigrations() {
   ensureColumn('platform_candidate_assets', 'mcp_composition_reason', 'TEXT');
   ensureColumn('platform_candidate_assets', 'mcp_composition_by', 'TEXT');
   ensureColumn('platform_candidate_assets', 'mcp_composition_at', 'TEXT');
+  ensureColumn('platform_candidate_assets', 'mcp_tools_snapshot', 'TEXT');
 
   // 审核任务
   db.exec(`CREATE TABLE IF NOT EXISTS platform_review_tasks (
@@ -3899,6 +3902,13 @@ app.post("/api/platform/governance/candidates/:id/confirm-mcp-composition", requ
   if (!canConfirmMcpComposition(candidate)) {
     return res.status(409).json({ error: 'candidate requires a Tool draft before MCP composition' });
   }
+
+  const selectedToolNames = [...new Set(Array.isArray(req.body?.selected_tool_names) ? req.body.selected_tool_names.map(String).filter(Boolean) : [])];
+  const availableTools = safeParse(candidate.human_tools_snapshot) || [];
+  const selectedTools = availableTools.filter(tool => tool && typeof tool === 'object' && selectedToolNames.includes(String(tool.name || '')));
+  if (!selectedToolNames.length) return res.status(400).json({ error: 'at least one Tool must be selected' });
+  if (selectedTools.length !== selectedToolNames.length) return res.status(400).json({ error: 'selected Tool is not available for this candidate' });
+
   let composition;
   try {
     composition = confirmMcpComposition(candidate, {
@@ -3909,25 +3919,28 @@ app.post("/api/platform/governance/candidates/:id/confirm-mcp-composition", requ
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-  db.prepare("UPDATE platform_candidate_assets SET mcp_composition_status = 'confirmed', mcp_composition_reason = ?, mcp_composition_by = ?, mcp_composition_at = datetime('now'), status = 'mcp_composition_confirmed' WHERE id = ?").run(composition.reason, composition.confirmed_by, candidate.id);
+  db.prepare("UPDATE platform_candidate_assets SET mcp_composition_status = 'confirmed', mcp_composition_reason = ?, mcp_composition_by = ?, mcp_composition_at = datetime('now'), mcp_tools_snapshot = ?, status = 'mcp_composition_confirmed' WHERE id = ?").run(composition.reason, composition.confirmed_by, JSON.stringify(selectedTools), candidate.id);
   governanceRepo.saveGovernanceDecision({
     candidateId: candidate.id,
     decisionType: 'mcp_composition_confirmed',
     aiSnapshot: candidate.ai_tools_snapshot,
-    humanSnapshot: JSON.stringify(composition),
+    humanSnapshot: JSON.stringify({ ...composition, tools: selectedTools }),
     reason: composition.reason,
     by: composition.confirmed_by
   });
-  res.json({ ok: true, control_flow: 'mcp_composition_confirmed', composition, candidate: governanceRepo.getCandidate(candidate.id) });
+  res.json({ ok: true, control_flow: 'mcp_composition_confirmed', composition: { ...composition, tools: selectedTools }, candidate: governanceRepo.getCandidate(candidate.id) });
 });
 
 app.post("/api/platform/governance/candidates/:id/assemble-mcp", requireAuth, requireAdmin, (req, res) => {
   const candidate = governanceRepo.getCandidate(req.params.id);
   if (!candidate) return res.status(404).json({ error: 'candidate not found' });
 
+  const compositionTools = safeParse(candidate.mcp_tools_snapshot);
   const normalized = {
     ...candidate,
-    human_tools_snapshot: safeParse(candidate.human_tools_snapshot)
+    human_tools_snapshot: Array.isArray(compositionTools) && compositionTools.length
+      ? compositionTools
+      : safeParse(candidate.human_tools_snapshot)
   };
   if (!canAssembleMcp(normalized)) {
     return res.status(409).json({
@@ -4916,13 +4929,28 @@ app.get("/api/workbuddy/assets", (req, res) => {
   res.json(result);
 });
 
+function normalizeWorkBuddyTools(rawTools) {
+  return (Array.isArray(rawTools) ? rawTools : [])
+    .map(tool => {
+      if (typeof tool === "string") {
+        return {
+          name: tool,
+          display_name: tool,
+          description: "",
+          inputSchema: { type: "object", properties: {}, required: [] }
+        };
+      }
+      return tool && typeof tool === "object" ? tool : null;
+    })
+    .filter(Boolean);
+}
 // 获取指定资产的 Tool 定义（OpenAI function calling 格式）
 app.get("/api/workbuddy/assets/:id/tools", requireAuth, (req, res) => {
   const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
   if (!scopedAssets(req).some(item => item.id === asset.id)) return res.status(403).json({ error: "asset access denied" });
   if (customerScope(req) && asset.status !== "published") return res.status(403).json({ error: "asset is not delivered" });
-  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  const tools = normalizeWorkBuddyTools(decode(asset.tools));
   // 返回 OpenAI 兼容的 function 定义格式
   const functions = tools.map(t => ({
     type: "function",
@@ -4946,7 +4974,7 @@ app.post("/api/workbuddy/assets/:id/execute", async (req, res) => {
   const { tool_name, arguments: args } = req.body || {};
   if (!tool_name) return res.status(400).json({ error: "tool_name required" });
 
-  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  const tools = normalizeWorkBuddyTools(decode(asset.tools));
   const tool = tools.find(t => t.name === tool_name);
   if (!tool) return res.status(404).json({ error: `tool "${tool_name}" not found` });
 
@@ -4977,6 +5005,132 @@ app.post("/api/workbuddy/assets/:id/execute", async (req, res) => {
 });
 
 // 完整的 WorkBuddy Chat 端点（接收 AI 配置 + 用户消息，自动 Tool Call）
+function normalizeOpenAIResponsesUrl(baseUrl) {
+  const normalizedBase = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!normalizedBase) return "";
+  if (/\/responses$/i.test(normalizedBase)) return normalizedBase;
+  const normalizedPath = new URL(normalizedBase).pathname.replace(/\/+$/, "");
+  return !normalizedPath || normalizedPath === "/"
+    ? `${normalizedBase}/v1/responses`
+    : `${normalizedBase}/responses`;
+}
+
+function getResponsesOutputText(data) {
+  if (data?.output_text) return data.output_text;
+  const message = Array.isArray(data?.output) ? data.output.find(item => item.type === "message") : null;
+  return Array.isArray(message?.content) ? message.content.map(item => item.text || "").join("") : "";
+}
+
+function parseWorkBuddyToolDecision(content) {
+  const text = String(content || "").replace(/```json\s*|```/gi, "").trim();
+  try {
+    const direct = JSON.parse(text);
+    return direct?.action === "call_tool" && direct?.tool ? direct : null;
+  } catch {}
+
+  const actionIndex = text.indexOf('"action"');
+  const start = actionIndex >= 0 ? text.lastIndexOf("{", actionIndex) : -1;
+  if (start < 0) return null;
+
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      try {
+        const decision = JSON.parse(text.slice(start, index + 1));
+        return decision?.action === "call_tool" && decision?.tool ? decision : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+async function runResponsesWorkBuddyChat({ aiUrl, aiKey, aiModel, tools, history, message, runtime, systemPrompt }) {
+  const responsesUrl = normalizeOpenAIResponsesUrl(aiUrl);
+  const inputText = [...(history || []), { role: "user", content: message }]
+    .map(item => `${item.role === "user" ? "\u7528\u6237" : "\u52a9\u624b"}\uff1a${item.content}`)
+    .join("\n\n");
+  const toolInstruction = `${systemPrompt}\n\n\u5f53\u9700\u8981\u8c03\u7528\u5de5\u5177\u65f6\uff0c\u53ea\u8f93\u51fa JSON\uff1a{"action":"call_tool","tool":"\u5de5\u5177\u540d","args":{}}\u3002\u4e0d\u9700\u8981\u5de5\u5177\u65f6\uff0c\u76f4\u63a5\u56de\u7b54\u7528\u6237\u3002`;
+  const firstResponse = await fetch(responsesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${aiKey}` },
+    body: JSON.stringify({ model: aiModel, input: inputText, instructions: toolInstruction, max_output_tokens: 2000 }),
+    signal: AbortSignal.timeout(60000)
+  });
+  if (!firstResponse.ok) throw new Error(`Responses request failed (${firstResponse.status})`);
+
+  const firstData = await firstResponse.json();
+  const firstText = getResponsesOutputText(firstData);
+  const decision = parseWorkBuddyToolDecision(firstText);
+  if (!decision) {
+    return { reply: firstText || "\u672a\u83b7\u5f97\u6a21\u578b\u56de\u590d\u3002", tool_calls: [], usage: firstData.usage?.total_tokens || 0 };
+  }
+
+  const tool = tools.find(item => item.name === decision.tool);
+  if (!tool) {
+    return { reply: "\u6ca1\u6709\u627e\u5230\u53ef\u8c03\u7528\u7684\u5de5\u5177\u3002", tool_calls: [], usage: firstData.usage?.total_tokens || 0 };
+  }
+
+  let callResult;
+  if (runtime) {
+    callResult = await callRuntimeTool({ endpoint: runtime.endpoint, toolName: tool.name, args: decision.args || {} });
+  } else {
+    callResult = { result: generateMockResult(tool, decision.args || {}), trace_id: "mock_" + Date.now(), latency_ms: Math.floor(10 + Math.random() * 50) };
+  }
+  const toolCall = {
+    tool_name: tool.name,
+    display_name: tool.display_name || tool.name,
+    arguments: decision.args || {},
+    result: callResult.result,
+    trace_id: callResult.trace_id,
+    latency_ms: callResult.latency_ms,
+    source: runtime ? "poc_sse" : "mock",
+    error: callResult.error
+  };
+
+  const secondResponse = await fetch(responsesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${aiKey}` },
+    body: JSON.stringify({
+      model: aiModel,
+      input: `${inputText}\n\n[\u5de5\u5177\u6267\u884c\u7ed3\u679c]\uff1a${JSON.stringify(toolCall.result)}`,
+      instructions: `${systemPrompt}\n\n\u8bf7\u6839\u636e\u5de5\u5177\u7ed3\u679c\u76f4\u63a5\u56de\u7b54\u7528\u6237\uff0c\u4e0d\u8981\u8f93\u51fa\u539f\u59cb JSON\u3002`,
+      max_output_tokens: 1000
+    }),
+    signal: AbortSignal.timeout(30000)
+  });
+  const secondData = secondResponse.ok ? await secondResponse.json() : null;
+  const reply = getResponsesOutputText(secondData) || `\u5df2\u8c03\u7528\u300c${toolCall.display_name}\u300d\u5e76\u5b8c\u6210\u5904\u7406\u3002`;
+  return {
+    reply,
+    tool_calls: [toolCall],
+    usage: (firstData.usage?.total_tokens || 0) + (secondData?.usage?.total_tokens || 0)
+  };
+}
+function normalizeOpenAIChatUrl(baseUrl) {
+  const normalizedBase = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!normalizedBase) return "";
+  if (/\/chat\/completions$/i.test(normalizedBase)) return normalizedBase;
+  return /\/v1$/i.test(normalizedBase)
+    ? `${normalizedBase}/chat/completions`
+    : `${normalizedBase}/v1/chat/completions`;
+}
 app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
   const { asset_id, runtime_id, message, history, model_config } = req.body || {};
   if (!asset_id) return res.status(400).json({ error: "asset_id required" });
@@ -4988,7 +5142,7 @@ app.post("/api/workbuddy/chat", requireAuth, async (req, res) => {
   if (customerScope(req) && asset.status !== "published") return res.status(403).json({ error: "asset is not delivered" });
   const runtime = runtime_id ? db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ? AND asset_id = ? AND status = 'running'").get(runtime_id, asset_id) : null;
 
-  const tools = decode(asset.tools).filter(t => typeof t === 'object');
+  const tools = normalizeWorkBuddyTools(decode(asset.tools));
   if (!tools.length) return res.status(400).json({ error: "该资产没有可用的 Tool" });
 
   // AI 配置：优先用请求中的 model_config，否则用 .env 配置
@@ -5035,7 +5189,7 @@ ${toolList}
 
   try {
     // Step 1: 调用 AI，让它决定是否调用 Tool
-    const chatUrl = aiUrl.endsWith('/') ? `${aiUrl}v1/chat/completions` : `${aiUrl}/v1/chat/completions`;
+    const chatUrl = normalizeOpenAIChatUrl(aiUrl);
     const resp1 = await fetch(chatUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
@@ -5052,7 +5206,16 @@ ${toolList}
 
     if (!resp1.ok) {
       const errText = await resp1.text().catch(() => '');
-      return res.status(500).json({ error: `AI 返回 ${resp1.status}: ${errText.slice(0, 300)}` });
+      if (resp1.status === 404) {
+        try {
+          return res.json(await runResponsesWorkBuddyChat({ aiUrl, aiKey, aiModel, tools, history, message, runtime, systemPrompt }));
+        } catch (fallbackError) {
+          console.error(`WorkBuddy Responses fallback failed: ${fallbackError.message}`);
+          return res.status(502).json({ error: "AI service request failed. Check the model endpoint and try again." });
+        }
+      }
+      console.error(`WorkBuddy model request failed (${resp1.status}): ${errText.slice(0, 300)}`);
+      return res.status(502).json({ error: "AI service request failed. Check the model endpoint and try again." });
     }
 
     const data1 = await resp1.json();
@@ -5138,7 +5301,8 @@ ${toolList}
       usage: data1.usage?.total_tokens || 0
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`WorkBuddy chat failed: ${err.message}`);
+    res.status(502).json({ error: "AI service request failed. Check the model endpoint and try again." });
   }
 });
 

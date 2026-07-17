@@ -2973,12 +2973,25 @@ async function deployToWorkBuddy() {
 
     showToast('已部署 ' + tools.length + ' 个 Tool 到 WorkBuddy，可以开始测试', 'success');
   } catch (error) {
-    statusEl.innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">❌ 部署失败：' + escapeHtml(error.message) + '</div>';
+    statusEl.innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">❌ 部署失败：' + escapeHtml(describeWorkBuddyFailure(error)) + '</div>';
     _workbuddyDeployed = false;
     showToast(error.message, 'error');
   }
 }
 
+function describeWorkBuddyFailure(error) {
+  const message = String(error?.message || error || '').trim();
+  if (/endpoint not supported|not_found|404/i.test(message)) {
+    return '\u6a21\u578b\u670d\u52a1\u5730\u5740\u6682\u4e0d\u652f\u6301\u5bf9\u8bdd\u8c03\u7528\uff0c\u8bf7\u68c0\u67e5\u63a5\u5165\u5730\u5740\u540e\u91cd\u8bd5\u3002';
+  }
+  if (/401|403|unauthorized|api key/i.test(message)) {
+    return '\u6a21\u578b\u670d\u52a1\u9274\u6743\u5931\u8d25\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5\u63a5\u5165\u914d\u7f6e\u3002';
+  }
+  if (/AI service request failed|fetch failed|timeout/i.test(message)) {
+    return '\u6a21\u578b\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002';
+  }
+  return message || '\u8054\u8c03\u6682\u65f6\u65e0\u6cd5\u5b8c\u6210\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002';
+}
 let _customerWorkBuddyHistory = [];
 let _customerWorkBuddyDeployedAssetId = '';
 
@@ -3023,7 +3036,7 @@ async function customerDeployToWorkBuddy() {
     if (messages) messages.innerHTML = '<div style="text-align:center;color:#16a34a;font-size:12px;padding:16px 0">MCP \u8d44\u4ea7\u5df2\u90e8\u7f72\u5230 WorkBuddy\uff0c\u73b0\u5728\u53ef\u4ee5\u5f00\u59cb\u6d4b\u8bd5\u3002</div>';
   } catch (error) {
     _customerWorkBuddyDeployedAssetId = '';
-    if (status) status.innerHTML = `<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">${escapeHtml(error.message)}</div>`;
+    if (status) status.innerHTML = `<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">${escapeHtml(describeWorkBuddyFailure(error))}</div>`;
     showToast(error.message, 'error');
   }
 }
@@ -3036,8 +3049,8 @@ async function sendCustomerWorkBuddyMessage() {
   if (!select?.value || _customerWorkBuddyDeployedAssetId !== select.value) { showToast('\u8bf7\u5148\u90e8\u7f72\u5f53\u524d\u9009\u4e2d\u7684 MCP \u8d44\u4ea7\u3002', 'warning'); return; }
   const message = input.value.trim();
   input.value = '';
-  messages.innerHTML += `<div style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(message)}</div>`;
-  messages.innerHTML += '<div id="customerWorkBuddyTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">WorkBuddy \u6b63\u5728\u8c03\u7528\u5de5\u5177...</div>';
+  messages.innerHTML += `<div class="workbuddy-message workbuddy-message--user" style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(message)}</div>`;
+  messages.innerHTML += '<div id="customerWorkBuddyTyping" class="workbuddy-message workbuddy-message--typing" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">WorkBuddy \u6b63\u5728\u8c03\u7528\u5de5\u5177...</div>';
   messages.scrollTop = messages.scrollHeight;
   try {
     const response = await fetch('/api/workbuddy/chat', {
@@ -3051,18 +3064,20 @@ async function sendCustomerWorkBuddyMessage() {
     $('customerWorkBuddyTyping')?.remove();
     (result.tool_calls || []).forEach(call => {
       const trace = document.createElement('div');
+      trace.className = 'workbuddy-execution';
       trace.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
       trace.innerHTML = `<details><summary style="color:#7c3aed;font-weight:600">${escapeHtml(call.display_name || call.tool_name || '\u5de5\u5177\u8c03\u7528')}</summary><div style="margin-top:6px;font-family:Consolas,monospace;font-size:11px;color:#64748b">\u53c2\u6570\uff1a${escapeHtml(JSON.stringify(call.arguments || {}))}<br>\u7ed3\u679c\uff1a${escapeHtml(JSON.stringify(call.result || {}))}</div></details>`;
       messages.appendChild(trace);
     });
     const reply = document.createElement('div');
+    reply.className = 'workbuddy-message workbuddy-message--assistant';
     reply.style.cssText = 'align-self:flex-start;background:#f1f5f9;padding:10px 14px;border-radius:12px 12px 12px 2px;max-width:85%;line-height:1.7';
     reply.innerHTML = renderMarkdown(result.reply || '');
     messages.appendChild(reply);
     messages.scrollTop = messages.scrollHeight;
   } catch (error) {
     $('customerWorkBuddyTyping')?.remove();
-    messages.innerHTML += `<div style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">${escapeHtml(error.message)}</div>`;
+    messages.innerHTML += `<div class="workbuddy-message workbuddy-message--error" style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">${escapeHtml(describeWorkBuddyFailure(error))}</div>`;
     messages.scrollTop = messages.scrollHeight;
   }
 }
@@ -3200,8 +3215,8 @@ async function sendAgentMessage() {
   input.value = '';
 
   // 显示用户消息
-  msgBox.innerHTML += `<div style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(userMsg)}</div>`;
-  msgBox.innerHTML += `<div id="agentTyping" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">⏳ WorkBuddy (TTKC-AUTO) 正在分析并调用工具...</div>`;
+  msgBox.innerHTML += `<div class="workbuddy-message workbuddy-message--user" style="align-self:flex-end;background:var(--primary);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:80%">${escapeHtml(userMsg)}</div>`;
+  msgBox.innerHTML += `<div id="agentTyping" class="workbuddy-message workbuddy-message--typing" style="align-self:flex-start;background:#f1f5f9;padding:8px 12px;border-radius:12px 12px 12px 2px;color:#64748b;font-size:12px">⏳ WorkBuddy (TTKC-AUTO) 正在分析并调用工具...</div>`;
   msgBox.scrollTop = msgBox.scrollHeight;
 
   try {
@@ -3232,6 +3247,7 @@ async function sendAgentMessage() {
     if (result.tool_calls?.length) {
       result.tool_calls.forEach(tc => {
         var tcCard = document.createElement('div');
+        tcCard.className = 'workbuddy-execution';
         tcCard.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
         tcCard.innerHTML = '<details style="cursor:pointer"><summary style="color:#7c3aed;font-weight:600">🔧 ' + escapeHtml(tc.display_name) + ' - 调用成功</summary>'
           + '<div style="margin-top:6px;padding:6px 8px;background:#fff;border-radius:4px;font-size:11px;color:#64748b;font-family:Consolas,monospace">'
@@ -3244,6 +3260,7 @@ async function sendAgentMessage() {
 
     // 显示 AI 回复（Markdown 渲染）
     var replyDiv = document.createElement('div');
+    replyDiv.className = 'workbuddy-message workbuddy-message--assistant';
     replyDiv.style.cssText = 'align-self:flex-start;background:#f1f5f9;padding:10px 14px;border-radius:12px 12px 12px 2px;max-width:85%;line-height:1.7';
     replyDiv.innerHTML = renderMarkdown(result.reply);
     msgBox.appendChild(replyDiv);
@@ -3251,7 +3268,7 @@ async function sendAgentMessage() {
   } catch (error) {
     const typing = $('agentTyping');
     if (typing) typing.remove();
-    msgBox.innerHTML += `<div style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">❌ ${escapeHtml(error.message)}</div>`;
+    msgBox.innerHTML += `<div class="workbuddy-message workbuddy-message--error" style="align-self:flex-start;background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:85%">❌ ${escapeHtml(describeWorkBuddyFailure(error))}</div>`;
     msgBox.scrollTop = msgBox.scrollHeight;
   }
 }
