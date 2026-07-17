@@ -21,4 +21,7 @@ test("generates an asset-specific SSE server with Trace event reporting", () => 
   assert.doesNotMatch(code, /toolName !== "sales_top_products"/);
   assert.match(code, /trace_poc_/);
   assert.match(code, /POC_EVENT_URL/);
+  assert.match(code, /POC_EXECUTE_URL/);
+  assert.match(code, /database connector request failed/);
+  assert.match(code, /row_count/);
 });

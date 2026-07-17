@@ -59,6 +59,31 @@ function executeMockConnector(toolName, args) {
   };
 }
 
+async function executeConnector(toolName, args) {
+  if (!process.env.POC_EXECUTE_URL) return executeMockConnector(toolName, args);
+  const response = await fetch(process.env.POC_EXECUTE_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-poc-runtime-token": process.env.POC_EVENT_TOKEN
+    },
+    body: JSON.stringify({ tool_name: toolName, arguments: args })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "database connector request failed");
+  return payload.data;
+}
+
+function auditSummary(data) {
+  return {
+    connector: data?.connector || "unknown",
+    mode: data?.mode || "unknown",
+    source: data?.source || null,
+    row_count: Number(data?.row_count || 0),
+    columns: Array.isArray(data?.columns) ? data.columns : []
+  };
+}
+
 async function reportEvent(payload) {
   if (!process.env.POC_EVENT_URL || !process.env.POC_EVENT_TOKEN) return;
   try {
@@ -88,7 +113,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   const toolName = request.params.name;
   const args = request.params.arguments || {};
   try {
-    const data = executeMockConnector(toolName, args);
+    const data = await executeConnector(toolName, args);
     await reportEvent({
       event_type: "tool_call",
       trace_id: traceId,
@@ -96,7 +121,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
       latency_ms: Date.now() - startedAt,
       tool_name: toolName,
       request_params: args,
-      response_summary: data
+      response_summary: auditSummary(data)
     });
     return { content: [{ type: "text", text: JSON.stringify({ trace_id: traceId, data }) }] };
   } catch (error) {

@@ -862,7 +862,8 @@ function filterCandidatesByCustomer(candidates) {
   const selected = state.candidateCustomerFilter || '';
   const byCustomer = selected ? candidates.filter(candidate => candidateCustomerInfo(candidate).id === selected) : candidates;
   const sourceFilter = state.candidateSourceFilter || '';
-  return sourceFilter ? byCustomer.filter(candidate => candidate.source_ref === sourceFilter) : byCustomer;
+  const scoped = sourceFilter ? byCustomer.filter(candidate => candidate.source_ref === sourceFilter) : byCustomer;
+  return [...scoped].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'));
 }
 
 function candidateRecognitionMeta(candidate) {
@@ -1270,12 +1271,18 @@ function renderPublish() {
   }
 
   // 填充沙箱综合测试的资产选择 dropdown（按企业筛选）
-  const sandboxSelect = $('sandboxAssetSelect');
+  const sandboxSelect = $('mcpAssetSelect');
   if (sandboxSelect) {
     const currentVal = sandboxSelect.value;
     let options = scopedAssets.map(asset => `<option value="${asset.id}">${displayAssetName(asset.name)}（${asset.project_name || asset.project_id}）</option>`).join('');
     sandboxSelect.innerHTML = options;
     if (currentVal && scopedAssets.find(a => a.id === currentVal)) sandboxSelect.value = currentVal;
+    if (!currentVal) {
+      const realDataAsset = scopedAssets.find(asset => {
+        try { return JSON.parse(asset.runtime_config || '{}').mode === 'database_proxy'; } catch { return false; }
+      });
+      if (realDataAsset) sandboxSelect.value = realDataAsset.id;
+    }
     const pendingWorkBuddyAssetId = state.pendingWorkBuddyAssetId;
     if (pendingWorkBuddyAssetId && scopedAssets.some(asset => asset.id === pendingWorkBuddyAssetId)) {
       sandboxSelect.value = pendingWorkBuddyAssetId;
@@ -2639,7 +2646,12 @@ export function renderCustomerWorkBuddy() {
   const select = $('customerWorkBuddyAssetSelect');
   const deployButton = $('customerWorkBuddyDeployBtn');
   if (!select || !deployButton) return;
-  const assets = customerAssets().filter(asset => list(asset.tools).some(tool => tool && typeof tool === 'object' && (tool.name || tool.display_name)));
+  const assets = customerAssets()
+    .filter(asset => list(asset.tools).some(tool => tool && typeof tool === 'object' && (tool.name || tool.display_name)))
+    .sort((a, b) => {
+      const mode = asset => { try { return JSON.parse(asset.runtime_config || '{}').mode === 'database_proxy' ? 1 : 0; } catch { return 0; } };
+      return mode(b) - mode(a) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
+    });
   const selectedId = select.value;
   select.innerHTML = assets.length
     ? assets.map(asset => `<option value="${escapeJs(asset.id)}">${text(displayAssetName(asset.name))} (${list(asset.tools).length} Tool)</option>`).join('')

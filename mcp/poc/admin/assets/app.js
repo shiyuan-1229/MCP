@@ -2086,28 +2086,72 @@ function toggleAllCaps(checked) {
   updateCapSelectCount();
 }
 
-async function confirmRecognitionToCandidates() {
+async function confirmSelectedCapabilities() {
+  return packageSelectedCapabilities({ advanceToCandidates: true });
+}
+
+async function packageSelectedCapabilities({ advanceToCandidates = false } = {}) {
   const sourceId = window._currentPreviewSourceId;
   if (!sourceId) { showToast('未找到数据源', 'error'); return; }
 
-  const btn = $('capPackageBtn');
+  const checked = document.querySelectorAll('.cap-check:checked');
+  const allChecks = document.querySelectorAll('.cap-check');
+  const selectedCaps = Array.from(checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]).filter(Boolean);
+  const selectedNames = selectedCaps.map(c => c.name);
+  const customInstructions = $('capCustomInstructions')?.value?.trim() || '';
+
+  // 自动构建封装要求
+  let effectiveInstructions = customInstructions;
+  if (selectedCaps.length < allChecks.length) {
+    const deselected = Array.from(allChecks).filter(cb => !cb.checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]?.name).filter(Boolean);
+    effectiveInstructions = (customInstructions ? customInstructions + '\n\n' : '') + `请只封装以下能力：${selectedNames.join('、')}。\n不需要封装的能力：${deselected.join('、')}`;
+  }
+
+  const btn = $('capCandidateBtn') || $('capPackageBtn');
   const hint = $('capStatusHint');
+  if (advanceToCandidates) {
+    // The selected capability list is a human confirmation for step 3, not a
+    // request to publish Tools.  Keep the AI instruction scoped accordingly.
+    effectiveInstructions = `Only identify the selected business capabilities: ${selectedNames.join(', ')}. Do not finalize or publish Tools; create candidate capabilities for manual screening.`;
+  }
   btn.disabled = true;
   btn.textContent = '正在生成候选业务能力...';
   hint.innerHTML = '<span style="color:#b46b06">⏳ 正在生成 OpenAPI 草案并创建候选业务能力...</span>';
 
+  if (advanceToCandidates) {
+    btn.textContent = '正在生成候选业务能力...';
+    hint.innerHTML = '<span style="color:#80542a">正在生成本次资料的候选业务能力...</span>';
+  }
   try {
     const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
       method: 'POST',
       body: JSON.stringify({ use_ai: true })
     });
+    if (advanceToCandidates && result.spec_id) {
+      await confirmOpenapiSpec(result.spec_id);
+      return;
+    }
     await loadAll();
-    await confirmOpenapiSpec(result.spec_id);
+    renderAll();
+
+    // 隐藏能力预览面板，显示结果面板
+    $('capabilityPanel').style.display = 'none';
+
+    if (result.ai_used) {
+      showAiAnalysisResult(result);
+      showToast(`AI 封装完成：${result.tools?.length || 0} 个 Tool`, 'success');
+    } else if (result.error) {
+      showToast(`AI 失败: ${result.error}`, 'warning');
+    }
   } catch (error) {
     btn.disabled = false;
     btn.textContent = '确认识别并进入候选业务能力';
     hint.innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(error.message)}</span>`;
   }
+}
+
+async function confirmRecognitionToCandidates() {
+  return confirmSelectedCapabilities();
 }
 
 function closeCapabilityPanel() {
@@ -2682,6 +2726,8 @@ window.triggerRecognition = triggerRecognition;
 window.showCapabilityPanel = showCapabilityPanel;
 window.filterCapabilities = filterCapabilities;
 window.toggleAllCaps = toggleAllCaps;
+window.packageSelectedCapabilities = packageSelectedCapabilities;
+window.confirmSelectedCapabilities = confirmSelectedCapabilities;
 window.confirmRecognitionToCandidates = confirmRecognitionToCandidates;
 window.closeCapabilityPanel = closeCapabilityPanel;
 window.updateCapSelectCount = updateCapSelectCount;
@@ -2711,6 +2757,7 @@ window.refreshDbSource = refreshDbSource;
 window.sendAgentMessage = sendAgentMessage;
 window.deployToWorkBuddy = deployToWorkBuddy;
 window.onSandboxAssetChange = onSandboxAssetChange;
+window.onMcpAssetChange = onSandboxAssetChange;
 
 // 智能体联调 — 通过 WorkBuddy Tool Call 协议
 let _agentHistory = [];
@@ -2722,7 +2769,7 @@ const WORKBUDDY_DEFAULT_MODEL = {};
 
 // 部署 MCP 资产到 WorkBuddy
 async function deployToWorkBuddy() {
-  const assetSelect = $('sandboxAssetSelect');
+  const assetSelect = $('mcpAssetSelect');
   const statusEl = $('workbuddyDeployStatus');
   if (!assetSelect?.value) { showToast('请先选择要部署的 MCP 资产', 'warning'); return; }
 
@@ -2739,9 +2786,20 @@ async function deployToWorkBuddy() {
     const tools = data.tools || [];
     if (!tools.length) throw new Error('该资产没有可用的 Tool，无法部署');
 
+    const runtimeResponse = await fetch(`/api/platform/mcp-assets/${assetSelect.value}/poc-runtimes`, {
+      method: 'POST', headers: { Authorization: `Bearer ${state.token}` }
+    });
+    const runtime = await runtimeResponse.json();
+    if (!runtimeResponse.ok || runtime.error || runtime.status !== 'running') {
+      throw new Error(runtime.error || 'WorkBuddy runtime deployment failed');
+    }
+    _connectedRuntimeId = runtime.id;
+    const realDataReady = data.execution?.connector_state === 'connected';
+
     // 显示部署成功状态 + Tool 清单
     let html = '<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:8px">';
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✅</span><strong style="color:#16a34a;font-size:14px">已部署到 WorkBuddy</strong><span style="font-size:11px;color:#64748b;margin-left:auto">模型：TTKC-AUTO · ' + tools.length + ' 个 Tool 已加载</span></div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px">✅</span><strong style="color:#16a34a;font-size:14px">已部署到 WorkBuddy</strong><span style="font-size:11px;color:#64748b;margin-left:auto">Runtime: ' + escapeHtml(runtime.id) + ' · ' + tools.length + ' 个 Tool 已加载</span></div>';
+    html += '<div style="font-size:12px;color:' + (realDataReady ? '#166534' : '#92400e') + ';margin-bottom:7px">' + (realDataReady ? '真实数据库只读连接已就绪' : '当前资产未绑定真实数据库 Connector，对话将返回 POC Mock') + '</div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
     tools.forEach(function(t) {
       html += '<span style="font-size:11px;background:#fff;border:1px solid var(--line);padding:2px 8px;border-radius:4px">🔧 ' + escapeHtml(t.function.name) + '</span>';
@@ -2784,10 +2842,12 @@ function describeWorkBuddyFailure(error) {
 }
 let _customerWorkBuddyHistory = [];
 let _customerWorkBuddyDeployedAssetId = '';
+let _customerWorkBuddyRuntimeId = '';
 
 function resetCustomerWorkBuddy() {
   _customerWorkBuddyHistory = [];
   _customerWorkBuddyDeployedAssetId = '';
+  _customerWorkBuddyRuntimeId = '';
   const status = $('customerWorkBuddyDeployStatus');
   const input = $('customerWorkBuddyInput');
   const sendButton = $('customerWorkBuddySendBtn');
@@ -2818,7 +2878,14 @@ async function customerDeployToWorkBuddy() {
     if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
     const tools = Array.isArray(data.tools) ? data.tools : [];
     if (!tools.length) throw new Error('\u8be5 MCP \u8d44\u4ea7\u6682\u65e0\u53ef\u7528 Tool\u3002');
-    if (status) status.innerHTML = `<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px"><strong style="color:#16a34a">WorkBuddy \u5df2\u51c6\u5907\u5c31\u7eea</strong><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${tools.map(tool => `<span style="font-size:11px;background:#fff;border:1px solid var(--line);padding:2px 8px;border-radius:4px">${escapeHtml(tool.function?.name || '-')}</span>`).join('')}</div></div>`;
+    const runtimeResponse = await fetch(`/api/platform/mcp-assets/${select.value}/poc-runtimes`, {
+      method: 'POST', headers: { Authorization: `Bearer ${state.token}` }
+    });
+    const runtime = await runtimeResponse.json();
+    if (!runtimeResponse.ok || runtime.error || runtime.status !== 'running') throw new Error(runtime.error || 'WorkBuddy runtime deployment failed');
+    _customerWorkBuddyRuntimeId = runtime.id;
+    const realDataReady = data.execution?.connector_state === 'connected';
+    if (status) status.innerHTML = `<div style="padding:12px 14px;background:#f5ecdf;border:1px solid #dec5a5;border-radius:8px"><strong style="color:#80542a">WorkBuddy \u5df2\u90e8\u7f72\u5e76\u8fd0\u884c</strong><span style="margin-left:8px;font-size:11px;color:#6a492e">Runtime: ${escapeHtml(runtime.id)}</span><div style="margin-top:7px;font-size:12px;color:${realDataReady ? '#166534' : '#92400e'}">${realDataReady ? '真实数据库只读连接已就绪' : '该 MCP 未绑定真实数据库 Connector，对话将返回 POC Mock'}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${tools.map(tool => `<span style="font-size:11px;background:#fffdf9;border:1px solid var(--line);padding:2px 8px;border-radius:4px">${escapeHtml(tool.function?.name || '-')}</span>`).join('')}</div></div>`;
     _customerWorkBuddyHistory = [];
     _customerWorkBuddyDeployedAssetId = select.value;
     if (input) { input.disabled = false; input.placeholder = '\u8bf7\u8f93\u5165\u95ee\u9898\uff0c\u6d4b\u8bd5\u8be5 MCP \u8d44\u4ea7...'; input.focus(); }
@@ -2826,6 +2893,7 @@ async function customerDeployToWorkBuddy() {
     if (messages) messages.innerHTML = '<div style="text-align:center;color:#16a34a;font-size:12px;padding:16px 0">MCP \u8d44\u4ea7\u5df2\u90e8\u7f72\u5230 WorkBuddy\uff0c\u73b0\u5728\u53ef\u4ee5\u5f00\u59cb\u6d4b\u8bd5\u3002</div>';
   } catch (error) {
     _customerWorkBuddyDeployedAssetId = '';
+    _customerWorkBuddyRuntimeId = '';
     if (status) status.innerHTML = `<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#dc2626">${escapeHtml(describeWorkBuddyFailure(error))}</div>`;
     showToast(error.message, 'error');
   }
@@ -2846,7 +2914,7 @@ async function sendCustomerWorkBuddyMessage() {
     const response = await fetch('/api/workbuddy/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
-      body: JSON.stringify({ asset_id: select.value, message, history: _customerWorkBuddyHistory.slice(-10), model_config: WORKBUDDY_DEFAULT_MODEL })
+      body: JSON.stringify({ asset_id: select.value, runtime_id: _customerWorkBuddyRuntimeId, message, history: _customerWorkBuddyHistory.slice(-10), model_config: WORKBUDDY_DEFAULT_MODEL })
     });
     const result = await response.json();
     if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
@@ -2855,8 +2923,11 @@ async function sendCustomerWorkBuddyMessage() {
     (result.tool_calls || []).forEach(call => {
       const trace = document.createElement('div');
       trace.className = 'workbuddy-execution';
-      trace.style.cssText = 'align-self:center;width:100%;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px;font-size:12px';
-      trace.innerHTML = `<details><summary style="color:#7c3aed;font-weight:600">${escapeHtml(call.display_name || call.tool_name || '\u5de5\u5177\u8c03\u7528')}</summary><div style="margin-top:6px;font-family:Consolas,monospace;font-size:11px;color:#64748b">\u53c2\u6570\uff1a${escapeHtml(JSON.stringify(call.arguments || {}))}<br>\u7ed3\u679c\uff1a${escapeHtml(JSON.stringify(call.result || {}))}</div></details>`;
+      const connector = call.result?.data?.connector || call.result?.connector || 'mock';
+      const isRealData = connector === 'database_proxy';
+      const source = call.result?.data?.source || call.result?.source || '';
+      trace.style.cssText = `align-self:center;width:100%;background:${isRealData ? '#f5ecdf' : '#f8f4ee'};border:1px solid ${isRealData ? '#dec5a5' : '#dfd1c0'};border-radius:8px;padding:6px 12px;font-size:12px`;
+      trace.innerHTML = `<details><summary style="color:#80542a;font-weight:600">${escapeHtml(call.display_name || call.tool_name || '\u5de5\u5177\u8c03\u7528')} <span style="margin-left:6px;font-size:11px">${isRealData ? '\u771f\u5b9e\u6570\u636e\u00b7\u53ea\u8bfb' : 'POC Mock'}</span></summary><div style="margin-top:6px;font-family:Consolas,monospace;font-size:11px;color:#6a6258">${source ? `\u6570\u636e\u6e90\uff1a${escapeHtml(source)}<br>` : ''}\u53c2\u6570\uff1a${escapeHtml(JSON.stringify(call.arguments || {}))}<br>\u7ed3\u679c\uff1a${escapeHtml(JSON.stringify(call.result || {}))}</div></details>`;
       messages.appendChild(trace);
     });
     const reply = document.createElement('div');
@@ -2996,7 +3067,7 @@ function renderMarkdown(text) {
 async function sendAgentMessage() {
   const input = $('agentInput');
   const msgBox = $('agentMessages');
-  const assetSelect = $('sandboxAssetSelect');
+  const assetSelect = $('mcpAssetSelect');
   if (!_workbuddyDeployed) { showToast('请先点击「部署到 WorkBuddy」', 'warning'); return; }
   if (!input?.value?.trim()) return;
   if (!assetSelect?.value) { showToast('请先选择要测试的 MCP 资产', 'warning'); return; }

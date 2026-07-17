@@ -20,7 +20,7 @@ import { buildCandidateFromAi, canCreateToolDraft, buildToolDraft, canConfirmMcp
 import { parseDDL, parseCSVHeader } from "./modules/ddl-parser.mjs";
 import { createRuntimeManager } from "./modules/poc-runtime/runtime-manager.mjs";
 import { callRuntimeTool, inspectRuntime } from "./modules/poc-runtime/mcp-client.mjs";
-import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema, describeConnectionError } from "./db-connector.mjs";
+import { testConnection as dbTestConnection, fetchSchema as dbFetchSchema, executeReadOnlyBinding, describeConnectionError } from "./db-connector.mjs";
 import { buildDeliveryFactSnapshot } from "./modules/delivery-ai/context.mjs";
 import { transitionVersion, validateDeliveryDraft } from "./modules/delivery-ai/validation.mjs";
 
@@ -46,6 +46,10 @@ const ADMIN_DIR = path.join(__dirname, "..", "admin");
 const CLIENT_DIR = path.join(__dirname, "..", "client");
 const governanceRepo = createGovernanceRepository(db);
 let pocRuntimeManager;
+// Connection passwords live only in this process.  Published MCP metadata
+// retains bindings but never credentials, and child runtimes call back through
+// a token-protected local proxy instead of receiving database secrets.
+const transientDbConnectors = new Map();
 
 // WebSocket 服务
 const wss = new WebSocketServer({ noServer: true });
@@ -519,6 +523,7 @@ function runMigrations() {
   ensureColumn('platform_builder_requests', 'intake_source_id', 'TEXT');
   ensureColumn('platform_builder_requests', 'updated_at', 'TEXT');
   ensureColumn('platform_mcp_assets', 'visibility', "TEXT DEFAULT 'internal'");
+  ensureColumn('platform_mcp_assets', 'runtime_config', 'TEXT');
   ensureColumn('platform_mcp_releases', 'project_id', 'TEXT');
   ensureColumn('platform_mcp_releases', 'environment', "TEXT DEFAULT 'production'");
   ensureColumn('platform_mcp_releases', 'release_notes', 'TEXT');
@@ -828,6 +833,116 @@ function backfillMissingReleaseDrafts() {
       AND NOT EXISTS (SELECT 1 FROM platform_mcp_releases r WHERE r.asset_id = a.id)`).all(...releaseDraftAssetStatuses);
   assets.forEach(asset => ensureReleaseDraft(asset, "Backfilled for WorkBuddy validation"));
   return assets.length;
+}
+
+// The early demo data predates the staged governance flow.  A few records were
+// marked as published while their intermediate stage fields still had their
+// creation defaults.  Published is the terminal state, so retain the release
+// history and normalize only those already-published records on every startup.
+// This deliberately does not advance any draft or in-review candidate.
+function repairHistoricalGovernanceState(database) {
+  const repairCandidates = database.prepare(`UPDATE platform_candidate_assets
+    SET manual_screen_status = 'approve',
+        manual_screen_decision = 'approve',
+        tool_boundary_status = 'confirmed',
+        tool_draft_status = 'draft',
+        mcp_composition_status = 'confirmed',
+        mcp_draft_status = 'draft',
+        acceptance_passed = 1,
+        publish_block_reason = NULL
+    WHERE status = 'published' AND mcp_id IS NOT NULL
+      AND (
+        COALESCE(manual_screen_status, '') != 'approve'
+        OR COALESCE(manual_screen_decision, '') != 'approve'
+        OR COALESCE(tool_boundary_status, '') != 'confirmed'
+        OR COALESCE(tool_draft_status, '') != 'draft'
+        OR COALESCE(mcp_composition_status, '') != 'confirmed'
+        OR COALESCE(mcp_draft_status, '') != 'draft'
+        OR COALESCE(acceptance_passed, 0) != 1
+        OR publish_block_reason IS NOT NULL
+      )`);
+  const repairReleases = database.prepare(`UPDATE platform_mcp_releases
+    SET status = 'published'
+    WHERE id IN (
+      SELECT r.id
+      FROM platform_mcp_releases r
+      JOIN platform_mcp_assets a ON a.id = r.asset_id
+      WHERE a.status = 'published'
+        AND r.released_at IS NOT NULL
+        AND r.status IN ('testing', 'tested', 'ready_to_publish')
+    )`);
+  const repairedCandidates = repairCandidates.run().changes;
+  const repairedReleases = repairReleases.run().changes;
+  return { candidates: repairedCandidates, releases: repairedReleases };
+}
+
+function parseRuntimeConfig(asset) {
+  const config = safeParse(asset?.runtime_config);
+  return config && typeof config === 'object' ? config : {};
+}
+
+function sanitizeRuntimeConfig(asset) {
+  const config = parseRuntimeConfig(asset);
+  return {
+    mode: config.mode || 'mock',
+    connector_state: transientDbConnectors.has(asset.id) ? 'connected' : (config.connector_state || 'not_configured'),
+    tool_bindings: config.tool_bindings || {}
+  };
+}
+
+function normalizeReadOnlyBindings(asset, rawBindings) {
+  if (!rawBindings || typeof rawBindings !== 'object' || Array.isArray(rawBindings)) throw new Error('tool_bindings must be an object');
+  const knownTools = new Map(decode(asset.tools).filter(tool => tool && typeof tool === 'object').map(tool => [tool.name, tool]));
+  const bindings = {};
+  for (const [toolName, raw] of Object.entries(rawBindings)) {
+    const tool = knownTools.get(toolName);
+    if (!tool) throw new Error(`tool binding is not exposed by this asset: ${toolName}`);
+    const schema = String(raw?.schema || '');
+    const table = String(raw?.table || '');
+    const columns = Array.isArray(raw?.columns) ? raw.columns.map(String) : [];
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(schema) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(table) || !columns.length) {
+      throw new Error(`binding for ${toolName} requires a valid schema, table and result columns`);
+    }
+    const allowedArgs = new Set(Object.keys(tool.inputSchema?.properties || {}));
+    const filters = {};
+    for (const [argumentName, rawRule] of Object.entries(raw?.filters || {})) {
+      if (!allowedArgs.has(argumentName)) throw new Error(`binding filter is not a Tool parameter: ${toolName}.${argumentName}`);
+      const rule = typeof rawRule === 'string' ? { column: rawRule, operator: '=' } : rawRule || {};
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(rule.column || '')) || !['=', '>=', '<='].includes(String(rule.operator || '='))) {
+        throw new Error(`invalid filter binding for ${toolName}.${argumentName}`);
+      }
+      filters[argumentName] = { column: String(rule.column), operator: String(rule.operator || '=') };
+    }
+    bindings[toolName] = {
+      schema, table, columns,
+      filters,
+      default_limit: Math.min(Math.max(Number(raw?.default_limit || 20), 1), 100),
+      max_limit: Math.min(Math.max(Number(raw?.max_limit || 50), 1), 100)
+    };
+  }
+  if (!Object.keys(bindings).length) throw new Error('at least one Tool binding is required');
+  return bindings;
+}
+
+async function executeConfiguredDatabaseTool(asset, toolName, args = {}) {
+  const connector = transientDbConnectors.get(asset.id);
+  const config = parseRuntimeConfig(asset);
+  const binding = config.tool_bindings?.[toolName];
+  if (!connector || !binding) {
+    const error = new Error('real database connector is not configured for this Tool');
+    error.code = 'REAL_CONNECTOR_NOT_CONFIGURED';
+    throw error;
+  }
+  const data = await executeReadOnlyBinding(connector, binding, args);
+  return {
+    connector: 'database_proxy',
+    mode: 'read_only',
+    source: `${data.schema}.${data.table}`,
+    row_count: data.row_count,
+    limit: data.limit,
+    columns: data.columns,
+    rows: data.rows
+  };
 }
 
 function scopedBuilderRequests(req) {
@@ -3180,6 +3295,44 @@ app.get("/api/platform/knowledge-bases/:id/recall-logs", requireAuth, (req, res)
 
 app.get("/api/platform/mcp-assets", requireAuth, (req, res) => res.json(scopedAssets(req).map(a => ({ ...a, tools: decode(a.tools) }))));
 
+app.get("/api/platform/mcp-assets/:id/real-data-connector", requireAuth, requireAdmin, (req, res) => {
+  const asset = scopedAssets(req).find(item => item.id === req.params.id);
+  if (!asset) return res.status(404).json({ error: 'asset not found' });
+  res.json({ asset_id: asset.id, ...sanitizeRuntimeConfig(asset), credential_storage: 'memory_only' });
+});
+
+app.post("/api/platform/mcp-assets/:id/real-data-connector", requireAuth, requireAdmin, async (req, res) => {
+  const asset = scopedAssets(req).find(item => item.id === req.params.id);
+  if (!asset) return res.status(404).json({ error: 'asset not found' });
+  const connection = req.body?.connection || {};
+  if (!connection.host || !connection.user || !connection.password) {
+    return res.status(400).json({ error: 'connection host, user and password are required' });
+  }
+  try {
+    const toolBindings = normalizeReadOnlyBindings(asset, req.body?.tool_bindings);
+    const tested = await dbTestConnection({ ...connection, database: connection.database || '*' });
+    if (!tested.ok) return res.status(502).json({ error: tested.message, diagnostic: tested });
+    transientDbConnectors.set(asset.id, {
+      host: String(connection.host), port: Number(connection.port) || 3306,
+      user: String(connection.user), password: String(connection.password)
+    });
+    const persisted = { mode: 'database_proxy', connector_state: 'transient', tool_bindings: toolBindings, updated_at: new Date().toISOString() };
+    db.prepare("UPDATE platform_mcp_assets SET runtime_config = ? WHERE id = ?").run(JSON.stringify(persisted), asset.id);
+    res.status(201).json({ asset_id: asset.id, mode: persisted.mode, connector_state: 'connected', tool_bindings: toolBindings, credential_storage: 'memory_only' });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'failed to configure real data connector' });
+  }
+});
+
+app.delete("/api/platform/mcp-assets/:id/real-data-connector", requireAuth, requireAdmin, (req, res) => {
+  const asset = scopedAssets(req).find(item => item.id === req.params.id);
+  if (!asset) return res.status(404).json({ error: 'asset not found' });
+  transientDbConnectors.delete(asset.id);
+  const current = parseRuntimeConfig(asset);
+  db.prepare("UPDATE platform_mcp_assets SET runtime_config = ? WHERE id = ?").run(JSON.stringify({ ...current, mode: 'mock', connector_state: 'disconnected' }), asset.id);
+  res.json({ ok: true, asset_id: asset.id, connector_state: 'disconnected' });
+});
+
 app.get("/api/platform/poc-runtimes", requireAuth, (req, res) => {
   const assetIds = scopedAssets(req).map(asset => asset.id);
   if (!assetIds.length) return res.json([]);
@@ -3187,7 +3340,9 @@ app.get("/api/platform/poc-runtimes", requireAuth, (req, res) => {
   res.json(rows);
 });
 
-app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, requireAdmin, async (req, res) => {
+// Customers can deploy only assets returned by scopedAssets (published assets
+// in their own project). The database connector remains administrator-configured.
+app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, async (req, res) => {
   const asset = scopedAssets(req).find(item => item.id === req.params.id);
   if (!asset) return res.status(404).json({ error: "asset not found" });
   const tools = decode(asset.tools);
@@ -3195,7 +3350,7 @@ app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, requireAdmin,
   let release = db.prepare("SELECT * FROM platform_mcp_releases WHERE asset_id = ? ORDER BY released_at DESC LIMIT 1").get(asset.id);
   // 兼容早期 POC：旧版本曾将自动生成的沙箱 release 错标为 published。
   // 该记录从未经过发布门禁，启动时降级为 testing，避免在发布视图中产生假阳性。
-  if (release?.status === 'published' && release.environment === 'sandbox' && release.release_notes === 'POC 自动创建') {
+  if (release?.status === 'published' && asset.status !== 'published' && release.environment === 'sandbox' && release.release_notes === 'POC 自动创建') {
     db.prepare("UPDATE platform_mcp_releases SET status = 'testing' WHERE id = ?").run(release.id);
     release = db.prepare("SELECT * FROM platform_mcp_releases WHERE id = ?").get(release.id);
   }
@@ -3213,7 +3368,7 @@ app.post("/api/platform/mcp-assets/:id/poc-runtimes", requireAuth, requireAdmin,
   const eventToken = crypto.randomBytes(24).toString("hex");
   db.prepare("INSERT INTO platform_poc_runtime_instances (id, asset_id, release_id, status, event_token, created_by) VALUES (?,?,?,?,?,?)").run(id, asset.id, release.id, "starting", eventToken, req.user.display_name);
   try {
-    const started = await pocRuntimeManager.start({ runtime: { id, asset_id: asset.id, release_id: release.id }, asset: { ...asset, tools }, eventToken, eventUrl: `http://127.0.0.1:${PORT}/api/internal/poc-runtimes/${id}/events` });
+    const started = await pocRuntimeManager.start({ runtime: { id, asset_id: asset.id, release_id: release.id }, asset: { ...asset, tools }, eventToken, eventUrl: `http://127.0.0.1:${PORT}/api/internal/poc-runtimes/${id}/events`, executeUrl: transientDbConnectors.has(asset.id) ? `http://127.0.0.1:${PORT}/api/internal/poc-runtimes/${id}/execute` : '' });
     db.prepare("UPDATE platform_poc_runtime_instances SET status = 'running', port = ?, endpoint = ?, health_checked_at = datetime('now') WHERE id = ?").run(started.port, started.endpoint, id);
     res.status(201).json(db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(id));
   } catch (error) {
@@ -3266,6 +3421,22 @@ app.post("/api/internal/poc-runtimes/:id/events", (req, res) => {
     );
   }
   res.status(202).json({ ok: true });
+});
+
+app.post("/api/internal/poc-runtimes/:id/execute", async (req, res) => {
+  const runtime = db.prepare("SELECT * FROM platform_poc_runtime_instances WHERE id = ?").get(req.params.id);
+  if (!runtime || req.get("x-poc-runtime-token") !== runtime.event_token) return res.status(401).json({ error: 'invalid runtime token' });
+  const asset = db.prepare("SELECT * FROM platform_mcp_assets WHERE id = ?").get(runtime.asset_id);
+  if (!asset) return res.status(404).json({ error: 'asset not found' });
+  const toolName = String(req.body?.tool_name || '');
+  const tools = decode(asset.tools);
+  if (!tools.some(tool => (typeof tool === 'string' ? tool : tool?.name) === toolName)) return res.status(404).json({ error: 'tool is not exposed by this asset' });
+  try {
+    const data = await executeConfiguredDatabaseTool(asset, toolName, req.body?.arguments || {});
+    res.json({ ok: true, data });
+  } catch (error) {
+    res.status(error?.code === 'REAL_CONNECTOR_NOT_CONFIGURED' ? 409 : 502).json({ error: error.message || 'database Tool execution failed' });
+  }
 });
 
 // 编辑 MCP 资产属性
@@ -5287,7 +5458,12 @@ app.get("/api/workbuddy/assets/:id/tools", requireAuth, (req, res) => {
       }
     }
   }));
-  res.json({ asset_id: asset.id, asset_name: asset.name, tools: functions });
+  res.json({
+    asset_id: asset.id,
+    asset_name: asset.name,
+    tools: functions,
+    execution: sanitizeRuntimeConfig(asset)
+  });
 });
 
 // 执行 Tool 调用（POC 阶段为模拟执行）
@@ -5303,29 +5479,38 @@ app.post("/api/workbuddy/assets/:id/execute", requireAuth, async (req, res) => {
   const tool = tools.find(t => t.name === tool_name);
   if (!tool) return res.status(404).json({ error: `tool "${tool_name}" not found` });
 
-  // 记录调用事件
   const eventId = makeId("evt");
   const traceId = `wb_${Date.now().toString(36)}`;
+  const realMode = transientDbConnectors.has(asset.id) && Boolean(parseRuntimeConfig(asset).tool_bindings?.[tool.name]);
+  let result;
+  let executionSource = 'mock';
+  let executionError = null;
+  const startedAt = Date.now();
+  try {
+    executionSource = realMode ? 'database_proxy' : 'mock';
+    result = realMode ? await executeConfiguredDatabaseTool(asset, tool.name, args || {}) : generateMockResult(tool, args || {});
+  } catch (error) {
+    executionError = error.message || 'database Tool execution failed';
+  }
   try {
     db.prepare("INSERT INTO platform_call_events (id, asset_id, asset_name, caller, status, latency_ms, description, trace_id, created_at, request_params, response_data) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
-      eventId, asset.id, asset.name, 'WorkBuddy', 'success', Math.floor(Math.random() * 200 + 50),
+      eventId, asset.id, asset.name, 'WorkBuddy', executionError ? 'error' : 'success', Date.now() - startedAt,
       `[WorkBuddy] ${tool.display_name || tool.name} 调用`, traceId,
       new Date().toISOString().slice(0, 19).replace('T', ' '),
-      JSON.stringify(args || {}), JSON.stringify({ status: 'mock_success' })
+      JSON.stringify(args || {}), JSON.stringify(executionError ? { error: executionError } : { connector: executionSource, row_count: result?.row_count || null, source: result?.source || null })
     );
   } catch {}
-
-  // 模拟执行结果
-  const mockData = generateMockResult(tool, args || {});
+  if (executionError) return res.status(502).json({ tool_name: tool.name, trace_id: traceId, source: executionSource, error: executionError });
   res.json({
     tool_name: tool.name,
     display_name: tool.display_name || tool.name,
     status: 'success',
     arguments: args || {},
-    result: mockData,
+    result,
     trace_id: traceId,
     executed_at: new Date().toISOString(),
-    note: "POC 阶段为模拟执行，生产环境将连接真实数据库"
+    source: executionSource,
+    note: executionSource === 'database_proxy' ? '已通过平台只读数据库代理返回真实数据。' : '未配置真实数据库 Connector，当前为 POC mock。'
   });
 });
 
@@ -5751,6 +5936,7 @@ pocRuntimeManager = createRuntimeManager({
 });
 seed();
 backfillMissingReleaseDrafts();
+repairHistoricalGovernanceState(db);
 
 
 

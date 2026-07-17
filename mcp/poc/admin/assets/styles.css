@@ -22,6 +22,40 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 .hidden { display: none !important; }
 body.customer .admin-only { display: none !important; }
+/* Customer workspace only: keep the operator console unchanged while giving
+   the delivered enterprise workspace a clear pink visual identity. */
+body.customer {
+  --bg: #f6f0e7;
+  --surface: #fffdf9;
+  --surface-2: #f2e7d8;
+  --ink: #4f3826;
+  --muted: #826a53;
+  --line: #dfc9ad;
+  --primary: #a67138;
+  --primary-dark: #80542a;
+  --info: #91612e;
+  --shadow: 0 6px 16px rgba(102, 69, 34, 0.08);
+}
+body.customer .sidebar {
+  background: linear-gradient(180deg, #a87b4a 0%, #89613a 52%, #6a492e 100%);
+  color: #fffaf2;
+}
+body.customer .side-brand { border-bottom-color: rgba(255,255,255,0.28); }
+body.customer .side-brand strong,
+body.customer .nav-btn,
+body.customer .nav-btn:hover { color: #fff; }
+body.customer .side-brand span { color: #f5e7d2; }
+body.customer .nav-btn:hover { background: rgba(255,255,255,0.18); }
+body.customer .nav-btn.active { background: rgba(78, 49, 25, 0.42); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); }
+body.customer .nav-badge { background: #fffaf2; color: #785027; }
+body.customer .main-panel { background: linear-gradient(135deg, #fbf7f0 0%, #f1e6d6 100%); }
+body.customer .panel,
+body.customer .metric-card,
+body.customer .info-card,
+body.customer .user-pill { background: #fffdf9; }
+body.customer tr:hover td { background: #faf2e7; }
+body.customer .customer-builder-chat { background: linear-gradient(180deg, #faf4ea 0%, #fffdf9 100%); }
+body.customer .customer-delivery-hero { background: linear-gradient(120deg, #faf3e8 0%, #f0e1ce 52%, #fffdf8 100%); border-color: #dfc5a5; }
 :focus-visible { outline: 2px solid rgba(53, 88, 214, 0.35); outline-offset: 2px; }
 .login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: linear-gradient(180deg, #111b2d 0%, #16253a 100%); }
 .login-card { width: min(460px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 28px; box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16); }

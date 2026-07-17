@@ -37,7 +37,7 @@ export function createRuntimeManager({
 }) {
   const children = new Map();
 
-  async function start({ runtime, asset, eventToken, eventUrl = "" }) {
+  async function start({ runtime, asset, eventToken, eventUrl = "", executeUrl = "" }) {
     const port = await findOpenPort();
     const endpoint = `http://127.0.0.1:${port}/sse`;
     const runtimeDir = path.join(rootDir, runtime.id);
@@ -51,7 +51,7 @@ export function createRuntimeManager({
 
     const child = spawnProcess(process.execPath, ["server.mjs"], {
       cwd: runtimeDir,
-      env: { ...process.env, PORT: String(port), POC_EVENT_TOKEN: eventToken, POC_EVENT_URL: eventUrl },
+      env: { ...process.env, PORT: String(port), POC_EVENT_TOKEN: eventToken, POC_EVENT_URL: eventUrl, POC_EXECUTE_URL: executeUrl },
       stdio: "ignore"
     });
     children.set(runtime.id, child);

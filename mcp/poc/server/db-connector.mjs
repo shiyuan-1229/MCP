@@ -54,6 +54,57 @@ function quoteIdentifier(value) {
   return `\`${String(value).replace(/`/g, '``')}\``;
 }
 
+function assertIdentifier(value, label) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || ''))) {
+    throw new Error(`invalid ${label}`);
+  }
+  return String(value);
+}
+
+/**
+ * Executes a pre-approved, read-only table binding.  The binding is data, not
+ * SQL: callers may choose only declared columns and declared equality/range
+ * filters.  This prevents an LLM or a WorkBuddy request from submitting free
+ * SQL to an imported database.
+ */
+export async function executeReadOnlyBinding(config, binding, args = {}) {
+  const schema = assertIdentifier(binding?.schema, 'schema');
+  const table = assertIdentifier(binding?.table, 'table');
+  const columns = Array.isArray(binding?.columns) ? binding.columns.map(column => assertIdentifier(column, 'column')) : [];
+  if (!columns.length || columns.length > 30) throw new Error('binding must declare 1-30 result columns');
+
+  const filters = binding?.filters && typeof binding.filters === 'object' ? binding.filters : {};
+  const clauses = [];
+  const values = [];
+  for (const [argumentName, rule] of Object.entries(filters)) {
+    const value = args?.[argumentName];
+    if (value === undefined || value === null || value === '') continue;
+    const column = assertIdentifier(typeof rule === 'string' ? rule : rule?.column, 'filter column');
+    const operator = String(typeof rule === 'object' ? rule?.operator || '=' : '=').toUpperCase();
+    if (!['=', '>=', '<='].includes(operator)) throw new Error(`unsupported filter operator for ${argumentName}`);
+    clauses.push(`${quoteIdentifier(column)} ${operator} ?`);
+    values.push(typeof value === 'string' ? value.slice(0, 256) : value);
+  }
+
+  const defaultLimit = Number(binding?.default_limit || 20);
+  const maxLimit = Math.min(Math.max(Number(binding?.max_limit || 50), 1), 100);
+  const limit = Math.min(Math.max(Number(args?.limit || defaultLimit), 1), maxLimit);
+  const sql = `SELECT ${columns.map(quoteIdentifier).join(', ')} FROM ${quoteIdentifier(schema)}.${quoteIdentifier(table)}`
+    + (clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '')
+    + ` LIMIT ${limit}`;
+  let conn;
+  try {
+    conn = await mysql.createConnection({
+      host: config.host || 'localhost', port: Number(config.port) || 3306,
+      user: config.user, password: config.password, charset: 'utf8mb4', connectTimeout: 10000
+    });
+    const [rows] = await conn.execute(sql, values);
+    return { rows, row_count: rows.length, limit, schema, table, columns };
+  } finally {
+    if (conn) await conn.end();
+  }
+}
+
 function buildTableDDL(table, columns) {
   const ddl = [`CREATE TABLE ${quoteIdentifier(table.schema_name)}.${quoteIdentifier(table.table_name)} (`];
   columns.forEach((column, index) => {

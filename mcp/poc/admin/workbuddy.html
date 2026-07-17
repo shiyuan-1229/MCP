@@ -9,18 +9,18 @@
   <title>WorkBuddy 接入测试 · MCP Forge</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --surface: #1e293b;
-      --surface-2: #334155;
-      --border: #475569;
-      --text: #f1f5f9;
-      --text-muted: #94a3b8;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
+      --bg: #f6f0e7;
+      --surface: #fffdf9;
+      --surface-2: #f2e7d8;
+      --border: #dfc9ad;
+      --text: #4f3826;
+      --text-muted: #826a53;
+      --primary: #a67138;
+      --primary-hover: #80542a;
       --success: #22c55e;
       --warning: #f59e0b;
       --error: #ef4444;
-      --purple: #8b5cf6;
+      --purple: #91612e;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -30,7 +30,7 @@
       min-height: 100vh;
     }
     .header {
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      background: linear-gradient(135deg, #fffdf9 0%, #f2e7d8 100%);
       border-bottom: 1px solid var(--border);
       padding: 16px 24px;
       display: flex;
@@ -63,6 +63,12 @@
     .panel-body { padding: 16px 18px; }
 
     .sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .sidebar .panel { background: linear-gradient(180deg, #a87b4a 0%, #89613a 100%); border-color: rgba(106,73,46,.38); color: #fff; }
+    .sidebar .panel-head { border-bottom-color: rgba(255,255,255,.28); }
+    .sidebar .field label, .sidebar .model-info, .sidebar .info-banner { color: #f5e7d2; }
+    .sidebar .info-banner { background: rgba(78,49,25,.20); border-color: rgba(255,255,255,.34); }
+    .sidebar .info-banner strong, .sidebar #assetInfo, .sidebar #assetName { color: #fff !important; }
+    .sidebar .field select, .sidebar .field input, .sidebar .field textarea { background: rgba(255,255,255,.94); color: #4f3826; border-color: rgba(255,255,255,.68); }
 
     .field { margin-bottom: 14px; }
     .field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }

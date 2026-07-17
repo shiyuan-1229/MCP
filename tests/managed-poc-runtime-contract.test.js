@@ -11,6 +11,9 @@ assert.match(server, /app\.get\("\/api\/platform\/poc-runtimes"/, 'server should
 assert.match(server, /app\.post\("\/api\/platform\/mcp-assets\/:id\/poc-runtimes"/, 'server should start a managed runtime');
 assert.match(server, /app\.post\("\/api\/platform\/poc-runtimes\/:id\/stop"/, 'server should stop a managed runtime');
 assert.match(server, /app\.post\("\/api\/internal\/poc-runtimes\/:id\/events"/, 'server should receive runtime call events');
+assert.match(server, /app\.post\("\/api\/internal\/poc-runtimes\/:id\/execute"/, 'server should proxy configured real-data Tool calls');
+assert.match(server, /real-data-connector/, 'server should configure real-data bindings separately from MCP metadata');
+assert.match(server, /transientDbConnectors/, 'database credentials should remain process-local');
 assert.match(server, /createRuntimeManager/, 'server should use the managed runtime module');
 assert.match(server, /ensureColumn\('platform_mcp_releases', 'project_id', 'TEXT'\)/, 'existing databases should migrate the POC release project_id column');
 assert.match(server, /'testing', 'sandbox', 'POC 自动创建'/, 'a POC-generated release should remain in testing until it passes publication gates');

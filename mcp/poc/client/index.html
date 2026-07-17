@@ -6,26 +6,27 @@
 <title>MCP Forge POC · 零售门店 AI 助手 — 测试客户端</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#F1F5F9;color:#1E293B;padding:20px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#F6F0E7;color:#4F3826;padding:20px}
 h1{font-size:22px;font-weight:700;margin-bottom:4px}
 .sub{font-size:13px;color:#64748B;margin-bottom:16px}
 .grid{display:grid;grid-template-columns:280px 1fr;gap:16px;max-width:1200px;margin:0 auto}
-.sidebar{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);height:fit-content}
-.sidebar h3{font-size:13px;font-weight:600;margin-bottom:8px;color:#64748B;text-transform:uppercase;letter-spacing:.5px}
+.sidebar{background:linear-gradient(180deg,#A87B4A 0%,#89613A 52%,#6A492E 100%);color:#fff;border-radius:12px;padding:16px;box-shadow:0 4px 12px rgba(106,73,46,.18);height:fit-content}
+.sidebar h3{font-size:13px;font-weight:600;margin-bottom:8px;color:#F5E7D2;text-transform:uppercase;letter-spacing:.5px}
 .sidebar .group{margin-bottom:14px}
 .sidebar .tool-item{padding:6px 10px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:12px;transition:all .15s;border:none;background:transparent;width:100%;text-align:left;display:flex;align-items:center;gap:6px}
-.sidebar .tool-item:hover{background:#EEF2FF;color:#4F46E5}
-.sidebar .tool-item.active{background:#4F46E5;color:#fff}
-.sidebar .tag{font-size:9px;background:#E0E7FF;color:#3730A3;padding:1px 6px;border-radius:6px}
-.main{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06);min-height:400px}
+.sidebar .tool-item{color:#fff}
+.sidebar .tool-item:hover{background:rgba(255,255,255,.18);color:#fff}
+.sidebar .tool-item.active{background:rgba(78,49,25,.48);color:#fff}
+.sidebar .tag{font-size:9px;background:#F5E7D2;color:#785027;padding:1px 6px;border-radius:6px}
+.main{background:#FFFDF9;border-radius:12px;padding:20px;box-shadow:0 4px 12px rgba(106,73,46,.10);min-height:400px}
 .main h2{font-size:16px;font-weight:600;margin-bottom:4px}
 .main .desc{font-size:12px;color:#64748B;margin-bottom:12px}
 .form-row{display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
 .form-row label{font-size:12px;font-weight:600;min-width:70px}
 .form-row input,.form-row select{padding:6px 10px;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;flex:1;min-width:120px;outline:none}
-.form-row input:focus,.form-row select:focus{border-color:#4F46E5}
-.btn{background:#4F46E5;color:#fff;border:none;padding:7px 20px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
-.btn:hover{background:#3730A3}
+.form-row input:focus,.form-row select:focus{border-color:#A67138}
+.btn{background:#A67138;color:#fff;border:none;padding:7px 20px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+.btn:hover{background:#80542A}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .result{background:#0F172A;color:#E2E8F0;padding:14px;border-radius:8px;font-size:13px;font-family:'SF Mono','Menlo','Monaco',monospace;white-space:pre-wrap;min-height:80px;line-height:1.5;margin-top:10px;overflow-x:auto;max-height:400px;overflow-y:auto}
 .result .success{color:#10B981}
@@ -35,8 +36,8 @@ h1{font-size:22px;font-weight:700;margin-bottom:4px}
 .status-bar .dot.green{background:#10B981}
 .status-bar .dot.red{background:#EF4444}
 .quick-btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.quick-btns button{background:#F1F5F9;border:1px solid #E2E8F0;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}
-.quick-btns button:hover{background:#EEF2FF;border-color:#4F46E5}
+.quick-btns button{background:#FAF1E5;border:1px solid #DFC9AD;padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}
+.quick-btns button:hover{background:#F0E1CE;border-color:#A67138}
 .server-info{font-size:11px;color:#94A3B8;margin-bottom:10px;display:flex;gap:12px;align-items:center}
 .server-info input{border:1px solid #E2E8F0;padding:4px 8px;border-radius:4px;font-size:11px;width:240px;font-family:monospace}
 </style>
