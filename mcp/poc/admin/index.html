@@ -93,7 +93,7 @@
           <div id="batchActionBar" style="display:none;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span id="batchSelectCount" style="font-size:12px;color:#1e40af"></span>
             <button type="button" class="primary-btn small" onclick="batchRecognizeSelected()">⚡ 批量识别选中项</button>
-            <span class="muted-line" style="font-size:11px">识别完成后可在「能力预览」中勾选并提封装要求</span>
+            <span class="muted-line" style="font-size:11px">识别完成后确认识别结果，进入候选业务能力与人工初筛</span>
           </div>
           <div class="table-wrap">
             <table class="intake-table">
@@ -156,17 +156,13 @@
               <option value="public">🌐 公开</option>
               <option value="internal">🔒 内部</option>
             </select>
-            <button type="button" class="ghost-btn small" onclick="toggleAllCaps(true)">全选</button>
-            <button type="button" class="ghost-btn small" onclick="toggleAllCaps(false)">全不选</button>
-            <span style="font-size:12px;color:#64748b" id="capSelectCount"></span>
           </div>
           <div id="capList" style="max-height:350px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px"></div>
           <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px">
-            <strong style="display:block;margin-bottom:6px">📦 封装要求（可选）</strong>
-            <span style="font-size:12px;color:#64748b;display:block;margin-bottom:8px">勾选上方你想要的能力，然后在这里告诉 AI 你希望怎么封装。留空则按默认封装全部勾选的能力。</span>
-            <textarea id="capCustomInstructions" rows="3" placeholder="例：只要查询类 Tool；把订单相关的合并成一个 Tool；每个 Tool 最多 5 个参数..." style="width:100%;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:6px;resize:vertical;margin-bottom:10px"></textarea>
+            <strong style="display:block;margin-bottom:6px">下一步：创建候选业务能力</strong>
+            <span style="font-size:12px;color:#64748b;display:block;margin-bottom:8px">确认本次识别结果后，系统会生成候选业务能力并进入人工初筛；不会在此阶段创建 Tool。</span>
             <div style="display:flex;gap:8px;align-items:center">
-              <button type="button" class="primary-btn" id="capPackageBtn" onclick="packageSelectedCapabilities()">开始封装选中能力</button>
+              <button type="button" class="primary-btn" id="capPackageBtn" onclick="confirmRecognitionToCandidates()">确认识别并进入候选业务能力</button>
               <span id="capStatusHint" style="font-size:12px"></span>
             </div>
           </div>
@@ -178,7 +174,7 @@
             <div class="card-list">
               <div class="info-card"><h4>支持的资料格式</h4><p>Swagger JSON / YAML、Postman Collection、SQL DDL、Excel 字段说明、PDF 业务文档、Markdown FAQ</p></div>
               <div class="info-card"><h4>资料越完整，产出越精准</h4><p>提供字段含义、示例数据、业务规则后，AI 识别的 OpenAPI 草案准确率可提升 60% 以上。</p></div>
-              <div class="info-card"><h4>识别流程</h4><p>导入资料 → AI 自动识别接口 → 生成 OpenAPI 草案 → 确认后进入 Tool 装配</p></div>
+              <div class="info-card"><h4>识别流程</h4><p>导入资料 → AI 自动识别接口 → 生成候选业务能力 → 候选接口人工初筛 → 确认 Tool 边界</p></div>
             </div>
           </article>
           <article class="panel">

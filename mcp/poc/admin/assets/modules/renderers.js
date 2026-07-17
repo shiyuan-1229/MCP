@@ -865,6 +865,29 @@ function filterCandidatesByCustomer(candidates) {
   return sourceFilter ? byCustomer.filter(candidate => candidate.source_ref === sourceFilter) : byCustomer;
 }
 
+function candidateRecognitionMeta(candidate) {
+  const spec = list(state.openapiSpecs).find(item => item.id === candidate.source_ref);
+  const source = list(state.sources).find(item => item.id === candidate.source_ref || item.id === spec?.source_id);
+  let rawPayload = null;
+  try { rawPayload = candidate.raw_payload ? JSON.parse(candidate.raw_payload) : null; } catch { /* legacy candidate payload is unavailable */ }
+  return {
+    sourceName: spec?.source_name || source?.name || rawPayload?.source_name || candidate.source_ref || '-',
+    recognizedAt: candidate.created_at || '-'
+  };
+}
+
+function newestCandidates(candidates) {
+  return [...candidates].sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
+}
+
+function renderCandidateRecognitionMeta(candidate) {
+  const meta = candidateRecognitionMeta(candidate);
+  const currentRun = state.candidateSourceFilter === candidate.source_ref
+    ? '<span class="badge info" style="font-size:10px;margin-left:6px">本次识别</span>'
+    : '';
+  return '<div style="padding:0 16px 10px;font-size:12px;color:#64748b">来源资料：' + text(meta.sourceName) + ' · 识别时间：' + text(meta.recognizedAt) + currentRun + '</div>';
+}
+
 function renderCandidateCustomerFilter(candidates, controlId) {
   const selected = state.candidateCustomerFilter || '';
   const customers = [];
@@ -904,7 +927,7 @@ function renderCandidatesPage() {
   const root = $('candidatesBoard');
   if (!root) return;
   const allCandidates = list(state.candidates);
-  const candidates = filterCandidatesByCustomer(allCandidates);
+  const candidates = newestCandidates(filterCandidatesByCustomer(allCandidates));
   if (!allCandidates.length) {
     root.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
       '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 →</button></div></article>';
@@ -939,6 +962,7 @@ function renderCandidatesPage() {
         '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">接口数量</span><p style="margin:4px 0 0;font-size:13px">' + aiTools.length + ' 个</p></div>' +
         '<div><span style="font-size:11px;color:#94a3b8;font-weight:650">风险等级</span><p style="margin:4px 0 0;font-size:13px">' + text(candidate.risk_level || '-') + '</p></div>' +
       '</div>' +
+      renderCandidateRecognitionMeta(candidate) +
       (hits.length ? '<div style="padding:0 16px 8px"><span style="font-size:11px;color:#f59e0b">⚠️ 敏感字段：' + text(hits.map(hit => typeof hit === 'string' ? hit : (hit.label || hit.field || '')).join('、')) + '</span></div>' : '') +
       '<div style="padding:0 16px 14px"><span style="font-size:12px;color:var(--primary)">点击查看接口详情并审核 →</span></div>' +
     '</article>';
@@ -3343,7 +3367,7 @@ export function renderReviewWorkbench() {
   if (!screenRoot) return;
 
   const allCandidates = list(state.candidates);
-  const scopedCandidates = filterCandidatesByCustomer(allCandidates);
+  const scopedCandidates = newestCandidates(filterCandidatesByCustomer(allCandidates));
   if (!allCandidates.length) {
     screenRoot.innerHTML = '<article class="panel"><strong>暂无候选业务能力</strong><p class="muted-line">请先在「资料接入」页面上传业务资料并触发 AI 识别。</p>' +
       '<div class="row-actions" style="margin-top:10px"><button type="button" class="ghost-btn small" onclick="jumpToPage(\'intake\')">去资料接入 -></button></div></article>';
@@ -3366,9 +3390,10 @@ export function renderReviewWorkbench() {
     const aiTools = jsonList(selected.ai_tools_snapshot);
     const hits = jsonList(selected.sensitive_hits);
     const screenDecided = selected.manual_screen_decision && selected.manual_screen_decision !== 'pending';
+    const recognitionMeta = candidateRecognitionMeta(selected);
 
     html += '<article class="panel" style="margin-bottom:14px">';
-    html += '<div class="panel-head"><div><span class="eyebrow">候选业务能力</span><h3>' + text(selected.name || '-') + '</h3></div>';
+    html += '<div class="panel-head"><div><span class="eyebrow">候选业务能力</span><h3>' + text(selected.name || '-') + '</h3><p style="margin:4px 0 0;font-size:12px;color:#64748b">来源资料：' + text(recognitionMeta.sourceName) + ' · 识别时间：' + text(recognitionMeta.recognizedAt) + (state.candidateSourceFilter === selected.source_ref ? ' · 本次识别' : '') + '</p></div>';
 
     if (screenDecided) {
       const dt = selected.manual_screen_decision === 'approve' ? '已通过' : selected.manual_screen_decision === 'reject' ? '已拒绝' : '修改后重审';
@@ -3471,7 +3496,7 @@ export function renderReviewWorkbench() {
         else if (c.manual_screen_decision === 'reject') badgeHtml = '<span class="badge danger">已拒绝</span>';
         else badgeHtml = '<span class="badge warning">修改后重审</span>';
       }
-      return '<article class="panel" style="margin-bottom:8px;cursor:pointer" onclick="enterCandidateReview(\'' + escapeJs(c.id) + '\')" tabindex="0"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px"><div><strong style="font-size:14px">' + text(c.name || '-') + '</strong><span style="margin-left:8px;font-size:12px;color:#94a3b8">' + aiTools.length + ' 个接口 · ' + text(c.business_domain || '-') + '</span></div>' + badgeHtml + '</div></article>';
+      return '<article class="panel" style="margin-bottom:8px;cursor:pointer" onclick="enterCandidateReview(\'' + escapeJs(c.id) + '\')" tabindex="0"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px"><div><strong style="font-size:14px">' + text(c.name || '-') + '</strong><span style="margin-left:8px;font-size:12px;color:#94a3b8">' + aiTools.length + ' 个接口 · ' + text(c.business_domain || '-') + '</span></div>' + badgeHtml + '</div>' + renderCandidateRecognitionMeta(c) + '</article>';
     }).join('');
   }
 

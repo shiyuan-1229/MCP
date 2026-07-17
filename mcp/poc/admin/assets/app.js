@@ -1517,10 +1517,12 @@ async function createDataSource() {
             });
           }
 
+          // The modal owns this select, so retain the label before it is removed.
+          const selectedType = $('ds_type');
+          const typeLabel = selectedType?.options[selectedType.selectedIndex]?.text.split('\uFF08')[0] || type;
           await loadAll();
           renderAll();
           document.body.removeChild(overlay);
-          const typeLabel = $('ds_type').options[$('ds_type').selectedIndex].text.split('（')[0];
 
           // 根据后端解析结果显示友好提示
           let msg = `「${name}」已导入（${typeLabel}）。`;
@@ -1908,7 +1910,7 @@ function openAiRecognizeModal(sourceId) {
       </div>
       <div style="margin-bottom:12px;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e40af">
         <strong>第一步：能力预览</strong><br>
-        AI 快速扫描数据，列出其中包含的业务能力。扫描完成后会在页面下方展开能力列表，你可以在那里勾选、筛选并提封装要求。
+        AI 快速扫描数据，列出其中包含的业务能力。扫描完成后会在页面下方展开能力列表，确认识别后将进入候选业务能力与人工初筛。
       </div>
       <div id="aiStatusHint" style="font-size:12px"></div>
       <div class="modal-actions">
@@ -2084,50 +2086,26 @@ function toggleAllCaps(checked) {
   updateCapSelectCount();
 }
 
-async function packageSelectedCapabilities() {
+async function confirmRecognitionToCandidates() {
   const sourceId = window._currentPreviewSourceId;
   if (!sourceId) { showToast('未找到数据源', 'error'); return; }
-
-  const checked = document.querySelectorAll('.cap-check:checked');
-  const allChecks = document.querySelectorAll('.cap-check');
-  const selectedCaps = Array.from(checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]).filter(Boolean);
-  const selectedNames = selectedCaps.map(c => c.name);
-  const customInstructions = $('capCustomInstructions')?.value?.trim() || '';
-
-  // 自动构建封装要求
-  let effectiveInstructions = customInstructions;
-  if (selectedCaps.length < allChecks.length) {
-    const deselected = Array.from(allChecks).filter(cb => !cb.checked).map(cb => window._currentCapabilities[Number(cb.dataset.idx)]?.name).filter(Boolean);
-    effectiveInstructions = (customInstructions ? customInstructions + '\n\n' : '') + `请只封装以下能力：${selectedNames.join('、')}。\n不需要封装的能力：${deselected.join('、')}`;
-  }
 
   const btn = $('capPackageBtn');
   const hint = $('capStatusHint');
   btn.disabled = true;
-  btn.textContent = 'AI 封装中...';
-  hint.innerHTML = '<span style="color:#b46b06">⏳ 正在调用大模型封装 Tool 定义（约 40-60 秒）...</span>';
+  btn.textContent = '正在生成候选业务能力...';
+  hint.innerHTML = '<span style="color:#b46b06">⏳ 正在生成 OpenAPI 草案并创建候选业务能力...</span>';
 
   try {
     const result = await api(`/api/platform/data-sources/${sourceId}/recognize`, {
       method: 'POST',
-      body: JSON.stringify({ use_ai: true, custom_instructions: effectiveInstructions })
+      body: JSON.stringify({ use_ai: true })
     });
-
     await loadAll();
-    renderAll();
-
-    // 隐藏能力预览面板，显示结果面板
-    $('capabilityPanel').style.display = 'none';
-
-    if (result.ai_used) {
-      showAiAnalysisResult(result);
-      showToast(`AI 封装完成：${result.tools?.length || 0} 个 Tool`, 'success');
-    } else if (result.error) {
-      showToast(`AI 失败: ${result.error}`, 'warning');
-    }
+    await confirmOpenapiSpec(result.spec_id);
   } catch (error) {
     btn.disabled = false;
-    btn.textContent = '开始封装选中能力';
+    btn.textContent = '确认识别并进入候选业务能力';
     hint.innerHTML = `<span style="color:#dc2626">❌ ${escapeHtml(error.message)}</span>`;
   }
 }
@@ -2704,7 +2682,7 @@ window.triggerRecognition = triggerRecognition;
 window.showCapabilityPanel = showCapabilityPanel;
 window.filterCapabilities = filterCapabilities;
 window.toggleAllCaps = toggleAllCaps;
-window.packageSelectedCapabilities = packageSelectedCapabilities;
+window.confirmRecognitionToCandidates = confirmRecognitionToCandidates;
 window.closeCapabilityPanel = closeCapabilityPanel;
 window.updateCapSelectCount = updateCapSelectCount;
 window.openAiRecognizeModal = openAiRecognizeModal;
