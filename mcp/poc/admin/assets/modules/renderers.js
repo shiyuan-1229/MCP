@@ -21,19 +21,11 @@ function escapeJs(value) {
 }
 
 function adminReleases() {
-  return list(state.releases).map(item => ({ ...item, ...(state.releaseOverrides?.[item.id] || {}) }));
+  return list(state.releases);
 }
 
 function adminBilling() {
-  return list(state.billing).map(item => {
-    const override = state.billingOverrides?.[item.id] || {};
-    const baseAmount = Number(item.amount ?? item.total_amount ?? 0);
-    return {
-      ...item,
-      ...override,
-      amount: Math.round((baseAmount + Number(override.adjustment || 0)) * 100) / 100
-    };
-  });
+  return list(state.billing);
 }
 
 function customerAssets() {
@@ -1292,7 +1284,7 @@ function renderPublish() {
         <button type="button" class="ghost-btn small" onclick="openPublishDrawer('${item.id}')">详情</button>
         ${isTested ? `<button type="button" class="primary-btn small" onclick="publishRelease('${item.id}')">发布</button>` : ''}
         ${isPublished ? `<button type="button" class="primary-btn small danger" onclick="rollbackRelease('${item.id}')">回滚</button>` : ''}
-        ${!isTested && !isPublished && !isRolledBack ? `<button type="button" class="ghost-btn small" onclick="markReleaseTested('${item.id}')">标记通过</button>` : ''}
+        ${!isTested && !isPublished && !isRolledBack ? `<button type="button" class="ghost-btn small" onclick="publishRelease('${item.id}')">标记通过</button>` : ''}
       </div>`;
     return `<tr><td>${text(item.asset_name || item.asset_id || '-')}</td><td>${text(item.version || '-')}</td><td>${badge(item.status || 'draft')}</td><td>${text(item.environment || '-')}</td><td>${text(item.tested_at || '-')}</td><td>${text(item.released_at || '-')}</td><td>${text(item.notes || '-')}</td><td>${actions}</td></tr>`;
   }), '暂无发布记录', 8);
@@ -1490,7 +1482,7 @@ function maskCallText(value) {
     .slice(0, 600);
 }
 
-function governanceFailureEvents() {
+function liveGovernanceFailures() {
   return list(state.governanceDemoOverview?.acceptanceFailures).map(item => ({
     id: `governance_${item.trace_id}`,
     trace_id: item.trace_id,
@@ -1514,8 +1506,8 @@ function monitoringBucketLabel(type) {
   return labels[type] || type || '调用异常';
 }
 
-function monitoringIssueStatus(key) {
-  return state.monitoringIssueStatuses?.[key]?.status || '待处理';
+function monitoringIssueStatus() {
+  return 'pending';
 }
 
 function monitoringIssueStatusBadge(status) {
@@ -1558,7 +1550,7 @@ function renderMonitoringPage() {
   if (isCustomerView()) return;
   const defaultFilters = { status: 'all', assetId: 'all', toolName: 'all', timeRange: '24h', query: '' };
   const filters = { ...defaultFilters, ...(state.monitoringFilters || {}) };
-  const events = [...list(state.events), ...governanceFailureEvents()].map(item => {
+  const events = [...list(state.events), ...liveGovernanceFailures()].map(item => {
     let inputTokens = Number(item.input_tokens) || 0;
     let outputTokens = Number(item.output_tokens) || 0;
     if (!inputTokens && !outputTokens) {
@@ -1661,10 +1653,10 @@ function governanceTasks() {
   const policies = list(state.policies);
   const accessItems = list(state.access);
   const assets = list(state.assets);
-  const events = [...list(state.events), ...governanceFailureEvents()].map(item => ({ ...item, _type: classifyCallEvent(item), _tool: eventToolName(item) }));
+  const events = [...list(state.events), ...liveGovernanceFailures()].map(item => ({ ...item, _type: classifyCallEvent(item), _tool: eventToolName(item) }));
   const failures = events.filter(item => item._type !== 'success');
 
-  governanceFailureEvents().forEach(item => tasks.push({
+  liveGovernanceFailures().forEach(item => tasks.push({
     id: 'publish_' + (item.trace_id || item.id || tasks.length),
     priority: 1,
     type: '发布准入阻断',
@@ -1754,7 +1746,7 @@ function governanceTasks() {
 function governanceCoverageItems() {
   const policies = list(state.policies);
   const accessItems = list(state.access);
-  const failures = [...list(state.events), ...governanceFailureEvents()].map(item => ({ ...item, _type: classifyCallEvent(item) })).filter(item => item._type !== 'success');
+  const failures = [...list(state.events), ...liveGovernanceFailures()].map(item => ({ ...item, _type: classifyCallEvent(item) })).filter(item => item._type !== 'success');
   return list(state.assets).slice(0, 12).map(asset => {
     const policy = policies.find(item => item.project_id === asset.project_id);
     const access = accessItems.find(item => item.project_id === asset.project_id || item.customer_id === asset.customer_id);
@@ -1801,7 +1793,7 @@ function governanceAuditItems() {
     desc: `${item.field || '-'}：${item.old_value || '-'} -> ${item.new_value || '-'}`,
     actor: item.changed_by || '-'
   }));
-  const failureItems = governanceFailureEvents().map((item, index) => ({
+  const failureItems = liveGovernanceFailures().map((item, index) => ({
     id: 'failure_' + (item.trace_id || item.id || index),
     time: item.created_at || '-',
     type: '发布阻断',
@@ -2106,14 +2098,14 @@ function renderPublishDrawer() {
     <div class="drawer-panel"><h4>操作</h4><div style="display:flex;gap:8px;flex-wrap:wrap">
       ${isTested ? `<button type="button" class="primary-btn small" onclick="publishRelease('${release?.id}')">执行发布</button>` : ''}
       ${isPublished ? `<button type="button" class="primary-btn small danger" onclick="rollbackRelease('${release?.id}')">执行回滚</button>` : ''}
-      ${!isTested && !isPublished ? `<button type="button" class="ghost-btn small" onclick="markReleaseTested('${release?.id}')">标记测试通过</button>` : ''}
+      ${!isTested && !isPublished ? `<button type="button" class="ghost-btn small" onclick="publishRelease('${release?.id}')">标记测试通过</button>` : ''}
       <button type="button" class="ghost-btn small" onclick="exportReleaseReport('${release?.id}')">导出报告</button>
     </div></div>`;
   renderDrawer('publishDrawer', 'publishDrawerBackdrop', 'publishDrawerTitle', 'publishDrawerContent', Boolean(state.publishDrawerOpen && release), release?.asset_name || '发布详情', body);
 }
 
 function renderUsageDrawer() {
-  const allEvents = [...list(state.events), ...governanceFailureEvents()].map(item => {
+  const allEvents = [...list(state.events), ...liveGovernanceFailures()].map(item => {
     let inputTokens = Number(item.input_tokens) || 0;
     let outputTokens = Number(item.output_tokens) || 0;
     if (!inputTokens && !outputTokens) {
