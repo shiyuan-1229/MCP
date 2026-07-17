@@ -3904,7 +3904,19 @@ app.post("/api/platform/governance/candidates/:id/resubmit-manual-screen", requi
   const reason = String(req.body?.reason || '人工已完成修改，重新提交初筛');
   const ok = governanceRepo.updateManualScreen({ id: candidate.id, decision: 'pending', reason, by });
   if (!ok) return res.status(500).json({ error: "failed to resubmit manual screening" });
-  res.json({ ok: true, candidate: governanceRepo.getCandidate(candidate.id) });
+  // 兼容旧版本产生的“修改后重审”记录：它们可能只有修改状态，没有重审任务。
+  let resubmitTask = governanceRepo.listOpenReviewTasksForCandidate(candidate.id, 'candidate_review')
+    .find(task => task.review_type === 'resubmit_review') || null;
+  if (!resubmitTask) {
+    resubmitTask = governanceRepo.createResubmitTask({
+      candidateId: candidate.id,
+      stage: 'candidate_review',
+      reviewType: 'resubmit_review',
+      reason: `修改后重审：${reason}`,
+      assigneeRole: 'developer'
+    });
+  }
+  res.json({ ok: true, candidate: governanceRepo.getCandidate(candidate.id), resubmit_task: resubmitTask });
 });
 
 // 更新候选业务能力字段（供修改后重审、Tool 编辑等使用）

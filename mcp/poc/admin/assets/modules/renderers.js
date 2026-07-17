@@ -696,7 +696,7 @@ window.resubmitCandidateScreen = async function(candidateId) {
       body: JSON.stringify({ reason: '人工已完成修改，提交候选接口重新初筛' })
     });
     await window.refreshData();
-    showToast('已进入待人工初筛队列，请重新确认通过、拒绝或继续修改。', 'success');
+    showToast('已重新打开编辑表单并进入待人工初筛队列；请修改字段后再提交审核决定。', 'success');
   } catch (error) {
     showToast(error.message, 'error');
   }
@@ -3391,8 +3391,8 @@ export function renderReviewWorkbench() {
         html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="jumpToPage(\'tooling\')">去确认 Tool 边界 →</button></div>';
       } else if (selected.manual_screen_decision === 'modify') {
         const resubmitTasks = list(state.reviews).filter(task => task.candidate_id === selected.id && task.status === 'open' && task.review_type === 'resubmit_review');
-        html += '<div style="margin:0 16px 12px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px"><strong style="font-size:13px;color:#0369a1">修改已保存，等待重新初筛</strong><p class="muted-line" style="margin:4px 0 0">系统已保留修改记录并创建 ' + resubmitTasks.length + ' 条重审任务。点击下方按钮后，候选会回到“待人工初筛”队列。</p></div>';
-        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="resubmitCandidateScreen(\'' + escapeJs(selected.id) + '\')">提交到人工初筛队列</button></div>';
+        html += '<div style="margin:0 16px 12px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px"><strong style="font-size:13px;color:#0369a1">修改已保存，等待重新初筛</strong><p class="muted-line" style="margin:4px 0 0">当前已有 ' + resubmitTasks.length + ' 条重审任务。点击下方按钮会重新打开可编辑字段，不会直接通过审核。</p></div>';
+        html += '<div class="row-actions" style="padding:0 16px 16px"><button type="button" class="primary-btn small" onclick="resubmitCandidateScreen(\'' + escapeJs(selected.id) + '\')">继续编辑并重新初筛</button></div>';
       }
     } else {
       const riskBadge = selected.risk_level === 'high' ? '<span class="badge danger">高风险</span>' : selected.risk_level === 'medium' ? '<span class="badge warning">中风险</span>' : '<span class="badge success">低风险</span>';
