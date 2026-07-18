@@ -1,4 +1,5 @@
 import { state, isCustomerView, getNavItems, displayAssetName } from './state.js';
+import { ADMIN_NAVIGATION_GROUPS, getNavigationIdForPage } from './guidance.js';
 import { $, badge, displayStatus, emptyState, escapeHtml, metric, money, text, showToast } from './ui.js';
 
 function list(value) {
@@ -69,6 +70,22 @@ export function renderNav() {
   const nav = $('nav');
   if (!nav || !state.user) return;
   nav.innerHTML = allowedNavItems()
+  const activeNavigationId = getNavigationIdForPage(state.currentPage);
+  nav.innerHTML = ADMIN_NAVIGATION_GROUPS.map(group => `
+    <section class="nav-group" aria-labelledby="nav-group-${group.id}">
+      <h3 id="nav-group-${group.id}" class="nav-group-label">${text(group.label)}</h3>
+      ${group.items.map(item => {
+        const active = item.id === activeNavigationId;
+        return `<button type="button" class="nav-btn ${active ? 'active' : ''}" data-page="${item.id}" title="${text(item.desc)}"${active ? ' aria-current="page"' : ''}>
+          <span class="nav-icon" aria-hidden="true">${text(item.icon)}</span><span class="nav-label">${text(item.label)}</span>
+        </button>`;
+      }).join('')}
+    </section>
+  `).join('');
+  nav.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page || 'summary'));
+  });
+  return;
     .map(item => {
       const icon = item.icon ? `<span class="nav-icon">${item.icon}</span>` : '';
       const desc = item.desc ? ` title="${text(item.desc)}"` : '';
