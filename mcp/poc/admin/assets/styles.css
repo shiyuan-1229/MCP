@@ -1070,20 +1070,21 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
   .workbuddy-console * { transition: none !important; }
 }
 
-.guided-work-main { display:grid; gap:16px; min-width:0; }
-/* Administrator today-workbench: grouped decisions instead of repeated task cards. */
-.guided-workbench { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; align-items:start; }
-.guided-work-focus, .guided-work-decision-list, .guided-work-batch, .guided-work-impact, .guided-work-risk, .guided-work-auth { border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
-.guided-work-focus { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:16px; background:#fff8f5; }
-.guided-focus-copy { min-width:0; }.guided-focus-copy h4, .guided-work-decision-list h4, .guided-work-batch h4, .guided-work-impact h4, .guided-work-risk h4, .guided-work-auth h4 { margin:4px 0; font-size:15px; }.guided-focus-copy p, .guided-decision-row p, .guided-work-batch p { margin:0; color:var(--muted); font-size:12px; }
+/* Administrator today-workbench: grouped decisions with one compact summary. */
+.guided-workbench { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; align-items:start; }
+.guided-work-main { display:grid; gap:12px; min-width:0; }
+.guided-work-focus, .guided-work-decision-list, .guided-work-batch, .guided-work-summary { border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
+.guided-work-focus { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:14px; background:#fff8f5; }
+.guided-focus-copy { min-width:0; }.guided-focus-copy h4, .guided-work-decision-list h4, .guided-work-batch h4, .guided-work-summary h4 { margin:4px 0; font-size:15px; }.guided-focus-copy p, .guided-decision-row p, .guided-work-batch p { margin:0; color:var(--muted); font-size:12px; }
 .guided-priority { display:inline-flex; align-items:center; padding:3px 7px; border-radius:999px; background:var(--surface-2); color:var(--primary-dark); font-size:11px; font-weight:700; }.guided-priority.priority-1 { background:#fde8e8; color:var(--danger); }
 .guided-work-decision-list { padding:0 14px; }.guided-work-section-head { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 0; }.guided-work-section-head > span { color:var(--muted); font-size:12px; }
-.guided-decision-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:11px 0; border-top:1px solid var(--line); }.guided-decision-row strong { font-size:13px; }
-.guided-work-batch { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:14px; background:#f5f8ff; }
-.guided-work-side { display:grid; gap:16px; align-content:start; }
-.guided-work-impact, .guided-work-risk, .guided-work-auth { padding:0 14px; }
-.guided-impact-grid, .guided-risk-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:0 0 14px; }.guided-impact-grid > div, .guided-risk-grid > div { display:grid; gap:2px; padding:10px; background:var(--surface-2); border-radius:8px; }.guided-impact-grid strong, .guided-risk-grid strong { font-size:18px; color:var(--ink); }.guided-impact-grid span, .guided-risk-grid span, .guided-risk-note { color:var(--muted); font-size:11px; }.guided-risk-note { margin:0; padding:0 0 14px; line-height:1.5; }
-@media (max-width: 860px) { .guided-workbench { grid-template-columns:1fr; }.guided-work-side { gap:12px; }.guided-work-impact, .guided-work-risk, .guided-work-auth { padding:0 14px; } }
+.guided-decision-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:10px 0; border-top:1px solid var(--line); }.guided-decision-row strong { font-size:13px; }
+.guided-work-batch { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:12px 14px; background:#f5f8ff; }
+.guided-work-side { align-content:start; }
+.guided-work-summary { padding:0 14px 14px; }
+.guided-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:16px; }
+.guided-summary-grid > div { display:grid; gap:2px; padding:8px 0; border-top:1px solid var(--line); }.guided-summary-grid strong { font-size:18px; color:var(--ink); }.guided-summary-grid span { color:var(--muted); font-size:11px; }
+@media (max-width: 860px) { .guided-workbench { grid-template-columns:1fr; } }
 @media (max-width: 560px) { .guided-work-focus, .guided-work-batch { align-items:flex-start; flex-direction:column; }.guided-decision-row { grid-template-columns:auto minmax(0,1fr); }.guided-decision-row .ghost-btn { grid-column:2; justify-self:start; } }
 /* Today work page keeps only the task workspace, with the reference header controls. */
 #summary .guided-work-queue { display:grid; gap:18px; }
@@ -1095,5 +1096,5 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
 #summary .guided-work-focus { background:#f7ece8; }
 #summary .guided-work-focus .primary-btn, #summary .guided-work-batch .primary-btn { background:#1d1f23; border-color:#1d1f23; }
 #summary .guided-work-focus .primary-btn:hover, #summary .guided-work-batch .primary-btn:hover { background:#111214; border-color:#111214; }
-#summary .guided-work-decision-list, #summary .guided-work-batch, #summary .guided-work-impact, #summary .guided-work-risk, #summary .guided-work-auth { background:#f5f6f8; border-color:transparent; }
+#summary .guided-work-decision-list, #summary .guided-work-batch, #summary .guided-work-summary { background:#f5f6f8; border-color:transparent; }
 @media (max-width: 560px) { .guided-work-header { align-items:flex-start; flex-direction:column; }.guided-work-controls { width:100%; justify-content:space-between; } }
