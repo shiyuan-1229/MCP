@@ -1,6 +1,6 @@
 import { state, isCustomerView, getNavItems, displayAssetName } from './state.js';
 import { ADMIN_NAVIGATION_GROUPS, getNavigationIdForPage } from './guidance.js';
-import { renderGuidedWorkQueue } from './guided-ui.js';
+import { renderGuidancePanels, renderGuidedWorkQueue } from './guided-ui.js';
 import { $, badge, displayStatus, emptyState, escapeHtml, metric, money, text, showToast } from './ui.js';
 
 function list(value) {
@@ -3254,6 +3254,7 @@ export function renderAll() {
   renderBuilderValueBoard();
   renderReviewWorkbench();
   switchPage(state.currentPage);
+  renderGuidancePanels(state);
 }
 
 // ============================================================
