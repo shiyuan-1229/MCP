@@ -28,3 +28,10 @@ export function renderGuidancePanels(state) {
   });
 }
 
+export function getGuidedRecovery(type) {
+  if (['401', '403'].includes(type)) return { pageId: 'settings', label: '???????' };
+  if (type === '400') return { pageId: 'tooling', label: '?? Tool ??' };
+  if (type === 'timeout' || type === '5xx') return { pageId: 'intake', label: '??????' };
+  return { pageId: 'monitoring', label: '?? Trace' };
+}
+
