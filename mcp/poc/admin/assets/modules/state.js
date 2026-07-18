@@ -1,3 +1,4 @@
+import { ADMIN_NAVIGATION_GROUPS } from './guidance.js';
 function readStoredJson(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -145,10 +146,11 @@ export const state = {
   selectedCandidateId: '',
   settingsTab: 'overview',
   settingsNotificationPreferences: { credentialExpiry: true, callFailure: true, deliveryReady: true },
+  guidanceFocus: { projectId: '', assetId: '', focusId: '', reason: '' },
   currentPage: 'summary'
 };
 
-export const navItems = [
+const legacyNavItems = [
   { id: 'summary', label: '打造总览', icon: '📊', desc: '资产生成全链路漏斗、产能趋势与动态', roles: ['admin', 'customer'] },
   { id: 'intake', label: '资料接入', icon: '📥', desc: '步骤 1：上传业务资料、连接数据库，触发 AI 识别', roles: ['admin'] },
   { id: 'recognition', label: 'AI 识别结果', icon: '🔍', desc: '步骤 2：查看 AI 识别出的 OpenAPI 端点草案与接口详情', roles: ['admin'] },
@@ -164,6 +166,7 @@ export const navItems = [
   { id: 'governance', label: '治理统计', icon: '🛡️', desc: '步骤 12：网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
   { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
 ];
+export const navItems = ADMIN_NAVIGATION_GROUPS.flatMap(group => group.items.map(item => ({ ...item, groupId: group.id, roles: ['admin'] })));
 export const customerNavItems = [
   { id: 'customer-overview', label: '\u4ea4\u4ed8\u603b\u89c8', roles: ['customer'] },
   { id: 'my-assets', label: '\u6211\u7684 MCP \u8d44\u4ea7', roles: ['customer'] },
