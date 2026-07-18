@@ -1,4 +1,5 @@
 import { state, isCustomerView, getNavItems, displayAssetName } from './state.js';
+import { ADMIN_NAVIGATION_GROUPS, deriveGuidedWork, getNavigationIdForPage } from './guidance.js';
 import { $, badge, displayStatus, emptyState, escapeHtml, metric, money, text, showToast } from './ui.js';
 
 function list(value) {
@@ -69,6 +70,22 @@ export function renderNav() {
   const nav = $('nav');
   if (!nav || !state.user) return;
   nav.innerHTML = allowedNavItems()
+  const activeNavigationId = getNavigationIdForPage(state.currentPage);
+  nav.innerHTML = ADMIN_NAVIGATION_GROUPS.map(group => `
+    <section class="nav-group" aria-labelledby="nav-group-${group.id}">
+      <h3 id="nav-group-${group.id}" class="nav-group-label">${text(group.label)}</h3>
+      ${group.items.map(item => {
+        const active = item.id === activeNavigationId;
+        return `<button type="button" class="nav-btn ${active ? 'active' : ''}" data-page="${item.id}" title="${text(item.desc)}"${active ? ' aria-current="page"' : ''}>
+          <span class="nav-icon" aria-hidden="true">${text(item.icon)}</span><span class="nav-label">${text(item.label)}</span>
+        </button>`;
+      }).join('')}
+    </section>
+  `).join('');
+  nav.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page || 'summary'));
+  });
+  return;
     .map(item => {
       const icon = item.icon ? `<span class="nav-icon">${item.icon}</span>` : '';
       const desc = item.desc ? ` title="${text(item.desc)}"` : '';
@@ -308,6 +325,16 @@ function renderGovernanceFlow() {
 }
 
 function renderSummary() {
+function renderGuidedWorkQueue() {
+  const root = $('guidedWorkQueue');
+  renderGuidedWorkQueue();
+  const summary = $('guidedWorkQueueSummary');
+  if (!root || !summary) return;
+  const tasks = deriveGuidedWork(state).slice(0, 8);
+  summary.textContent = tasks.length ? `\u5f53\u524d\u6709 ${tasks.length} \u9879\u9700\u8981\u63a8\u8fdb\uff0c\u8bf7\u4ece\u6700\u5f71\u54cd\u4ea4\u4ed8\u7684\u4e8b\u9879\u5f00\u59cb\u3002` : '\u5f53\u524d\u6ca1\u6709\u963b\u65ad\u9879\uff0c\u6240\u6709\u9879\u76ee\u5747\u53ef\u6309\u8ba1\u5212\u63a8\u8fdb\u3002';
+  root.innerHTML = tasks.length ? tasks.map((task, index) => `<article class="guided-work-card priority-${task.priority}"><span class="guided-work-order">${index + 1}</span><div><strong>${text(task.reason)}</strong><p>${text(task.actionLabel)}</p></div><button type="button" class="primary-btn small" onclick="navigateToPage('${task.pageId}', { projectId: '${escapeJs(task.projectId)}', assetId: '${escapeJs(task.assetId)}', focusId: '${escapeJs(task.focusId)}', reason: '${escapeJs(task.reason)}' })">\u7ee7\u7eed\u5904\u7406</button></article>`).join('') : '<div class="empty-state">\u6682\u65e0\u5f85\u529e\u3002</div>';
+}
+
   removeLegacySummaryPanels();
   const demo = state.governanceDemoOverview;
   const metrics = demo?.valueMetrics;
@@ -1559,6 +1586,13 @@ function monitoringNextAction(type) {
   return { label: '打开诊断', action: '' };
 }
 
+function monitoringGuidedNextAction(type) {
+  if (['401', '403'].includes(type)) return { label: '\u5904\u7406\u6388\u6743\u6216\u51ed\u8bc1', pageId: 'settings', action: "navigateToPage('settings')" };
+  if (type === '400') return { label: '\u786e\u8ba4 Tool \u8fb9\u754c', pageId: 'tooling', action: "navigateToPage('tooling')" };
+  if (type === 'timeout' || type === '5xx') return { label: '\u68c0\u67e5\u63a5\u5165\u5065\u5eb7', pageId: 'intake', action: "navigateToPage('intake')" };
+  return { label: '\u6253\u5f00 Trace', pageId: 'monitoring', action: "navigateToPage('monitoring')" };
+}
+
 function monitoringImpactText(events) {
   const customers = new Set(events.map(item => item.customer_name || item.customer_id).filter(Boolean));
   const projects = new Set(events.map(item => item.project_name || item.project_id).filter(Boolean));
@@ -1653,7 +1687,7 @@ function renderMonitoringPage() {
   if (issueNode) {
     issueNode.innerHTML = groups.length ? groups.map(group => {
       const latest = group.latest;
-      const next = monitoringNextAction(latest._type);
+      const next = monitoringGuidedNextAction(latest._type);
       const affectedTools = new Set(group.events.map(item => item._tool).filter(Boolean));
       const latestId = latest.id || latest.trace_id || '';
       return `<article class="monitoring-issue-card status-${group.status}">
@@ -2155,7 +2189,7 @@ function renderUsageDrawer() {
   const event = allEvents.find(item => (item.id || item.trace_id) === state.selectedUsageEventId);
   const reqParams = maskCallText(event?.request_params || event?.request_body || event?.input || '');
   const respSummary = maskCallText(event?.response_summary || event?.business_result || '-');
-  const next = monitoringNextAction(event?._type);
+  const next = monitoringGuidedNextAction(event?._type);
   const status = event ? monitoringIssueStatus(event._issueKey) : '待处理';
   const pathSteps = [
     { label: '调用方', value: event?.caller || '-' },
@@ -3212,6 +3246,7 @@ export function renderAll() {
   harmonizeAdminCopy();
   renderSummary();
   renderIntake();
+  renderGuidancePanels();
   renderRecognition();
   renderCandidatesPage();
   renderTooling();
@@ -3228,6 +3263,7 @@ export function renderAll() {
   renderUsage();
   renderApiKeys();
   renderKnowledge();
+  enhanceActionableEmptyStates();
   renderBilling();
   renderSettingsCenter();
   renderCustomerBuilder();
@@ -3295,6 +3331,26 @@ export function renderBuilderValueBoard() {
       <span class="muted-line">7 天内生成的复用建议</span>
     </div>
     <div class="metric-card">
+const GUIDANCE_STAGE_META = { intake: '\u8d44\u6599\u63a5\u5165', review: 'AI \u8bc6\u522b\u4e0e\u5ba1\u6838', tooling: '\u7ec4\u88c5 MCP \u8d44\u4ea7', publish: '\u6d4b\u8bd5\u4e0e\u53d1\u5e03', delivery: '\u4ea4\u4ed8\u786e\u8ba4' };
+function renderGuidancePanels() {
+  const stages = { intake: 'intake', recognition: 'review', tooling: 'tooling', publish: 'publish', delivery: 'delivery' };
+  const tasks = deriveGuidedWork(state);
+  Object.entries(stages).forEach(([pageId, stage]) => {
+    const page = document.getElementById(pageId); if (!page) return;
+    const task = tasks.find(item => item.stage === stage); let root = document.getElementById(`${pageId}Guidance`);
+    if (!root) { root = document.createElement('div'); root.id = `${pageId}Guidance`; root.className = 'guided-page-guidance'; page.prepend(root); }
+    const action = task ? `<button type="button" class="primary-btn small" onclick="navigateToPage('${task.pageId}', { projectId: '${escapeJs(task.projectId)}', assetId: '${escapeJs(task.assetId)}', focusId: '${escapeJs(task.focusId)}', reason: '${escapeJs(task.reason)}' })">${text(task.actionLabel)}</button>` : '<button type="button" class="primary-btn small" disabled>\u6682\u65e0\u5f85\u529e</button>';
+    root.innerHTML = `<article class="guided-stage-panel"><div><p class="eyebrow">\u5f53\u524d\u9636\u6bb5</p><h3>${GUIDANCE_STAGE_META[stage]}</h3><p>${text(task?.reason || '\u5f53\u524d\u9636\u6bb5\u6ca1\u6709\u963b\u65ad\u9879\u3002')}</p></div><div class="guided-stage-action">${action}</div></article>`;
+function enhanceActionableEmptyStates() {
+  const sourceRows = $('sourceRows');
+  if (sourceRows && !list(state.sources).length) sourceRows.innerHTML = '<tr><td colspan="9"><div class="empty-state">&#6682;&#26080;&#19994;&#21153;&#36164;&#26009; <button type="button" class="primary-btn small" onclick="document.getElementById(\'createDataSourceBtn\')?.click()">&#19978;&#20256;&#19994;&#21153;&#36164;&#26009;</button></div></td></tr>';
+  const assets = $('assetsMcpList');
+  if (assets && !list(state.assets).length) assets.innerHTML = '<div class="empty-state">&#6682;&#26080; MCP &#36164;&#20135; <button type="button" class="primary-btn small" onclick="navigateToPage(\'tooling\')">&#30830;&#35748; Tool &#36793;&#30028;</button></div>';
+}
+
+  });
+}
+
       <span class="metric-label">通过率（发布 / 已决策）</span>
       <strong>${passText}</strong>
       <span class="muted-line">${m.total_published} 已发布 / ${m.total_candidates} 候选</span>

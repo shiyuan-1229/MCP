@@ -2,6 +2,7 @@ import { state, navItems, customerNavItems, isCustomerView, getNavItems, display
 import { request } from './modules/api.js';
 import { $, confirmDialog, escapeHtml, openModal, permissionDeniedMessage, showApp, showLogin, showToast } from './modules/ui.js';
 import { renderAll, renderNav } from './modules/renderers.js';
+import { isAdminPage } from './modules/guidance.js';
 
 function list(value) { return Array.isArray(value) ? value : []; }
 
@@ -2682,11 +2683,15 @@ async function toggleAssetVisibility(assetId, visibility) {
 }
 
 function navigateToPage(pageId, focus = {}) {
-  if (state.user?.role !== 'admin') return;
-  const allowed = navItems.some(item => item.id === pageId && item.roles.includes('admin'));
-  if (!allowed) return;
+  if (state.user?.role !== 'admin' || !isAdminPage(pageId)) return;
+  state.guidanceFocus = {
+    projectId: focus.projectId || '',
+    assetId: focus.assetId || '',
+    focusId: focus.focusId || focus.eventId || '',
+    reason: focus.reason || ''
+  };
   state.currentPage = pageId;
-  if (pageId === 'monitoring') state.monitoringFocusId = focus.eventId || null;
+  if (pageId === 'monitoring') state.monitoringFocusId = focus.eventId || focus.focusId || null;
   renderAll();
 }
 
@@ -2713,13 +2718,9 @@ function setMonitoringFilter(key, value) {
 
 // 步骤条点击跳转（被 renderers.js 中 step-item onclick 调用）
 function jumpToPage(pageId) {
-  const allPages = ['summary', 'intake', 'recognition', 'candidates', 'review', 'tooling', 'tool-draft', 'mcp-compose', 'assets', 'publish', 'delivery', 'monitoring', 'governance', 'settings'];
-  if (!allPages.includes(pageId)) return;
   // 检查权限
-  if (state.user?.role !== 'admin') return;
   if (pageId === 'candidates') state.candidateSourceFilter = '';
-  state.currentPage = pageId;
-  renderAll();
+  navigateToPage(pageId);
 }
 
 window.triggerRecognition = triggerRecognition;
