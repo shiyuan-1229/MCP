@@ -17,14 +17,14 @@ assert.match(html, /id="guidedWorkQueueSummary"/u);
 assert.match(renderers, /renderGuidedWorkQueue/u);
 assert.match(guidedUi, /export function renderGuidedWorkQueue\(state, \$\)/u);
 assert.match(guidedUi, /decisionGroups/u);
-for (const token of ['guided-work-main', 'guided-work-focus', 'guided-work-decision-list', 'guided-work-batch', 'guided-work-side', 'guided-work-impact', 'guided-work-risk']) {
+for (const token of ['guided-work-main', 'guided-work-focus', 'guided-work-decision-list', 'guided-work-batch', 'guided-work-side', 'guided-work-summary', 'guided-summary-grid']) {
   assert.match(guidedUi, new RegExp(token, 'u'));
   assert.match(styles, new RegExp(`\\.${token}`, 'u'));
 }
 assert.match(guidedUi, /deriveGuidedWork\(state\)/u);
 assert.match(styles, /\.guided-work-list/u);
 assert.match(styles, /\.guided-work-card/u);
-assert.doesNotMatch(styles, /grid-row\s*:\s*1\s*\/\s*span\s*3/u);
-assert.doesNotMatch(styles, /#summary\s+\.guided-work-impact\s*\{[^}]*min-height\s*:\s*100%/u);
+assert.doesNotMatch(guidedUi, /guided-work-(impact|risk|auth)/u);
+assert.doesNotMatch(styles, /\.guided-work-(impact|risk|auth)/u);
 
 console.log('guided work queue layout passed');
