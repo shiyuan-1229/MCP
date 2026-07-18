@@ -1,5 +1,5 @@
 import { state, isCustomerView, getNavItems, displayAssetName } from './state.js';
-import { ADMIN_NAVIGATION_GROUPS, getNavigationIdForPage } from './guidance.js';
+import { ADMIN_NAVIGATION_GROUPS, deriveGuidedWork, getNavigationIdForPage } from './guidance.js';
 import { $, badge, displayStatus, emptyState, escapeHtml, metric, money, text, showToast } from './ui.js';
 
 function list(value) {
@@ -325,6 +325,15 @@ function renderGovernanceFlow() {
 }
 
 function renderSummary() {
+function renderGuidedWorkQueue() {
+  const root = $('guidedWorkQueue');
+  const summary = $('guidedWorkQueueSummary');
+  if (!root || !summary) return;
+  const tasks = deriveGuidedWork(state).slice(0, 8);
+  summary.textContent = tasks.length ? `\u5f53\u524d\u6709 ${tasks.length} \u9879\u9700\u8981\u63a8\u8fdb\uff0c\u8bf7\u4ece\u6700\u5f71\u54cd\u4ea4\u4ed8\u7684\u4e8b\u9879\u5f00\u59cb\u3002` : '\u5f53\u524d\u6ca1\u6709\u963b\u65ad\u9879\uff0c\u6240\u6709\u9879\u76ee\u5747\u53ef\u6309\u8ba1\u5212\u63a8\u8fdb\u3002';
+  root.innerHTML = tasks.length ? tasks.map((task, index) => `<article class="guided-work-card priority-${task.priority}"><span class="guided-work-order">${index + 1}</span><div><strong>${text(task.reason)}</strong><p>${text(task.actionLabel)}</p></div><button type="button" class="primary-btn small" onclick="navigateToPage('${task.pageId}', { projectId: '${escapeJs(task.projectId)}', assetId: '${escapeJs(task.assetId)}', focusId: '${escapeJs(task.focusId)}', reason: '${escapeJs(task.reason)}' })">\u7ee7\u7eed\u5904\u7406</button></article>`).join('') : '<div class="empty-state">\u6682\u65e0\u5f85\u529e\u3002</div>';
+}
+
   removeLegacySummaryPanels();
   const demo = state.governanceDemoOverview;
   const metrics = demo?.valueMetrics;
@@ -3199,6 +3208,7 @@ function renderSettingsCenter() {
     const preferences = state.settingsNotificationPreferences || {};
     const items = [
       ['credentialExpiry', '\u51ed\u8bc1\u5230\u671f\u63d0\u9192', '\u5728 API Key \u5230\u671f\u524d 30 \u5929\u63d0\u9192\u7ba1\u7406\u5458'],
+  renderGuidedWorkQueue();
       ['callFailure', '\u8c03\u7528\u5f02\u5e38\u63d0\u9192', '\u5f53 MCP \u8c03\u7528\u5f02\u5e38\u6216\u5931\u8d25\u65f6\u8fdb\u5165\u8fd0\u884c\u76d1\u63a7\u5f85\u529e'],
       ['deliveryReady', '\u4ea4\u4ed8\u5b8c\u6210\u63d0\u9192', '\u4ea4\u4ed8\u5305\u5168\u90e8\u5c31\u7eea\u540e\u63d0\u9192\u8fdb\u884c\u53d1\u5e03']
     ];

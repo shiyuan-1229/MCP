@@ -1014,6 +1014,11 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
 .nav-group-label { margin:0 10px 3px; color:#7f91ab; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
 .nav-btn:focus-visible { outline:2px solid #fff; outline-offset:2px; }
 @media (max-width:760px) { .nav-group + .nav-group { margin-top:0; padding-top:0; border-top:0; } .nav-group-label { grid-column:1 / -1; } }
+.guided-work-list { display:grid; gap:8px; }
+.guided-work-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.guided-work-card.priority-1 { border-left:4px solid var(--danger); }.guided-work-order { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--surface-2); color:var(--primary-dark); font-weight:700; }
+.guided-work-card p { margin:3px 0 0; color:var(--muted); font-size:12px; }
+@media (max-width:620px) { .guided-work-card { grid-template-columns:auto minmax(0,1fr); } .guided-work-card .primary-btn { grid-column:2; justify-self:start; } }
 .nav-group { display:grid; gap:4px; }
 .nav-group + .nav-group { margin-top:10px; padding-top:10px; border-top:1px solid rgba(216,225,241,.14); }
 .nav-group-label { margin:0 10px 3px; color:#7f91ab; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
