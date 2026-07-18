@@ -12,6 +12,11 @@ assert.match(html, /id="guidedWorkQueue"/u);
 assert.match(html, /id="guidedWorkQueueSummary"/u);
 assert.match(renderers, /renderGuidedWorkQueue/u);
 assert.match(guidedUi, /export function renderGuidedWorkQueue\(state, \$\)/u);
+assert.match(guidedUi, /decisionGroups/u);
+for (const token of ['guided-work-focus', 'guided-work-decision-list', 'guided-work-batch', 'guided-work-impact']) {
+  assert.match(guidedUi, new RegExp(token, 'u'));
+  assert.match(styles, new RegExp(`\\.${token}`, 'u'));
+}
 assert.match(guidedUi, /deriveGuidedWork\(state\)/u);
 assert.match(styles, /\.guided-work-list/u);
 assert.match(styles, /\.guided-work-card/u);
