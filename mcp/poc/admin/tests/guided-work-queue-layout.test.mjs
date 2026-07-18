@@ -8,6 +8,10 @@ const [html, renderers, guidedUi, styles] = await Promise.all([
   readFile('mcp/poc/admin/assets/styles.css', 'utf8')
 ]);
 
+for (const removedId of ['builderValueBoard', 'summaryCards', 'governanceValueBoard', 'governanceFlowBoard', 'governanceActionBoard', 'governanceRiskBoard', 'generationFunnel', 'generationFlowBoard', 'projectRows', 'activityList']) {
+  assert.doesNotMatch(html, new RegExp(`id="${removedId}"`, 'u'));
+}
+assert.match(html, /data-title="&#20170;&#26085;&#24453;&#21150;"/u);
 assert.match(html, /id="guidedWorkQueue"/u);
 assert.match(html, /id="guidedWorkQueueSummary"/u);
 assert.match(renderers, /renderGuidedWorkQueue/u);

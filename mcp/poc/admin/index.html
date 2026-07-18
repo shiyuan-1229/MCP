@@ -56,41 +56,20 @@
         <div class="user-pill"><span class="status-dot"></span><span id="currentUser">未登录</span></div>
       </header>
 
-      <section id="summary" class="page active" data-title="打造总览" data-eyebrow="企业 MCP 打造工作台 · B 端价值指标 · 产能趋势">
-        <article class="guided-work-queue panel">
-          <div class="panel-head"><div><p class="eyebrow">&#20170;&#26085;&#24037;&#20316;</p><h3>&#20248;&#20808;&#25512;&#36827;&#21487;&#20132;&#20184;&#30340; MCP &#36164;&#20135;</h3><p id="guidedWorkQueueSummary" class="muted-line"></p></div><button type="button" class="ghost-btn small" data-refresh="all">&#21047;&#26032;&#24453;&#21150;</button></div>
-          <div id="guidedWorkQueue" class="guided-work-list"></div>
-        </article>
-        <div class="panel" style="margin-bottom:14px">
-          <div class="panel-head">
-            <h3>企业 MCP 打造工作台 · B 端价值看板</h3>
-            <small class="muted-line">资料 → 候选 → 审核 → 验收 → 发布 → 复用，每一环都看得到 AI 与人共同创造的价值</small>
-          </div>
-          <div id="builderValueBoard" class="metric-grid"></div>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>打造驾驶舱</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="summaryCards" class="metric-grid"></div></div>
-        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>业务价值</h3><small class="muted-line">模拟案例用于解释人工治理带来的结果</small></div><div id="governanceValueBoard" class="metric-grid"></div></article>
-        <article class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>治理链路</h3><small class="muted-line">AI 提议 -> 人工修订 -> 最终发布</small></div><div id="governanceFlowBoard" class="metric-grid"></div></article>
-        <div class="content-grid two-col" id="governanceFocusBoards" style="margin-bottom:14px">
-          <article class="panel"><div class="panel-head"><h3>待处理事项</h3><small class="muted-line">按人工控制关口处理</small></div><div id="governanceActionBoard" class="card-list"></div></article>
-          <article class="panel"><div class="panel-head"><h3>风险提示</h3><small class="muted-line">优先处理安全、权限和验收阻断</small></div><div id="governanceRiskBoard" class="card-list"></div></article>
-        </div>
-        <article class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>资产生成漏斗</h3><small class="muted-line">点击各阶段可跳转到对应页面</small></div>
-          <div id="generationFunnel" class="funnel-container" style="padding:16px;display:grid;gap:8px"></div>
-        </article>
-        <article class="panel" style="margin-bottom:14px">
-          <div class="panel-head"><h3>核心链路看板</h3><small class="muted-line">业务资料 → OpenAPI → Tools → MCP Server → 上线 MCP 版本 → 交付包管理</small></div>
-          <div id="generationFlowBoard" class="metric-grid"></div>
-          <div class="table-wrap" style="margin-top:14px"><table class="pipeline-table"><thead><tr><th>客户 / 项目</th><th>业务资料</th><th>OpenAPI</th><th>Tools</th><th>MCP Server</th><th>上线 MCP 版本</th><th>交付资料</th><th>当前阶段</th></tr></thead><tbody id="projectPipelineRows"></tbody></table></div>
-        </article>
-        <div class="content-grid two-col">
-          <article class="panel"><div class="panel-head"><h3>项目与资产健康</h3><button type="button" class="ghost-btn" data-refresh="all">刷新</button></div><div id="projectControls" class="project-controls"></div><div class="table-wrap"><table class="health-table"><thead><tr><th>客户 / 项目</th><th>阶段 / 环境</th><th>进度</th><th>负责人</th><th>里程碑</th><th>最近发布</th><th>证书到期</th><th>调用异常</th><th>计费状态</th><th>健康状态</th></tr></thead><tbody id="projectRows"></tbody></table></div></article>
-          <article class="panel"><div class="panel-head"><h3>最近生成动态</h3></div><div id="activityList" class="event-list"></div></article>
-        </div>
-      </section>
+      <section id="summary" class="page active" data-title="&#20170;&#26085;&#24453;&#21150;" data-eyebrow="">
+  <article class="guided-work-queue">
+    <div class="guided-work-header">
+      <p id="guidedWorkQueueSummary" class="muted-line"></p>
+      <div class="guided-work-controls">
+        <label><input id="guidedWorkMine" type="checkbox">&#20165;&#30475;&#25105;&#36127;&#36131;</label>
+        <button type="button" class="ghost-btn small" data-refresh="all">&#21047;&#26032;</button>
+      </div>
+    </div>
+    <div id="guidedWorkQueue" class="guided-work-list"></div>
+  </article>
+</section>
 
-      <section id="intake" class="page" data-title="资料接入" data-eyebrow="步骤 1：上传业务资料触发 AI 识别 &#183; 支持文件上传、DDL 粘贴、数据库直连 &#183; 识别结果进入候选业务能力">
+<section id="intake" class="page" data-title="资料接入" data-eyebrow="步骤 1：上传业务资料触发 AI 识别 &#183; 支持文件上传、DDL 粘贴、数据库直连 &#183; 识别结果进入候选业务能力">
         <div id="intakeStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head"><h3>资料接入工作台</h3><div style="display:flex;gap:8px;align-items:center"><span id="aiStatusBadge" style="font-size:11px;padding:2px 8px;border-radius:4px"></span><select id="intakeCustomerFilter" onchange="filterIntakeByCustomer()" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px"><option value="">全部企业</option></select><button id="createDataSourceBtn" type="button" class="primary-btn small admin-only">导入业务资料</button></div></div>

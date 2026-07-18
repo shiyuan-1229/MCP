@@ -1082,3 +1082,16 @@ pre { margin: 0; min-height: 220px; max-height: 360px; overflow: auto; backgroun
 .guided-work-impact { grid-column:2; grid-row:1 / span 3; padding:0 14px; }.guided-impact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:0 0 14px; }.guided-impact-grid > div { display:grid; gap:2px; padding:10px; background:var(--surface-2); border-radius:8px; }.guided-impact-grid strong { font-size:18px; color:var(--ink); }.guided-impact-grid span { color:var(--muted); font-size:11px; }
 @media (max-width: 860px) { .guided-workbench { grid-template-columns:1fr; }.guided-work-focus, .guided-work-decision-list, .guided-work-batch, .guided-work-impact { grid-column:1; grid-row:auto; }.guided-work-impact { padding:0 14px; } }
 @media (max-width: 560px) { .guided-work-focus, .guided-work-batch { align-items:flex-start; flex-direction:column; }.guided-decision-row { grid-template-columns:auto minmax(0,1fr); }.guided-decision-row .ghost-btn { grid-column:2; justify-self:start; } }
+/* Today work page keeps only the task workspace, with the reference header controls. */
+#summary .guided-work-queue { display:grid; gap:18px; }
+.guided-work-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.guided-work-header .muted-line { margin:0; font-size:14px; }
+.guided-work-controls { display:flex; align-items:center; gap:10px; }
+.guided-work-controls label { display:flex; align-items:center; gap:7px; color:var(--ink); font-size:13px; }
+.guided-work-controls input { width:16px; height:16px; accent-color:var(--primary); }
+#summary .guided-work-focus { min-height:172px; background:#f7ece8; }
+#summary .guided-work-focus .primary-btn, #summary .guided-work-batch .primary-btn { background:#1d1f23; border-color:#1d1f23; }
+#summary .guided-work-focus .primary-btn:hover, #summary .guided-work-batch .primary-btn:hover { background:#111214; border-color:#111214; }
+#summary .guided-work-decision-list, #summary .guided-work-batch, #summary .guided-work-impact { background:#f5f6f8; border-color:transparent; }
+#summary .guided-work-impact { min-height:100%; }
+@media (max-width: 560px) { .guided-work-header { align-items:flex-start; flex-direction:column; }.guided-work-controls { width:100%; justify-content:space-between; } }
