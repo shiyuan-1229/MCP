@@ -1580,6 +1580,13 @@ function monitoringNextAction(type) {
   return { label: '打开诊断', action: '' };
 }
 
+function monitoringGuidedNextAction(type) {
+  if (['401', '403'].includes(type)) return { label: '\u5904\u7406\u6388\u6743\u6216\u51ed\u8bc1', pageId: 'settings', action: "navigateToPage('settings')" };
+  if (type === '400') return { label: '\u786e\u8ba4 Tool \u8fb9\u754c', pageId: 'tooling', action: "navigateToPage('tooling')" };
+  if (type === 'timeout' || type === '5xx') return { label: '\u68c0\u67e5\u63a5\u5165\u5065\u5eb7', pageId: 'intake', action: "navigateToPage('intake')" };
+  return { label: '\u6253\u5f00 Trace', pageId: 'monitoring', action: "navigateToPage('monitoring')" };
+}
+
 function monitoringImpactText(events) {
   const customers = new Set(events.map(item => item.customer_name || item.customer_id).filter(Boolean));
   const projects = new Set(events.map(item => item.project_name || item.project_id).filter(Boolean));
@@ -1674,7 +1681,7 @@ function renderMonitoringPage() {
   if (issueNode) {
     issueNode.innerHTML = groups.length ? groups.map(group => {
       const latest = group.latest;
-      const next = monitoringNextAction(latest._type);
+      const next = monitoringGuidedNextAction(latest._type);
       const affectedTools = new Set(group.events.map(item => item._tool).filter(Boolean));
       const latestId = latest.id || latest.trace_id || '';
       return `<article class="monitoring-issue-card status-${group.status}">
@@ -2176,7 +2183,7 @@ function renderUsageDrawer() {
   const event = allEvents.find(item => (item.id || item.trace_id) === state.selectedUsageEventId);
   const reqParams = maskCallText(event?.request_params || event?.request_body || event?.input || '');
   const respSummary = maskCallText(event?.response_summary || event?.business_result || '-');
-  const next = monitoringNextAction(event?._type);
+  const next = monitoringGuidedNextAction(event?._type);
   const status = event ? monitoringIssueStatus(event._issueKey) : '待处理';
   const pathSteps = [
     { label: '调用方', value: event?.caller || '-' },
