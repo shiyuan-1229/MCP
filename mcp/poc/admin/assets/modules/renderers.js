@@ -3233,6 +3233,7 @@ export function renderAll() {
   harmonizeAdminCopy();
   renderSummary();
   renderIntake();
+  renderGuidancePanels();
   renderRecognition();
   renderCandidatesPage();
   renderTooling();
@@ -3316,6 +3317,19 @@ export function renderBuilderValueBoard() {
       <span class="muted-line">7 天内生成的复用建议</span>
     </div>
     <div class="metric-card">
+const GUIDANCE_STAGE_META = { intake: '\u8d44\u6599\u63a5\u5165', review: 'AI \u8bc6\u522b\u4e0e\u5ba1\u6838', tooling: '\u7ec4\u88c5 MCP \u8d44\u4ea7', publish: '\u6d4b\u8bd5\u4e0e\u53d1\u5e03', delivery: '\u4ea4\u4ed8\u786e\u8ba4' };
+function renderGuidancePanels() {
+  const stages = { intake: 'intake', recognition: 'review', tooling: 'tooling', publish: 'publish', delivery: 'delivery' };
+  const tasks = deriveGuidedWork(state);
+  Object.entries(stages).forEach(([pageId, stage]) => {
+    const page = document.getElementById(pageId); if (!page) return;
+    const task = tasks.find(item => item.stage === stage); let root = document.getElementById(`${pageId}Guidance`);
+    if (!root) { root = document.createElement('div'); root.id = `${pageId}Guidance`; root.className = 'guided-page-guidance'; page.prepend(root); }
+    const action = task ? `<button type="button" class="primary-btn small" onclick="navigateToPage('${task.pageId}', { projectId: '${escapeJs(task.projectId)}', assetId: '${escapeJs(task.assetId)}', focusId: '${escapeJs(task.focusId)}', reason: '${escapeJs(task.reason)}' })">${text(task.actionLabel)}</button>` : '<button type="button" class="primary-btn small" disabled>\u6682\u65e0\u5f85\u529e</button>';
+    root.innerHTML = `<article class="guided-stage-panel"><div><p class="eyebrow">\u5f53\u524d\u9636\u6bb5</p><h3>${GUIDANCE_STAGE_META[stage]}</h3><p>${text(task?.reason || '\u5f53\u524d\u9636\u6bb5\u6ca1\u6709\u963b\u65ad\u9879\u3002')}</p></div><div class="guided-stage-action">${action}</div></article>`;
+  });
+}
+
       <span class="metric-label">通过率（发布 / 已决策）</span>
       <strong>${passText}</strong>
       <span class="muted-line">${m.total_published} 已发布 / ${m.total_candidates} 候选</span>
