@@ -93,14 +93,23 @@ async function verifyReviewNavBadge() {
 
   assert.match(source, /function getReviewPendingCount\(\)/u);
   assert.match(source, /nav-badge/u);
-  assert.match(source, /item\.id === 'review'/u);
+  assert.match(source, /item\.id === 'recognition'/u);
 }
 
 await verifyNavItems();
+async function verifyCustomerNavigationIsolation() {
+  const source = await readFile(renderersFilePath, 'utf8');
+
+  assert.match(source, /if \(isCustomerView\(\)\) \{\s*nav\.innerHTML = allowedNavItems\(\)/u);
+  assert.match(source, /ADMIN_NAVIGATION_GROUPS\.map/u);
+  assert.doesNotMatch(source, /return;\s*nav\.innerHTML = allowedNavItems\(\)/u);
+}
+
 await verifyPageShells();
 await verifyKnowledgeJumps();
 await verifyRendererSplit();
 await verifyReviewNavBadge();
 
+await verifyCustomerNavigationIsolation();
 console.log('admin navigation checks passed');
 

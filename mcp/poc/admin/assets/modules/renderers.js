@@ -70,28 +70,36 @@ function getReviewPendingCount() {
 export function renderNav() {
   const nav = $('nav');
   if (!nav || !state.user) return;
+
+  if (isCustomerView()) {
+    nav.innerHTML = allowedNavItems()
+      .map(item => {
+        const icon = item.icon ? `<span class="nav-icon">${item.icon}</span>` : '';
+        const desc = item.desc ? ` title="${text(item.desc)}"` : '';
+        return `<button type="button" class="nav-btn ${state.currentPage === item.id ? 'active' : ''}" data-page="${item.id}"${desc}>${icon}<span class="nav-label">${text(item.label)}</span></button>`;
+      })
+      .join('');
+    nav.querySelectorAll('.nav-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchPage(btn.dataset.page || 'customer-overview'));
+    });
+    return;
+  }
+
   const activeNavigationId = getNavigationIdForPage(state.currentPage);
-  nav.innerHTML = ADMIN_NAVIGATION_GROUPS.map(group => `<section class="nav-group" aria-labelledby="nav-group-${group.id}"><h3 id="nav-group-${group.id}" class="nav-group-label">${text(group.label)}</h3>${group.items.map(item => { const active = item.id === activeNavigationId; return `<button type="button" class="nav-btn ${active ? 'active' : ''}" data-page="${item.id}" title="${text(item.desc)}"${active ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${text(item.icon)}</span><span class="nav-label">${text(item.label)}</span></button>`; }).join('')}</section>`).join('');
-  nav.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchPage(btn.dataset.page || 'summary'));
-  });
-  return;
-  nav.innerHTML = allowedNavItems()
-    .map(item => {
-      const icon = item.icon ? `<span class="nav-icon">${item.icon}</span>` : '';
-      const desc = item.desc ? ` title="${text(item.desc)}"` : '';
-      const reviewCount = item.id === 'review' ? getReviewPendingCount() : 0;
-      const badge = reviewCount > 0
-        ? `<span class="nav-badge" aria-label="${reviewCount} 条待处理">${reviewCount}</span>`
-        : '';
-      return `<button type="button" class="nav-btn ${state.currentPage === item.id ? 'active' : ''}" data-page="${item.id}"${desc}>${icon}<span class="nav-label">${text(item.label)}</span>${badge}</button>`;
-    })
-    .join('');
+  nav.innerHTML = ADMIN_NAVIGATION_GROUPS.map(group => `
+    <section class="nav-group" aria-labelledby="nav-group-${group.id}">
+      <h3 id="nav-group-${group.id}" class="nav-group-label">${text(group.label)}</h3>
+      ${group.items.map(item => {
+        const active = item.id === activeNavigationId;
+        const reviewCount = item.id === 'recognition' ? getReviewPendingCount() : 0;
+        const reviewBadge = reviewCount > 0 ? `<span class="nav-badge" aria-label="${reviewCount} \u6761\u5f85\u5904\u7406">${reviewCount}</span>` : '';
+        return `<button type="button" class="nav-btn ${active ? 'active' : ''}" data-page="${item.id}" title="${text(item.desc)}"${active ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${text(item.icon)}</span><span class="nav-label">${text(item.label)}</span>${reviewBadge}</button>`;
+      }).join('')}
+    </section>`).join('');
   nav.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page || 'summary'));
   });
 }
-
 export function switchPage(id) {
   if (typeof document === 'undefined') return;
   const pageId = resolveAccessiblePage(id);
