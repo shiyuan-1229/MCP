@@ -3257,6 +3257,7 @@ export function renderAll() {
   renderUsage();
   renderApiKeys();
   renderKnowledge();
+  enhanceActionableEmptyStates();
   renderBilling();
   renderSettingsCenter();
   renderCustomerBuilder();
@@ -3334,6 +3335,13 @@ function renderGuidancePanels() {
     if (!root) { root = document.createElement('div'); root.id = `${pageId}Guidance`; root.className = 'guided-page-guidance'; page.prepend(root); }
     const action = task ? `<button type="button" class="primary-btn small" onclick="navigateToPage('${task.pageId}', { projectId: '${escapeJs(task.projectId)}', assetId: '${escapeJs(task.assetId)}', focusId: '${escapeJs(task.focusId)}', reason: '${escapeJs(task.reason)}' })">${text(task.actionLabel)}</button>` : '<button type="button" class="primary-btn small" disabled>\u6682\u65e0\u5f85\u529e</button>';
     root.innerHTML = `<article class="guided-stage-panel"><div><p class="eyebrow">\u5f53\u524d\u9636\u6bb5</p><h3>${GUIDANCE_STAGE_META[stage]}</h3><p>${text(task?.reason || '\u5f53\u524d\u9636\u6bb5\u6ca1\u6709\u963b\u65ad\u9879\u3002')}</p></div><div class="guided-stage-action">${action}</div></article>`;
+function enhanceActionableEmptyStates() {
+  const sourceRows = $('sourceRows');
+  if (sourceRows && !list(state.sources).length) sourceRows.innerHTML = '<tr><td colspan="9"><div class="empty-state">&#6682;&#26080;&#19994;&#21153;&#36164;&#26009; <button type="button" class="primary-btn small" onclick="document.getElementById(\'createDataSourceBtn\')?.click()">&#19978;&#20256;&#19994;&#21153;&#36164;&#26009;</button></div></td></tr>';
+  const assets = $('assetsMcpList');
+  if (assets && !list(state.assets).length) assets.innerHTML = '<div class="empty-state">&#6682;&#26080; MCP &#36164;&#20135; <button type="button" class="primary-btn small" onclick="navigateToPage(\'tooling\')">&#30830;&#35748; Tool &#36793;&#30028;</button></div>';
+}
+
   });
 }
 
