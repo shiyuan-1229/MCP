@@ -1,6 +1,6 @@
 import { state, isCustomerView, getNavItems, displayAssetName } from './state.js';
 import { ADMIN_NAVIGATION_GROUPS, getNavigationIdForPage } from './guidance.js';
-import { renderGuidancePanels, renderGuidedWorkQueue } from './guided-ui.js';
+import { enhanceActionableEmptyStates, getGuidedRecovery, renderGuidancePanels, renderGuidedWorkQueue } from './guided-ui.js';
 import { $, badge, displayStatus, emptyState, escapeHtml, metric, money, text, showToast } from './ui.js';
 
 function list(value) {
@@ -1555,10 +1555,8 @@ function monitoringIssueStatusBadge(status) {
 }
 
 function monitoringNextAction(type) {
-  if (['401', '403'].includes(type)) return { label: '去授权治理', action: "navigateToPage('governance')" };
-  if (type === '400') return { label: '看 Tool 边界', action: "navigateToPage('tooling')" };
-  if (type === 'timeout' || type === '5xx') return { label: '查接入健康', action: "navigateToPage('governance')" };
-  return { label: '打开诊断', action: '' };
+  const guided = getGuidedRecovery(type);
+  return { label: guided.label, action: `navigateToPage('${guided.pageId}', { reason: '${guided.reason}' })` };
 }
 
 function monitoringImpactText(events) {
@@ -3253,6 +3251,7 @@ export function renderAll() {
   renderCustomerAssetOverlay();
   renderBuilderValueBoard();
   renderReviewWorkbench();
+  enhanceActionableEmptyStates(state, $);
   switchPage(state.currentPage);
   renderGuidancePanels(state);
 }

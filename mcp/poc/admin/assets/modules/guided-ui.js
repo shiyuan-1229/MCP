@@ -28,10 +28,22 @@ export function renderGuidancePanels(state) {
   });
 }
 
-export function getGuidedRecovery(type) {
-  if (['401', '403'].includes(type)) return { pageId: 'settings', label: '???????' };
-  if (type === '400') return { pageId: 'tooling', label: '?? Tool ??' };
-  if (type === 'timeout' || type === '5xx') return { pageId: 'intake', label: '??????' };
-  return { pageId: 'monitoring', label: '?? Trace' };
+export function enhanceActionableEmptyStates(state, $) {
+  void state;
+  const sourceRows = $('sourceRows');
+  if (sourceRows?.querySelector('.empty-state')) {
+    sourceRows.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>\u8fd8\u6ca1\u6709\u4e1a\u52a1\u8d44\u6599\u3002</p><button type="button" class="primary-btn small" data-guided-empty-action="upload" onclick="document.getElementById('createDataSourceBtn')?.click()">\u4e0a\u4f20\u4e1a\u52a1\u8d44\u6599</button></div></td></tr>`;
+  }
+
+  const assetsMcpList = $('assetsMcpList');
+  if (assetsMcpList?.querySelector('.empty-state')) {
+    assetsMcpList.innerHTML = `<div class="empty-state"><p>\u8fd8\u6ca1\u6709 MCP \u8349\u7a3f\u3002</p><button type="button" class="primary-btn small" data-guided-empty-action="tooling" onclick="navigateToPage('tooling')">\u786e\u8ba4 Tool \u8fb9\u754c</button></div>`;
+  }
 }
 
+export function getGuidedRecovery(type) {
+  if (['401', '403'].includes(type)) return { pageId: 'settings', label: '\u5904\u7406\u6388\u6743\u6216\u51ed\u8bc1', reason: '\u8c03\u7528\u56e0\u6388\u6743\u5931\u8d25\u88ab\u963b\u65ad' };
+  if (type === '400') return { pageId: 'tooling', label: '\u786e\u8ba4 Tool \u8fb9\u754c', reason: '\u8c03\u7528\u53c2\u6570\u4e0d\u7b26\u5408 Tool \u8fb9\u754c' };
+  if (type === 'timeout' || type === '5xx') return { pageId: 'intake', label: '\u68c0\u67e5\u63a5\u5165\u5065\u5eb7', reason: '\u8d44\u6599\u6e90\u6216\u63a5\u5165\u5065\u5eb7\u5f02\u5e38' };
+  return { pageId: 'monitoring', label: '\u6253\u5f00 Trace', reason: '\u9700\u8981\u67e5\u770b\u8c03\u7528\u94fe\u8def' };
+}
