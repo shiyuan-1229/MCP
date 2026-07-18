@@ -34,3 +34,6 @@ nul
 
 # Generated local MCP runtime processes
 mcp/poc/server/runtime-instances/
+
+# Local isolated development worktrees
+.worktrees/
