@@ -327,6 +327,7 @@ function renderGovernanceFlow() {
 function renderSummary() {
 function renderGuidedWorkQueue() {
   const root = $('guidedWorkQueue');
+  renderGuidedWorkQueue();
   const summary = $('guidedWorkQueueSummary');
   if (!root || !summary) return;
   const tasks = deriveGuidedWork(state).slice(0, 8);
@@ -3208,7 +3209,6 @@ function renderSettingsCenter() {
     const preferences = state.settingsNotificationPreferences || {};
     const items = [
       ['credentialExpiry', '\u51ed\u8bc1\u5230\u671f\u63d0\u9192', '\u5728 API Key \u5230\u671f\u524d 30 \u5929\u63d0\u9192\u7ba1\u7406\u5458'],
-  renderGuidedWorkQueue();
       ['callFailure', '\u8c03\u7528\u5f02\u5e38\u63d0\u9192', '\u5f53 MCP \u8c03\u7528\u5f02\u5e38\u6216\u5931\u8d25\u65f6\u8fdb\u5165\u8fd0\u884c\u76d1\u63a7\u5f85\u529e'],
       ['deliveryReady', '\u4ea4\u4ed8\u5b8c\u6210\u63d0\u9192', '\u4ea4\u4ed8\u5305\u5168\u90e8\u5c31\u7eea\u540e\u63d0\u9192\u8fdb\u884c\u53d1\u5e03']
     ];
