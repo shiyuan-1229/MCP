@@ -1346,7 +1346,7 @@ function deliveryPackages(deliverables = list(state.deliverables), projectScope 
 
   return [...projectIds].map(projectId => {
     const project = projects.find(item => item.id === projectId) || { id: projectId, name: projectId };
-    const files = deliverables.filter(item => item.project_id === projectId);
+    const files = deliverables.filter(item => item.project_id === projectId && !item.asset_id);
     const projectAssets = assets.filter(item => item.project_id === projectId);
     const assetIds = new Set(projectAssets.map(item => item.id));
     const release = releases.filter(item => assetIds.has(item.asset_id)).sort((a, b) => String(b.released_at || b.tested_at || '').localeCompare(String(a.released_at || a.tested_at || '')))[0] || null;
@@ -1453,6 +1453,11 @@ function renderDeliverables() {
       })
     : allDeliverables;
 
+  const totalPages = Math.max(1, Math.ceil(deliverables.length / 15));
+  window.__deliveryLedgerPage = Math.min(window.__deliveryLedgerPage || 1, totalPages);
+  const startIndex = (window.__deliveryLedgerPage - 1) * 15;
+  const pagedDeliverables = deliverables.slice(startIndex, startIndex + 15);
+
   const packageProjects = selectedCustomer ? projects.filter(item => item.customer_id === selectedCustomer) : null;
   renderDeliveryCommandCenter(deliverables, packageProjects);
 
@@ -1464,7 +1469,7 @@ function renderDeliverables() {
     { label: '生成中', value: deliverables.filter(item => item.status === 'generating').length },
     { label: '待处理', value: deliverables.filter(item => ['failed', 'expired', 'revoked'].includes(item.status)).length }
   ]);
-  renderSimpleRows('deliverableRows', deliverables.map(item => {
+  renderSimpleRows('deliverableRows', pagedDeliverables.map(item => {
     const canDownload = item.status === 'ready';
     const typeLabel = {
       'config': '配置包',
@@ -1480,8 +1485,9 @@ function renderDeliverables() {
         <button type="button" class="ghost-btn small" onclick="openDeliverableDrawer('${item.id}')">详情</button>
         ${canDownload ? `<button type="button" class="primary-btn small" onclick="downloadDeliverable('${item.id}')">下载</button>` : '<span class="muted-line">整理中</span>'}
       </div>`;
-    return `<tr><td><strong>${text(item.name || '-')}</strong></td><td>${text(item.project_name || item.project_id || '-')}</td><td><span class="cap-chip">${typeLabel}</span></td><td>${badge(item.status || 'draft')}</td><td>${text(item.updated_at || '-')}</td><td>${text(item.notes || '-')}</td><td>${actions}</td></tr>`;
-  }), '暂旤交付物资料', 7);
+    const assetLabel = item.asset_id ? `${item.asset_name || item.asset_id}${item.asset_version ? ` ${item.asset_version}` : ''}` : 'Project-level material';
+    return `<tr><td><strong>${text(item.name || '-')}</strong></td><td>${text(item.project_name || item.project_id || '-')}</td><td>${text(assetLabel)}</td><td><span class="cap-chip">${typeLabel}</span></td><td>${badge(item.status || 'draft')}</td><td>${text(item.updated_at || '-')}</td><td>${text(item.notes || '-')}</td><td>${actions}</td></tr>`;
+  }), '暂旤交付物资料', 8);
 }
 
 // ============================================================

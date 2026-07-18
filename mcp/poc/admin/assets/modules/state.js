@@ -161,8 +161,7 @@ export const navItems = [
   { id: 'publish', label: '上线 MCP 版本', icon: '🚀', desc: '步骤 9：沙箱试调、灰度发布、版本管理与回滚', roles: ['admin', 'customer'] },
   { id: 'delivery', label: '交付包管理', icon: '📋', desc: '步骤 10：交付团队归档与复盘，配置包、测试报告、调用日志等交付物', roles: ['admin'] },
   { id: 'monitoring', label: '调用监控', icon: '📈', desc: '步骤 11：异常优先查看 Tool 调用、Trace ID 和诊断动作', roles: ['admin'] },
-  { id: 'governance', label: '治理统计', icon: '🛡️', desc: '步骤 12：网关策略、接入台账、调用成效与审计日志', roles: ['admin'] },
-  { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
+    { id: 'settings', label: '设置', icon: '⚙️', desc: 'API 凭证管理、知识库资料、计费与结算配置', roles: ['admin'] }
 ];
 export const customerNavItems = [
   { id: 'customer-overview', label: '\u4ea4\u4ed8\u603b\u89c8', roles: ['customer'] },

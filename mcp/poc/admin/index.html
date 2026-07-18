@@ -332,10 +332,11 @@
           <div id="deliverableSummary" class="deliverable-summary"></div>
           <div class="table-wrap">
             <table class="deliverable-table">
-              <thead><tr><th>资料名称</th><th>所属项目</th><th>资料类型</th><th>状态</th><th>最近更新</th><th>说明</th><th>操作</th></tr></thead>
+              <thead><tr><th>资料名称</th><th>所属项目</th><th>关联 MCP</th><th>资料类型</th><th>状态</th><th>最近更新</th><th>说明</th><th>操作</th></tr></thead>
               <tbody id="deliverableRows"></tbody>
             </table>
           </div>
+          <div id="deliveryPagination" style="margin-top:20px;text-align:center"></div>
         </article>
       </section>
       <section id="monitoring" class="page" data-title="调用监控" data-eyebrow="步骤 11：异常优先 &#183; Trace ID &#183; Tool 调用诊断">
@@ -408,8 +409,8 @@
             <button type="button" class="tab-btn" data-tab="access-webhook" onclick="switchAccessTab('access-webhook')">回调</button>
           </div>
           <div id="access-overview" class="tab-panel active">
-            <div class="content-grid access-overview-grid">
-              <article class="panel"><div class="panel-head"><h3>交付运行概况</h3></div><div id="accessOverview"></div></article>
+            <div class="content-grid">
+
               <article class="panel"><div class="panel-head"><h3>客户接入台账</h3><button id="createAccessBtn" type="button" class="primary-btn small admin-only">新增接入项</button></div>
                 <div class="table-wrap"><table class="access-table"><thead><tr><th>客户 / 项目</th><th>接入项</th><th>类型</th><th>地址 / 范围</th><th>环境</th><th>证书到期</th><th>最近检查</th><th>状态</th><th class="admin-only">操作</th></tr></thead><tbody id="accessRows"></tbody></table></div>
               </article>
@@ -486,13 +487,12 @@
           </div>
         </div>
       </section>
-
       <section id="review" class="page" data-title="候选接口人工初筛" data-eyebrow="步骤 4：人工审核 AI 提取的候选业务能力是否可信 &#183; 高风险候选双人复核">
         <div id="reviewStepBar" class="step-bar-container" style="margin-bottom:14px"></div>
         <div id="candidateScreenBoard" style="margin-bottom:20px"></div>
       </section>
 
-            
+
 <section id="customer-overview" class="page" data-title="交付总览" data-eyebrow="本次交付、验收进度与运行支持">
   <article id="customerDeliveryHero" class="panel customer-delivery-hero"></article>
   <div id="customerDeliverySummary" class="metric-grid" style="margin-top:14px"></div>

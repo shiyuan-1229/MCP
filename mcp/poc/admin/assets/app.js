@@ -2516,7 +2516,7 @@ function filterAssetsByCustomer() { renderAll(); }
 function filterRecognitionByCustomer() { renderAll(); }
 function filterToolingByCustomer() { renderAll(); }
 function filterPublishByCustomer() { renderAll(); }
-function filterDeliveryByCustomer() { renderAll(); }
+function filterDeliveryByCustomer() { window.resetDeliveryLedgerPage?.(); renderAll(); }
 
 // 按企业批量识别（旧接口保留兼容）
 async function batchRecognize(customerId, customerName, count) {
