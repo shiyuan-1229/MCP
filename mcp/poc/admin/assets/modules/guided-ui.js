@@ -41,6 +41,12 @@ export function renderGuidedWorkQueue(state, $) {
   const blockedAssets = (Array.isArray(state.assets) ? state.assets : []).filter(item => item.status === 'acceptance_failed').length;
   const pendingDeliverables = (Array.isArray(state.deliverables) ? state.deliverables : []).filter(item => item.status !== 'ready').length;
   const publishedAssets = (Array.isArray(state.releases) ? state.releases : []).filter(item => item.status === 'published').length;
+  const failedEvents = (Array.isArray(state.events) ? state.events : []).filter(item => {
+    const status = String(item.status || '').toLowerCase();
+    return ['error', 'failed', 'timeout'].includes(status) || Number(item.status_code) >= 500;
+  }).length;
+  const blockedDeliverables = (Array.isArray(state.deliverables) ? state.deliverables : []).filter(item => ['failed', 'expired', 'revoked'].includes(item.status)).length;
+  const authorizationFailures = (Array.isArray(state.events) ? state.events : []).filter(item => [401, 403].includes(Number(item.status_code))).length;
 
   summary.textContent = tasks.length
     ? `\u5f53\u524d\u6709 ${tasks.length} \u9879\u5f85\u63a8\u8fdb\u4e8b\u9879\uff0c${sourceTasks.length ? `${sourceTasks.length} \u4efd\u8d44\u6599\u53ef\u6279\u91cf\u5904\u7406\u3002` : '\u8bf7\u5148\u5904\u7406\u963b\u65ad\u4ea4\u4ed8\u7684\u4e8b\u9879\u3002'}`
@@ -53,13 +59,19 @@ export function renderGuidedWorkQueue(state, $) {
 
   root.innerHTML = `
     <div class="guided-workbench">
+      <div class="guided-work-main">
       <section class="guided-work-focus">
         <div class="guided-focus-copy"><span class="guided-priority priority-${focusTask?.priority || 2}">${taskPriorityLabel(focusTask?.priority || 2)} \u5f53\u524d\u6700\u4f18\u5148</span><h4>${text(focusTitle)}</h4><p>${text(focusReason)}</p></div>
         ${actionButton(focusIsBatch ? { ...focusTask, pageId: 'intake' } : focusTask, focusAction, 'primary-btn small')}
       </section>
       ${remainingDecisions.length ? `<section class="guided-work-decision-list"><div class="guided-work-section-head"><h4>\u9700\u8981\u4eba\u5de5\u5224\u65ad</h4><span>${remainingDecisions.length} \u9879</span></div>${remainingDecisions.map(task => `<article class="guided-decision-row"><span class="guided-priority priority-${task.priority}">${taskPriorityLabel(task.priority)}</span><div><strong>${text(task.count > 1 ? `${task.count}\u9879${task.actionLabel}` : task.actionLabel)}</strong><p>${text(task.reason)}</p></div>${actionButton(task, '\u53bb\u5904\u7406')}</article>`).join('')}</section>` : ''}
       ${sourceTasks.length && !focusIsBatch ? `<section class="guided-work-batch"><div><h4>${sourceTasks.length}\u4efd\u4e1a\u52a1\u8d44\u6599\u7b49\u5f85 AI \u8bc6\u522b</h4><p>\u5df2\u6309\u9879\u76ee\u805a\u5408\uff0c\u53ef\u4ee5\u6279\u91cf\u63a8\u8fdb\u3002</p></div>${actionButton({ ...sourceTasks[0], pageId: 'intake' }, '\u6279\u91cf\u63d0\u4ea4 AI \u8bc6\u522b', 'primary-btn small')}</section>` : ''}
+      </div>
+      <aside class="guided-work-side">
       <section class="guided-work-impact"><div class="guided-work-section-head"><h4>\u4ea4\u4ed8\u5f71\u54cd</h4><button type="button" class="ghost-btn small" onclick="navigateToPage('monitoring')">\u67e5\u770b\u6cbb\u7406\u8fd0\u8425</button></div><div class="guided-impact-grid"><div><strong>${sourceTasks.length}</strong><span>\u5f85\u8bc6\u522b\u8d44\u6599</span></div><div><strong>${blockedAssets}</strong><span>\u963b\u585e\u53d1\u5e03</span></div><div><strong>${pendingDeliverables}</strong><span>\u5f85\u8865\u4ea4\u4ed8</span></div><div><strong>${publishedAssets}</strong><span>\u5df2\u53d1\u5e03 MCP</span></div></div></section>
+        <section class="guided-work-risk"><div class="guided-work-section-head"><h4>\u8fd0\u884c\u4e0e\u4ea4\u4ed8\u98ce\u9669</h4><span>${failedEvents + blockedDeliverables} \u9879\u9700\u5173\u6ce8</span></div><div class="guided-risk-grid"><div><strong>${failedEvents}</strong><span>\u8c03\u7528\u5f02\u5e38</span></div><div><strong>${blockedDeliverables}</strong><span>\u4ea4\u4ed8\u5931\u8d25</span></div></div>${failedEvents + blockedDeliverables ? '<p class="guided-risk-note">\u8bf7\u4f18\u5148\u6392\u67e5\u5f02\u5e38\u8c03\u7528\u548c\u5931\u6548\u8d44\u6599\uff0c\u518d\u7ee7\u7eed\u53d1\u5e03\u6216\u4ea4\u4ed8\u3002</p>' : '<p class="guided-risk-note">\u5f53\u524d\u6ca1\u6709\u8fd0\u884c\u6216\u4ea4\u4ed8\u963b\u65ad\u9879\u3002</p>'}</section>
+        <section class="guided-work-auth"><div class="guided-work-section-head"><h4>\u51ed\u8bc1\u4e0e\u6388\u6743</h4><span>${authorizationFailures} \u9879\u5f02\u5e38</span></div>${authorizationFailures ? '<p class="guided-risk-note">\u8bf7\u524d\u5f80\u5e73\u53f0\u8bbe\u7f6e\u5904\u7406\u5931\u6548\u51ed\u8bc1\u6216\u8bbf\u95ee\u6388\u6743\u3002</p>' : '<p class="guided-risk-note">\u5f53\u524d\u6ca1\u6709\u51ed\u8bc1\u6216\u6388\u6743\u5f02\u5e38\u3002</p>'}</section>
+      </aside>
     </div>`;
 }
 
